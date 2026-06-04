@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+{% block title %}产品管理{% endblock %}
+
+{% block extra_style %}
+.tab-bar  { display:flex; gap:0; border-bottom:2px solid #e2e8f0; margin-bottom:20px; }
+.tab-btn  { padding:10px 22px; font-size:.875rem; font-weight:500; color:#6b7280;
+            text-decoration:none !important; border-bottom:2px solid transparent;
+            margin-bottom:-2px; transition:color .15s; }
+.tab-btn:hover { color:#1a3a5c; }
+.tab-btn.active { color:#1a3a5c; border-bottom-color:#1a3a5c; font-weight:600; }
+
+.mgmt-table { width:100%; border-collapse:collapse; font-size:.875rem; }
+.mgmt-table th { background:#f8fafc; font-weight:600; text-align:left; padding:10px 12px;
+                 border-bottom:2px solid #e2e8f0; font-size:.75rem;
+                 text-transform:uppercase; letter-spacing:.04em; color:#6b7280; }
+.mgmt-table td { padding:10px 12px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.mgmt-table tbody tr:hover td { background:#f8fafc; }
+.action-btns { display:flex; gap:6px; }
+.btn-edit { background:#e0f2fe; color:#0369a1; border:none; }
+.btn-edit:hover { background:#bae6fd; }
+.btn-del  { background:#fee2e2; color:#991b1b; border:none; }
+.btn-del:hover  { background:#fecaca; }
+
+.insp-card { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;
+             padding:14px 16px; margin-bottom:12px; }
+.insp-card-title { font-weight:600; font-size:.875rem; color:#1a3a5c; margin-bottom:10px; }
+.insp-list { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.insp-chip { display:inline-flex; align-items:center; gap:6px; background:#fff;
+             border:1px solid #d0d5dd; border-radius:20px; padding:4px 12px;
+             font-size:.82rem; }
+.insp-chip form { margin:0; }
+.insp-chip button { background:none; border:none; color:#9ca3af; cursor:pointer;
+                    font-size:.85rem; padding:0; line-height:1; }
+.insp-chip button:hover { color:#dc2626; }
+.empty-state { text-align:center; padding:40px; color:#9ca3af; font-size:.9rem; }
+.add-form-row { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;
+                background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;
+                padding:14px 16px; margin-top:16px; }
+.add-form-row .form-group { margin:0; }
+.add-form-row label { font-size:.78rem; }
+.add-form-row input, .add-form-row select, .add-form-row textarea {
+  font-size:.82rem; padding:7px 10px; }
+.product-thumb { width:40px; height:40px; object-fit:cover; border-radius:4px;
+                 border:1px solid #e2e8f0; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1100px; margin:0 auto;">
+
+  <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c; margin-bottom:16px;"><span class="lt" data-en="Product Management" data-zh="产品管理">Product Management</span></h1>
+
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <a href="?tab=categories"    class="tab-btn {{ 'active' if tab=='categories' }}"><span class="lt" data-en="Product Categories" data-zh="产品类别">Product Categories</span></a>
+    <a href="?tab=inspector_map" class="tab-btn {{ 'active' if tab=='inspector_map' }}"><span class="lt" data-en="Inspector Config" data-zh="检验员配置">Inspector Config</span></a>
+    <a href="?tab=archive"       class="tab-btn {{ 'active' if tab=='archive' }}"><span class="lt" data-en="Product Archive" data-zh="产品档案">Product Archive</span></a>
+  </div>
+
+  <!-- ── Tab 1: 产品类别 ── -->
+  {% if tab == 'categories' %}
+  <div class="card">
+    {% if cats %}
+    <div style="overflow-x:auto;">
+      <table class="mgmt-table">
+        <thead>
+          <tr>
+            <th>类别编号</th>
+            <th>类别名称</th>
+            <th>描述</th>
+            <th>产品数</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in cats %}
+          <tr>
+            <td><span style="font-family:monospace; background:#f3f4f6; padding:2px 6px; border-radius:4px;">
+              {{ c.code or '—' }}</span></td>
+            <td><strong>{{ c.name }}</strong></td>
+            <td style="color:#6b7280;">{{ c.description or '—' }}</td>
+            <td style="color:#6b7280;">
+              {{ items | selectattr('category_name','equalto', c.name) | list | length }}
+            </td>
+            <td>
+              <form method="POST" action="{{ url_for('category_delete', cid=c.id) }}"
+                    onsubmit="return confirm('确认删除类别「{{ c.name }}」？此操作不可恢复。')">
+                <button type="submit" class="btn btn-sm btn-del">删除</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">暂无类别，请在下方添加</div>
+    {% endif %}
+
+    <!-- Inline add form -->
+    <form method="POST" action="{{ url_for('category_new') }}">
+      <div class="add-form-row">
+        <div class="form-group">
+          <label>类别编号</label>
+          <input type="text" name="code" style="width:90px;" placeholder="如 RSV">
+        </div>
+        <div class="form-group">
+          <label>类别名称 <span style="color:#dc2626;">*</span></label>
+          <input type="text" name="name" required style="width:200px;" placeholder="如 Ball Valves">
+        </div>
+        <div class="form-group">
+          <label>描述</label>
+          <input type="text" name="description" style="width:260px;" placeholder="简要说明">
+        </div>
+        <div class="form-group" style="padding-top:20px;">
+          <button type="submit" class="btn btn-primary btn-sm">+ 添加类别</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- ── Tab 2: 检验员配置 ── -->
+  {% elif tab == 'inspector_map' %}
+  {% if cats %}
+    {% for c in cats %}
+    <div class="insp-card">
+      <div class="insp-card-title">
+        {% if c.code %}<span style="font-family:monospace; background:#e0f2fe; color:#0369a1;
+          padding:1px 7px; border-radius:12px; font-size:.78rem; margin-right:6px;">{{ c.code }}</span>{% endif %}
+        {{ c.name }}
+      </div>
+
+      <div class="insp-list">
+        {% set inspectors = insp_map.get(c.id, []) %}
+        {% if inspectors %}
+          {% for i in inspectors %}
+          <span class="insp-chip">
+            &#128100; {{ i.inspector_name }}
+            <form method="POST" action="{{ url_for('inspector_delete', iid=i.id) }}">
+              <button type="submit" title="移除">&#10005;</button>
+            </form>
+          </span>
+          {% endfor %}
+        {% else %}
+          <span style="font-size:.82rem; color:#9ca3af;">暂未配置检验员</span>
+        {% endif %}
+      </div>
+
+      <form method="POST" action="{{ url_for('inspector_add', cid=c.id) }}"
+            style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <select name="inspector_name"
+                style="width:200px; padding:6px 10px; font-size:.82rem; border:1px solid #d0d5dd; border-radius:6px;">
+          <option value="">— 选择检验员 —</option>
+          {% for emp in all_employees %}
+            {% set already = insp_map.get(c.id, []) | map(attribute='inspector_name') | list %}
+            {% if emp.name not in already %}
+            <option value="{{ emp.name }}">{{ emp.name }}{% if emp.role %} ({{ emp.role }}){% endif %}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm btn-primary">添加</button>
+      </form>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="card">
+    <div class="empty-state">请先在「产品类别」标签中添加类别</div>
+  </div>
+  {% endif %}
+
+  <!-- ── Tab 3: 产品档案 ── -->
+  {% elif tab == 'archive' %}
+
+  <!-- Search & filter bar -->
+  <form method="GET" action="{{ url_for('products') }}" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; align-items:flex-end;">
+    <input type="hidden" name="tab" value="archive">
+    <div>
+      <label style="font-size:.75rem; color:#6b7280; display:block; margin-bottom:2px;"><span class="lt" data-en="Search" data-zh="搜索">Search</span></label>
+      <input type="text" name="q" value="{{ search }}" placeholder="编码 / 名称..."
+             style="width:200px; padding:7px 10px; font-size:.85rem;">
+    </div>
+    <div>
+      <label style="font-size:.75rem; color:#6b7280; display:block; margin-bottom:2px;"><span class="lt" data-en="Category" data-zh="类别">Category</span></label>
+      <select name="cat_id" style="padding:7px 10px; font-size:.85rem;">
+        <option value="">— <span class="lt" data-en="All Categories" data-zh="全部类别">All Categories</span> —</option>
+        {% for c in cats %}
+        <option value="{{ c.id }}" {{ 'selected' if cat_id|string == c.id|string }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-outline" style="align-self:flex-end;"><span class="lt" data-en="Filter" data-zh="筛选">Filter</span></button>
+    {% if search or cat_id %}
+    <a href="{{ url_for('products', tab='archive') }}" class="btn btn-outline" style="align-self:flex-end; color:#6b7280;"><span class="lt" data-en="Clear" data-zh="清除">Clear</span></a>
+    {% endif %}
+    <span style="align-self:flex-end; font-size:.82rem; color:#9ca3af; margin-left:4px;">
+      {{ items|length }} <span class="lt" data-en="items" data-zh="个产品">items</span>
+    </span>
+    <div style="margin-left:auto; align-self:flex-end;">
+      <a href="{{ url_for('product_new') }}" class="btn btn-primary">+ <span class="lt" data-en="New Product" data-zh="新增产品">New Product</span></a>
+    </div>
+  </form>
+
+  <div class="card">
+    {% if items %}
+    <div style="overflow-x:auto;">
+      <table class="mgmt-table">
+        <thead>
+          <tr>
+            <th><span class="lt" data-en="Code" data-zh="编码">Code</span></th>
+            <th><span class="lt" data-en="Name" data-zh="名称">Name</span></th>
+            <th><span class="lt" data-en="Category" data-zh="类别">Category</span></th>
+            <th><span class="lt" data-en="Sub Category" data-zh="子类别">Sub Category</span></th>
+            <th><span class="lt" data-en="Supplier" data-zh="供应商">Supplier</span></th>
+            <th style="text-align:center;"><span class="lt" data-en="Crate Qty" data-zh="箱数量">Crate Qty</span></th>
+            <th style="text-align:center;"><span class="lt" data-en="Inspect Pcs" data-zh="检验件数">Inspect Pcs</span></th>
+            <th style="text-align:center;"><span class="lt" data-en="Mins/Pc" data-zh="分钟/件">Mins/Pc</span></th>
+            <th><span class="lt" data-en="Notes" data-zh="备注">Notes</span></th>
+            <th><span class="lt" data-en="Actions" data-zh="操作">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in items %}
+          <tr>
+            <td><span style="font-family:monospace; background:#f3f4f6;
+                padding:2px 6px; border-radius:4px; white-space:nowrap;">{{ p.item_code or '—' }}</span></td>
+            <td><strong>{{ p.name }}</strong>
+              {% if p.image_path %}
+              <img src="{{ url_for('product_image', filename=p.image_path) }}"
+                   class="product-thumb" alt="" style="display:inline-block; margin-left:6px; vertical-align:middle;">
+              {% endif %}
+            </td>
+            <td>{{ p.category_name or '—' }}</td>
+            <td style="color:#6b7280; font-size:.82rem;">{{ p.sub_category or '—' }}</td>
+            <td>{{ p.supplier_name or '—' }}</td>
+            <td style="text-align:center; color:#374151;">{{ p.crate_qty or '—' }}</td>
+            <td style="text-align:center; color:#374151;">{{ p.inspect_pcs or '—' }}</td>
+            <td style="text-align:center; color:#374151;">{{ p.inspect_mins or '—' }}</td>
+            <td style="color:#6b7280; font-size:.82rem; max-width:180px;">{{ p.description or '—' }}</td>
+            <td>
+              <div class="action-btns">
+                <a href="{{ url_for('product_edit', pid=p.id) }}" class="btn btn-sm btn-edit"><span class="lt" data-en="Edit" data-zh="编辑">Edit</span></a>
+                <form method="POST" action="{{ url_for('product_delete', pid=p.id) }}"
+                      onsubmit="return confirm('确认删除「{{ p.name }}」？')">
+                  <button type="submit" class="btn btn-sm btn-del"><span class="lt" data-en="Del" data-zh="删除">Del</span></button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <span class="lt" data-en="No products found" data-zh="暂无产品">No products found</span>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+</div>
+</div>
+{% endblock %}

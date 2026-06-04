@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}区域管理{% endblock %}
+
+{% block extra_style %}
+.region-tree { font-size:.875rem; }
+.rnode { margin:0; }
+.rnode-row { display:flex; align-items:center; gap:8px; padding:7px 10px;
+             border-radius:6px; transition:background .1s; }
+.rnode-row:hover { background:#f1f5f9; }
+.rnode-toggle { cursor:pointer; width:16px; text-align:center; color:#9ca3af;
+                font-size:.75rem; flex-shrink:0; user-select:none; }
+.rnode-name { font-weight:500; flex:1; }
+.rnode-code { font-size:.75rem; color:#9ca3af; margin-left:4px; }
+.rnode-children { margin-left:22px; border-left:2px solid #e8eaee; padding-left:8px; }
+.level-1 > .rnode-row .rnode-name { font-weight:700; color:#1a3a5c; font-size:.9rem; }
+.level-2 > .rnode-row .rnode-name { font-weight:600; color:#374151; }
+.level-3 > .rnode-row .rnode-name { color:#4b5563; }
+.level-4 > .rnode-row .rnode-name { color:#6b7280; font-size:.83rem; }
+.level-badge { font-size:.68rem; padding:1px 6px; border-radius:10px; font-weight:600;
+               flex-shrink:0; }
+.lv1 { background:#dbeafe; color:#1e40af; }
+.lv2 { background:#ede9fe; color:#5b21b6; }
+.lv3 { background:#d1fae5; color:#065f46; }
+.lv4 { background:#fef3c7; color:#92400e; }
+.rnode-actions { display:flex; gap:4px; flex-shrink:0; }
+.btn-add-child { background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; font-size:.75rem; padding:3px 8px; border-radius:4px; cursor:pointer; }
+.btn-add-child:hover { background:#dcfce7; }
+.btn-edit-node { background:#e0f2fe; color:#0369a1; border:none; font-size:.75rem; padding:3px 8px; border-radius:4px; cursor:pointer; }
+.btn-del-node  { background:#fee2e2; color:#991b1b; border:none; font-size:.75rem; padding:3px 8px; border-radius:4px; cursor:pointer; }
+.add-form { background:#f8fafc; border:1px dashed #d0d5dd; border-radius:8px;
+            padding:14px 16px; margin-bottom:16px; }
+.add-form-title { font-weight:600; font-size:.85rem; color:#374151; margin-bottom:10px; }
+.add-inline { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; }
+.add-inline input, .add-inline select { font-size:.83rem; padding:7px 10px; }
+.add-inline label { font-size:.78rem; font-weight:500; color:#6b7280;
+                    display:block; margin-bottom:3px; }
+.inline-field { display:flex; flex-direction:column; }
+/* modal */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4);
+                 z-index:100; align-items:center; justify-content:center; }
+.modal-overlay.open { display:flex; }
+.modal-box { background:#fff; border-radius:10px; padding:24px; width:360px;
+             max-width:calc(100vw - 32px); box-shadow:0 8px 32px rgba(0,0,0,.15); }
+.modal-title { font-weight:700; font-size:1rem; margin-bottom:16px; color:#1a3a5c; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:900px; margin:0 auto;">
+
+  <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c; margin-bottom:16px;">
+    区域信息管理
+    <span style="font-size:.8rem; font-weight:400; color:#9ca3af; margin-left:8px;">省份 → 城市 → 厂区 → 车间</span>
+  </h1>
+
+  <!-- Add root (province) -->
+  <div class="add-form">
+    <div class="add-form-title">新增省份（一级区域）</div>
+    <form method="POST" action="{{ url_for('region_new') }}">
+      <input type="hidden" name="level" value="1">
+      <div class="add-inline">
+        <div class="inline-field">
+          <label>省份名称 *</label>
+          <input type="text" name="name" required placeholder="如：广东省" style="width:160px;">
+        </div>
+        <div class="inline-field">
+          <label>编码（选填）</label>
+          <input type="text" name="code" placeholder="GD" style="width:80px;">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-end;">添加省份</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Tree -->
+  <div class="card">
+    {% if tree %}
+    <div class="region-tree">
+      {% for prov in tree %}
+      <div class="rnode level-1" id="node-{{ prov.id }}">
+        <div class="rnode-row">
+          <span class="rnode-toggle" onclick="toggleNode({{ prov.id }})">▼</span>
+          <span class="level-badge lv1">省</span>
+          <span class="rnode-name">{{ prov.name }}</span>
+          {% if prov.code %}<span class="rnode-code">{{ prov.code }}</span>{% endif %}
+          <div class="rnode-actions">
+            <button class="btn-add-child" onclick="openAddModal({{ prov.id }}, 2, '{{ prov.name }}')">+ 添加城市</button>
+            <button class="btn-edit-node" onclick="openEditModal({{ prov.id }}, '{{ prov.name }}', '{{ prov.code }}')">编辑</button>
+            <form method="POST" action="{{ url_for('region_delete', rid=prov.id) }}" style="display:inline"
+                  onsubmit="return confirm('删除「{{ prov.name }}」及其所有下级区域？')">
+              <button class="btn-del-node" type="submit">删除</button>
+            </form>
+          </div>
+        </div>
+        <div class="rnode-children" id="children-{{ prov.id }}">
+          {% for city in prov.children %}
+          <div class="rnode level-2" id="node-{{ city.id }}">
+            <div class="rnode-row">
+              <span class="rnode-toggle" onclick="toggleNode({{ city.id }})">{% if city.children %}▼{% else %}&nbsp;{% endif %}</span>
+              <span class="level-badge lv2">市</span>
+              <span class="rnode-name">{{ city.name }}</span>
+              {% if city.code %}<span class="rnode-code">{{ city.code }}</span>{% endif %}
+              <div class="rnode-actions">
+                <button class="btn-add-child" onclick="openAddModal({{ city.id }}, 3, '{{ city.name }}')">+ 添加厂区</button>
+                <button class="btn-edit-node" onclick="openEditModal({{ city.id }}, '{{ city.name }}', '{{ city.code }}')">编辑</button>
+                <form method="POST" action="{{ url_for('region_delete', rid=city.id) }}" style="display:inline"
+                      onsubmit="return confirm('删除「{{ city.name }}」及其所有下级？')">
+                  <button class="btn-del-node" type="submit">删除</button>
+                </form>
+              </div>
+            </div>
+            <div class="rnode-children" id="children-{{ city.id }}">
+              {% for factory in city.children %}
+              <div class="rnode level-3" id="node-{{ factory.id }}">
+                <div class="rnode-row">
+                  <span class="rnode-toggle" onclick="toggleNode({{ factory.id }})">{% if factory.children %}▼{% else %}&nbsp;{% endif %}</span>
+                  <span class="level-badge lv3">厂</span>
+                  <span class="rnode-name">{{ factory.name }}</span>
+                  {% if factory.code %}<span class="rnode-code">{{ factory.code }}</span>{% endif %}
+                  <div class="rnode-actions">
+                    <button class="btn-add-child" onclick="openAddModal({{ factory.id }}, 4, '{{ factory.name }}')">+ 添加车间</button>
+                    <button class="btn-edit-node" onclick="openEditModal({{ factory.id }}, '{{ factory.name }}', '{{ factory.code }}')">编辑</button>
+                    <form method="POST" action="{{ url_for('region_delete', rid=factory.id) }}" style="display:inline"
+                          onsubmit="return confirm('删除「{{ factory.name }}」？')">
+                      <button class="btn-del-node" type="submit">删除</button>
+                    </form>
+                  </div>
+                </div>
+                <div class="rnode-children" id="children-{{ factory.id }}">
+                  {% for ws in factory.children %}
+                  <div class="rnode level-4" id="node-{{ ws.id }}">
+                    <div class="rnode-row">
+                      <span class="rnode-toggle">&nbsp;</span>
+                      <span class="level-badge lv4">间</span>
+                      <span class="rnode-name">{{ ws.name }}</span>
+                      {% if ws.code %}<span class="rnode-code">{{ ws.code }}</span>{% endif %}
+                      <div class="rnode-actions">
+                        <button class="btn-edit-node" onclick="openEditModal({{ ws.id }}, '{{ ws.name }}', '{{ ws.code }}')">编辑</button>
+                        <form method="POST" action="{{ url_for('region_delete', rid=ws.id) }}" style="display:inline"
+                              onsubmit="return confirm('删除「{{ ws.name }}」？')">
+                          <button class="btn-del-node" type="submit">删除</button>
+                        </form>
+                      </div>
+                    </div>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="text-align:center; padding:48px; color:#9ca3af; font-size:.9rem;">
+      暂无区域数据，请先添加省份
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+</div>
+
+<!-- Add child modal -->
+<div class="modal-overlay" id="addModal">
+  <div class="modal-box">
+    <div class="modal-title" id="addModalTitle">新增下级区域</div>
+    <form method="POST" action="{{ url_for('region_new') }}" id="addModalForm">
+      <input type="hidden" name="level" id="addLevel">
+      <input type="hidden" name="parent_id" id="addParentId">
+      <div class="form-group">
+        <label id="addLabel">名称 *</label>
+        <input type="text" name="name" required autofocus placeholder="">
+      </div>
+      <div class="form-group">
+        <label>编码（选填）</label>
+        <input type="text" name="code" placeholder="">
+      </div>
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button type="submit" class="btn btn-primary">添加</button>
+        <button type="button" class="btn btn-outline" onclick="closeModal('addModal')">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit modal -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal-box">
+    <div class="modal-title">编辑区域</div>
+    <form method="POST" id="editForm">
+      <div class="form-group">
+        <label>名称 *</label>
+        <input type="text" name="name" id="editName" required>
+      </div>
+      <div class="form-group">
+        <label>编码（选填）</label>
+        <input type="text" name="code" id="editCode">
+      </div>
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <button type="button" class="btn btn-outline" onclick="closeModal('editModal')">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const LEVEL_NAMES = { 1:'省份', 2:'城市', 3:'厂区', 4:'车间' };
+
+function toggleNode(id) {
+  const ch = document.getElementById('children-' + id);
+  const tog = document.querySelector('#node-' + id + ' > .rnode-row > .rnode-toggle');
+  if (!ch) return;
+  const hidden = ch.style.display === 'none';
+  ch.style.display = hidden ? '' : 'none';
+  if (tog) tog.textContent = hidden ? '▼' : '▶';
+}
+
+function openAddModal(parentId, level, parentName) {
+  document.getElementById('addLevel').value = level;
+  document.getElementById('addParentId').value = parentId;
+  document.getElementById('addModalTitle').textContent = '在「' + parentName + '」下添加' + (LEVEL_NAMES[level] || '下级');
+  document.getElementById('addLabel').textContent = (LEVEL_NAMES[level] || '名称') + ' *';
+  document.getElementById('addModal').classList.add('open');
+}
+
+function openEditModal(id, name, code) {
+  document.getElementById('editName').value = name;
+  document.getElementById('editCode').value = code || '';
+  document.getElementById('editForm').action = '/regions/' + id + '/edit';
+  document.getElementById('editModal').classList.add('open');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+document.querySelectorAll('.modal-overlay').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+});
+</script>
+{% endblock %}

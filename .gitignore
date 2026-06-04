@@ -1,0 +1,38 @@
+# ── 只保留 prod_schedule 应用代码，其余全部忽略 ──────────────────────────────
+/*
+!/.gitignore
+!/prod_schedule/
+
+# ── 运行时数据（真实业务数据，绝对不提交）────────────────────────────────────
+/prod_schedule/data/app.db
+/prod_schedule/data/current_week.json
+/prod_schedule/data/previous_week.json
+/prod_schedule/data/previous_week_backup.json
+/prod_schedule/data/inspections_cache.json
+/prod_schedule/data/config.json
+
+# ── 用户上传内容 & 大型图片资源 ──────────────────────────────────────────────
+/prod_schedule/uploads/
+/prod_schedule/static/kb_images/
+/prod_schedule/static/product_images/
+
+# ── Python 字节码缓存 ─────────────────────────────────────────────────────────
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── 临时调试输出文件 ──────────────────────────────────────────────────────────
+/prod_schedule/compare_output.txt
+/prod_schedule/hdr_output.txt
+/prod_schedule/load_output.txt
+/prod_schedule/restore_output.txt
+
+# ── 系统 / 编辑器噪音 ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+.vscode/
+.idea/

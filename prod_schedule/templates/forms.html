@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}检验表单模板{% endblock %}
+
+{% block extra_style %}
+.tpl-card { border:1px solid #e2e8f0; border-radius:8px; padding:14px 16px; margin-bottom:10px; }
+.kw-chip { display:inline-block; background:#e0f2fe; color:#0369a1; border-radius:4px;
+           padding:1px 8px; font-size:.75rem; margin:2px; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:900px; margin:0 auto;">
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">检验表单模板</h1>
+    <span style="font-size:.82rem; color:#6b7280;">{{ templates|length }} 个模板 &nbsp;|&nbsp;
+      重新导入: <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;">python import_forms.py</code>
+    </span>
+  </div>
+
+  <div class="card" style="margin-bottom:16px; background:#fffbeb; border:1px solid #fcd34d; padding:12px 16px;">
+    <div style="font-size:.85rem; color:#92400e;">
+      <strong>自动匹配规则：</strong>
+      系统根据「关键词」自动将 production schedule 中的 item description 与表单匹配。
+      关键词大小写不敏感，多个关键词用逗号分隔，满足任意一个即匹配。
+    </div>
+  </div>
+
+  {% for tpl in templates %}
+  {% set sections = tpl.sections_json | tojson %}
+  {% set q_count = namespace(n=0) %}
+  <div class="tpl-card">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+      <div style="flex:1;">
+        <div style="font-weight:600; font-size:.95rem; color:#1a3a5c; margin-bottom:6px;">
+          {{ tpl.name }}
+        </div>
+        <div style="font-size:.78rem; color:#6b7280; margin-bottom:8px;">
+          来源: {{ tpl.source_file or '—' }}
+        </div>
+        <div style="margin-bottom:8px;">
+          {% if tpl.keywords %}
+            {% for kw in tpl.keywords.split(',') %}
+            <span class="kw-chip">{{ kw.strip() }}</span>
+            {% endfor %}
+          {% else %}
+          <span style="font-size:.78rem; color:#9ca3af;">未设置关键词</span>
+          {% endif %}
+        </div>
+        <!-- Edit keywords inline -->
+        <form method="POST" action="{{ url_for('form_keywords_update', fid=tpl.id) }}"
+              style="display:flex; gap:8px; align-items:center;">
+          <input type="text" name="keywords" value="{{ tpl.keywords }}"
+                 style="width:340px; font-size:.8rem; padding:5px 10px;"
+                 placeholder="关键词1, 关键词2, ...">
+          <button type="submit" class="btn btn-sm btn-outline">保存关键词</button>
+        </form>
+      </div>
+      <form method="POST" action="{{ url_for('form_template_delete', fid=tpl.id) }}"
+            onsubmit="return confirm('确认删除「{{ tpl.name }}」模板？')">
+        <button type="submit" class="btn btn-sm"
+                style="background:#fee2e2;color:#991b1b;border:none;flex-shrink:0;">删除</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+
+  {% if not templates %}
+  <div style="text-align:center; padding:50px; color:#9ca3af;">
+    暂无检验表单模板。<br>
+    运行 <code>python import_forms.py</code> 从 Excel 文件导入模板。
+  </div>
+  {% endif %}
+
+</div>
+</div>
+{% endblock %}

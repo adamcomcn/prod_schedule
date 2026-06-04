@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}知识库{% endblock %}
+
+{% block extra_style %}
+.kb-layout { display:grid; grid-template-columns:220px 1fr; gap:20px; align-items:start; }
+@media(max-width:768px){ .kb-layout { grid-template-columns:1fr; } }
+.cat-list { list-style:none; padding:0; }
+.cat-list li a { display:block; padding:8px 12px; border-radius:6px; font-size:.85rem;
+                 color:#374151; text-decoration:none !important; }
+.cat-list li a:hover { background:#f3f4f6; }
+.cat-list li a.active { background:#1a3a5c; color:#fff; font-weight:600; }
+.cat-list li a .count { float:right; font-size:.75rem; opacity:.7; }
+.article-card { border:1px solid #e2e8f0; border-radius:8px; padding:14px 16px;
+                margin-bottom:10px; background:#fff; transition:box-shadow .15s; }
+.article-card:hover { box-shadow:0 2px 8px rgba(0,0,0,.08); }
+.article-card h3 { font-size:.9rem; font-weight:600; margin-bottom:4px; }
+.article-card h3 a { color:#1a3a5c; text-decoration:none !important; }
+.article-card h3 a:hover { color:#1a6fc4; }
+.article-card .preview { font-size:.8rem; color:#6b7280; line-height:1.5;
+                         display:-webkit-box; -webkit-line-clamp:2;
+                         -webkit-box-orient:vertical; overflow:hidden; }
+.article-tag { display:inline-block; background:#e0f2fe; color:#0369a1;
+               border-radius:4px; padding:1px 7px; font-size:.72rem;
+               font-weight:600; margin-right:4px; }
+.search-bar { display:flex; gap:8px; margin-bottom:16px; }
+.search-bar input { flex:1; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1100px; margin:0 auto;">
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;"><span class="lt" data-en="Knowledge Base" data-zh="知识库">Knowledge Base</span></h1>
+    <a href="{{ url_for('kb_article_new') }}" class="btn btn-primary">+ <span class="lt" data-en="New Article" data-zh="新增文章">New Article</span></a>
+  </div>
+
+  <!-- Search -->
+  <form method="GET" class="search-bar">
+    {% if cat_filter %}<input type="hidden" name="cat" value="{{ cat_filter }}">{% endif %}
+    <input type="text" name="q" value="{{ search }}" placeholder="搜索文章标题、内容或标签...">
+    <button type="submit" class="btn btn-outline">搜索</button>
+    {% if search %}<a href="{{ url_for('knowledge', cat=cat_filter) }}" class="btn btn-outline">清除</a>{% endif %}
+  </form>
+
+  <div class="kb-layout">
+    <!-- Left: categories -->
+    <div>
+      <div class="card" style="padding:16px;">
+        <div style="font-size:.8rem; font-weight:600; color:#6b7280; text-transform:uppercase;
+                    letter-spacing:.05em; margin-bottom:10px;">分类</div>
+        <ul class="cat-list">
+          <li>
+            <a href="{{ url_for('knowledge', q=search) }}"
+               class="{{ 'active' if not cat_filter }}">
+              全部 <span class="count">{{ articles|length if not cat_filter else '' }}</span>
+            </a>
+          </li>
+          {% for c in cats %}
+          <li>
+            <a href="{{ url_for('knowledge', cat=c.id, q=search) }}"
+               class="{{ 'active' if cat_filter|string == c.id|string }}">
+              {{ c.name }}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+
+        <!-- Add category -->
+        <form method="POST" action="{{ url_for('kb_category_new') }}" style="margin-top:14px; border-top:1px solid #f0f0f0; padding-top:12px;">
+          <div class="form-group" style="margin-bottom:8px;">
+            <input type="text" name="name" placeholder="新类别名称" style="font-size:.8rem; padding:6px 10px;">
+          </div>
+          <button type="submit" class="btn btn-outline btn-sm" style="width:100%;">+ 添加分类</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Right: articles -->
+    <div>
+      {% if articles %}
+        {% for item in articles %}
+        {% set a = item.row %}
+        <div class="article-card" style="display:flex; gap:14px; align-items:flex-start;">
+          {% if item.first_img %}
+          <a href="{{ url_for('kb_article', aid=a.id) }}" style="flex-shrink:0;">
+            <img src="/static/kb_images/{{ item.first_img }}"
+                 style="width:90px; height:70px; object-fit:cover; border-radius:6px;
+                        border:1px solid #e2e8f0; display:block;" loading="lazy" alt="">
+          </a>
+          {% endif %}
+          <div style="flex:1; min-width:0;">
+            <h3><a href="{{ url_for('kb_article', aid=a.id) }}">{{ a.title }}</a></h3>
+            <div style="margin-bottom:6px;">
+              {% if a.tags %}
+                {% for tag in a.tags.split(',') %}
+                <span class="article-tag">{{ tag.strip() }}</span>
+                {% endfor %}
+              {% endif %}
+              {% if a.cat_name %}
+              <span style="font-size:.75rem; color:#9ca3af; margin-left:4px;">{{ a.cat_name }}</span>
+              {% endif %}
+              {% if item.img_count %}
+              <span style="font-size:.72rem; color:#9ca3af; margin-left:6px;">
+                &#128247; {{ item.img_count }} 张照片</span>
+              {% endif %}
+            </div>
+            <div class="preview">{{ a.content }}</div>
+            <div style="margin-top:8px; display:flex; gap:8px;">
+              <a href="{{ url_for('kb_article', aid=a.id) }}" class="btn btn-sm btn-outline">查看</a>
+              <a href="{{ url_for('kb_article_edit', aid=a.id) }}"
+                 style="font-size:.78rem; color:#6b7280; align-self:center;">编辑</a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div style="text-align:center; padding:60px; color:#9ca3af;">
+        {% if search %}没有匹配「{{ search }}」的文章{% else %}该分类暂无文章{% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+</div>
+{% endblock %}

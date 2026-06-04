@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:720px; margin:0 auto;">
+
+  <div style="margin-bottom:16px;">
+    <a href="{{ url_for('orders') }}" style="font-size:.85rem; color:#6b7280;">
+      &#8592; 返回订单列表
+    </a>
+  </div>
+
+  <div class="card">
+    <div class="card-title">{{ title }}</div>
+
+    <form method="POST">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 20px;">
+
+        <div class="form-group">
+          <label>订单号 <span style="color:#dc2626;">*</span></label>
+          <input type="text" name="order_number" required
+                 value="{{ order.order_number if order else '' }}"
+                 placeholder="如 DPL2600">
+        </div>
+
+        <div class="form-group">
+          <label>区域</label>
+          <select name="region">
+            <option value="">— 选择区域 —</option>
+            {% for r in ['MELBOURNE','FIJI','QLD','NEW ZEALAND','DI FITTING','PRETAPS'] %}
+            <option value="{{ r }}"
+              {{ 'selected' if order and order.region == r else '' }}>{{ r }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>产品编码</label>
+          <input type="text" name="item_code"
+                 value="{{ order.item_code if order else '' }}"
+                 placeholder="如 RSV0150FL">
+        </div>
+
+        <div class="form-group">
+          <label>客户</label>
+          <input type="text" name="customer"
+                 value="{{ order.customer if order else '' }}"
+                 placeholder="客户名称">
+        </div>
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>产品描述</label>
+          <input type="text" name="description"
+                 value="{{ order.description if order else '' }}"
+                 placeholder="产品完整描述">
+        </div>
+
+        <div class="form-group">
+          <label>供应商</label>
+          <select name="supplier_id">
+            <option value="">— 选择供应商 —</option>
+            {% for s in suppliers %}
+            <option value="{{ s.id }}"
+              {{ 'selected' if order and order.supplier_id == s.id else '' }}>
+              {{ s.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>产品类别</label>
+          <select name="category_id">
+            <option value="">— 选择类别 —</option>
+            {% for c in cats %}
+            <option value="{{ c.id }}"
+              {{ 'selected' if order and order.category_id == c.id else '' }}>
+              {{ c.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>数量</label>
+          <input type="number" name="quantity" min="0" step="0.01"
+                 value="{{ order.quantity if order else '' }}"
+                 placeholder="0">
+        </div>
+
+        <div class="form-group">
+          <label>状态</label>
+          <select name="status">
+            {% for s in ['Pending','In Progress','Shipped','On Hold'] %}
+            <option value="{{ s }}"
+              {{ 'selected' if order and order.status == s else ('' if order else ('selected' if s == 'Pending' else '')) }}>
+              {{ s }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>下单日期</label>
+          <input type="date" name="order_date"
+                 value="{{ order.order_date if order else '' }}">
+        </div>
+
+        <div class="form-group">
+          <label>预计交期 (ETA)</label>
+          <input type="date" name="eta"
+                 value="{{ order.eta if order else '' }}">
+        </div>
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>备注</label>
+          <textarea name="notes" rows="3"
+                    placeholder="其他说明">{{ order.notes if order else '' }}</textarea>
+        </div>
+
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <a href="{{ url_for('orders') }}" class="btn btn-outline">取消</a>
+      </div>
+    </form>
+  </div>
+
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,366 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block extra_style %}
+.dash-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 16px; }
+@media (max-width: 960px) { .dash-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 500px)  { .dash-grid { grid-template-columns: repeat(2, 1fr); } }
+
+.stat-card { background: #fff; border-radius: 10px;
+             box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 18px 20px; }
+.stat-label { font-size: .72rem; font-weight: 600; text-transform: uppercase;
+              letter-spacing: .06em; color: #6b7280; margin-bottom: 6px; }
+.stat-value { font-size: 2rem; font-weight: 700; line-height: 1; }
+.stat-sub   { font-size: .75rem; color: #9ca3af; margin-top: 4px; }
+
+.c-new      { color: #065f46; }
+.c-not      { color: #991b1b; }
+.c-partial  { color: #92400e; }
+.c-shipped  { color: #374151; }
+.c-typo     { color: #7c3aed; }
+
+.alert-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.alert-chip { display: flex; align-items: center; gap: 8px; padding: 10px 18px;
+              border-radius: 8px; font-size: .875rem; font-weight: 600; }
+.chip-qa     { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.chip-vtrust { background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
+.chip-ok     { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+
+.insp-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden;
+            background: #e5e7eb; margin: 10px 0; }
+.insp-pass    { background: #10b981; }
+.insp-fail    { background: #ef4444; }
+.insp-partial { background: #f59e0b; }
+.insp-legend { display: flex; gap: 20px; flex-wrap: wrap; font-size: .8rem; color: #374151; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+       margin-right: 5px; vertical-align: middle; }
+
+.rtable { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.rtable th { background: #f8fafc; font-weight: 600; text-align: center; padding: 10px 8px;
+             border-bottom: 2px solid #e2e8f0; font-size: .72rem;
+             text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
+.rtable th:first-child { text-align: left; }
+.rtable td { padding: 10px 8px; text-align: center; border-bottom: 1px solid #f1f5f9; }
+.rtable td:first-child { text-align: left; font-weight: 600; color: #1a3a5c; }
+.rtable tbody tr:hover td { background: #f8fafc; }
+.rtable tfoot td { font-weight: 700; background: #f1f5f9; border-top: 2px solid #e2e8f0; }
+.rtable tfoot td:first-child { color: #1a3a5c; }
+.n-new     { color: #059669; font-weight: 600; }
+.n-not     { color: #dc2626; font-weight: 600; }
+.n-partial { color: #d97706; font-weight: 600; }
+.n-shipped { color: #6b7280; }
+.n-qa      { color: #dc2626; font-weight: 700; }
+.n-vt      { color: #ea580c; font-weight: 700; }
+.n-zero    { color: #d1d5db; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1200px; margin:0 auto;">
+
+  <!-- Header -->
+  <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:16px;">
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;"><span class="lt" data-en="Dashboard" data-zh="仪表板">Dashboard</span></h1>
+    {% if upload_date %}
+    <span style="font-size:.8rem; color:#9ca3af;"><span class="lt" data-en="Week uploaded:" data-zh="本周上传：">Week uploaded:</span> {{ upload_date }}</span>
+    {% endif %}
+  </div>
+
+  <!-- Status cards -->
+  <div class="dash-grid">
+    <div class="stat-card">
+      <div class="stat-label"><span class="lt" data-en="Total Jobs" data-zh="总任务数">Total Jobs</span></div>
+      <div class="stat-value" style="color:#1a3a5c;">{{ totals.total }}</div>
+      <div class="stat-sub"><span class="lt" data-en="this week" data-zh="本周">this week</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="lt" data-en="New" data-zh="新增">New</span></div>
+      <div class="stat-value c-new">{{ totals.new }}</div>
+      <div class="stat-sub"><span class="lt" data-en="added this week" data-zh="本周新增">added this week</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="lt" data-en="Not Shipped" data-zh="未发货">Not Shipped</span></div>
+      <div class="stat-value c-not">{{ totals.not_shipped }}</div>
+      <div class="stat-sub"><span class="lt" data-en="still with supplier" data-zh="仍在供应商处">still with supplier</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="lt" data-en="Partially Shipped" data-zh="部分发货">Partially Shipped</span></div>
+      <div class="stat-value c-partial">{{ totals.partially_shipped }}</div>
+      <div class="stat-sub"><span class="lt" data-en="qty reduced" data-zh="数量减少">qty reduced</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="lt" data-en="Shipped" data-zh="已发货">Shipped</span></div>
+      <div class="stat-value c-shipped">{{ totals.shipped }}</div>
+      <div class="stat-sub"><span class="lt" data-en="left schedule" data-zh="已离开排期">left schedule</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="lt" data-en="Typo Flags" data-zh="疑似错误">Typo Flags</span></div>
+      <div class="stat-value c-typo">{{ typo_count }}</div>
+      <div class="stat-sub"><span class="lt" data-en="need review" data-zh="需核查">need review</span></div>
+    </div>
+  </div>
+
+  <!-- Alert chips -->
+  <div class="alert-row">
+    {% if totals.qa_violations > 0 %}
+    <div class="alert-chip chip-qa">
+      &#9888; <span class="lt" data-en="QA BRT Violations:" data-zh="QA BRT违规：">QA BRT Violations:</span> <strong>{{ totals.qa_violations }}</strong>
+      <span style="font-weight:400; font-size:.8rem;"><span class="lt" data-en="shipped/partial without QA BRTs sent" data-zh="已发货/部分发货但未发送QA BRT">shipped/partial without QA BRTs sent</span></span>
+    </div>
+    {% else %}
+    <div class="alert-chip chip-ok">&#10003; <span class="lt" data-en="No QA BRT violations" data-zh="无QA BRT违规">No QA BRT violations</span></div>
+    {% endif %}
+
+    {% if totals.vtrust_violations > 0 %}
+    <div class="alert-chip chip-vtrust">
+      &#9888; <span class="lt" data-en="V-Trust Violations:" data-zh="V-Trust违规：">V-Trust Violations:</span> <strong>{{ totals.vtrust_violations }}</strong>
+      <span style="font-weight:400; font-size:.8rem;"><span class="lt" data-en="valves shipped/partial without V-Trust pass" data-zh="阀门已发货/部分发货但无V-Trust通过记录">valves shipped/partial without V-Trust pass</span></span>
+    </div>
+    {% else %}
+    <div class="alert-chip chip-ok">&#10003; <span class="lt" data-en="No V-Trust violations" data-zh="无V-Trust违规">No V-Trust violations</span></div>
+    {% endif %}
+  </div>
+
+  <!-- Inspection progress -->
+  <div class="card">
+    <div class="card-title"><span class="lt" data-en="Inspection Progress" data-zh="检验进度">Inspection Progress</span></div>
+    {% if totals.total > 0 %}
+    {% set inspected = totals.insp_pass + totals.insp_fail + totals.insp_partial %}
+    <div style="margin-bottom:6px;">
+      <span style="font-size:1.6rem; font-weight:700; color:#1a3a5c;">{{ inspected }}</span>
+      <span style="font-size:.9rem; color:#6b7280;"> / {{ totals.total }} <span class="lt" data-en="inspected" data-zh="已检验">inspected</span></span>
+    </div>
+    <div class="insp-bar">
+      {% if totals.insp_pass > 0 %}
+      <div class="insp-pass" style="width:{{ (totals.insp_pass / totals.total * 100)|round(1) }}%"></div>
+      {% endif %}
+      {% if totals.insp_fail > 0 %}
+      <div class="insp-fail" style="width:{{ (totals.insp_fail / totals.total * 100)|round(1) }}%"></div>
+      {% endif %}
+      {% if totals.insp_partial > 0 %}
+      <div class="insp-partial" style="width:{{ (totals.insp_partial / totals.total * 100)|round(1) }}%"></div>
+      {% endif %}
+    </div>
+    <div class="insp-legend">
+      <span><span class="dot" style="background:#10b981;"></span><span class="lt" data-en="Pass:" data-zh="通过：">Pass:</span> <strong>{{ totals.insp_pass }}</strong></span>
+      <span><span class="dot" style="background:#ef4444;"></span><span class="lt" data-en="Fail:" data-zh="不通过：">Fail:</span> <strong>{{ totals.insp_fail }}</strong></span>
+      <span><span class="dot" style="background:#f59e0b;"></span><span class="lt" data-en="Partial Pass:" data-zh="部分通过：">Partial Pass:</span> <strong>{{ totals.insp_partial }}</strong></span>
+      <span><span class="dot" style="background:#e5e7eb;"></span><span class="lt" data-en="Pending:" data-zh="待检：">Pending:</span> <strong>{{ totals.insp_pending }}</strong></span>
+    </div>
+    {% else %}
+    <p style="color:#9ca3af; font-size:.875rem;"><span class="lt" data-en="No schedule data loaded." data-zh="暂无排期数据。">No schedule data loaded.</span></p>
+    {% endif %}
+  </div>
+
+  <!-- Inspector KPI -->
+  <div class="card">
+    <div class="card-title">&#128100; 检验员 KPI</div>
+    {% if inspector_stats %}
+
+    {# ── Summary table ── #}
+    <div style="overflow-x:auto; margin-bottom:28px;">
+      <table class="rtable">
+        <thead>
+          <tr>
+            <th style="text-align:left;">检验员</th>
+            <th>总检验数</th>
+            <th>&#10003; 通过</th>
+            <th>&#10007; 不通过</th>
+            <th>质检通过率</th>
+            <th>按时完成率</th>
+            <th style="min-width:90px;">按时 / 逾期</th>
+            <th>最近检验</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for name, s in inspector_stats %}
+          {% set pass_rate = (s.passed / s.total * 100)|round(0)|int if s.total else 0 %}
+          {% set ot = s.ontime_pct %}
+          <tr>
+            <td style="font-weight:600; color:#1a3a5c;">{{ name }}</td>
+            <td>{{ s.total }}</td>
+            <td style="color:{% if s.passed %}#059669{% else %}#d1d5db{% endif %};">{{ s.passed or '—' }}</td>
+            <td style="color:{% if s.failed %}#dc2626{% else %}#d1d5db{% endif %};">{{ s.failed or '—' }}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <div style="flex:1;background:#e5e7eb;border-radius:4px;height:7px;min-width:50px;">
+                  <div style="width:{{ pass_rate }}%;height:7px;border-radius:4px;
+                    background:{% if pass_rate>=80 %}#10b981{% elif pass_rate>=50 %}#f59e0b{% else %}#ef4444{% endif %};"></div>
+                </div>
+                <span style="font-size:.78rem;font-weight:600;
+                  color:{% if pass_rate>=80 %}#059669{% elif pass_rate>=50 %}#d97706{% else %}#dc2626{% endif %};">
+                  {{ pass_rate }}%
+                </span>
+              </div>
+            </td>
+            <td>
+              {% if ot is not none %}
+              <div style="display:flex;align-items:center;gap:6px;">
+                <div style="flex:1;background:#e5e7eb;border-radius:4px;height:7px;min-width:50px;">
+                  <div style="width:{{ ot }}%;height:7px;border-radius:4px;
+                    background:{% if ot>=80 %}#10b981{% elif ot>=50 %}#f59e0b{% else %}#ef4444{% endif %};"></div>
+                </div>
+                <span style="font-size:.78rem;font-weight:600;
+                  color:{% if ot>=80 %}#059669{% elif ot>=50 %}#d97706{% else %}#dc2626{% endif %};">
+                  {{ ot }}%
+                </span>
+              </div>
+              {% else %}
+              <span style="color:#d1d5db;font-size:.78rem;">无日期数据</span>
+              {% endif %}
+            </td>
+            <td style="font-size:.78rem;">
+              <span style="color:#059669;">{{ s.on_time }}↑</span>
+              <span style="color:#d1d5db;margin:0 2px;">/</span>
+              <span style="color:{% if s.late %}#dc2626{% else %}#d1d5db{% endif %};">{{ s.late }}↓</span>
+              {% if s.no_est %}<span style="color:#9ca3af;font-size:.7rem;"> ({{ s.no_est }} 无日期)</span>{% endif %}
+            </td>
+            <td style="color:#6b7280;font-size:.82rem;">{{ s.last_date or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# ── Per-inspector weekly breakdown cards ── #}
+    <div style="font-size:.8rem;font-weight:700;color:#1a3a5c;margin-bottom:12px;
+                padding-bottom:8px;border-bottom:1px solid #e8eaee;">
+      每周检验量（最近 8 周）
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+      {% for name, s in inspector_stats %}
+      {% set ot = s.ontime_pct %}
+      <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#fafafa;">
+
+        {# Header #}
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+          <span style="font-weight:700;font-size:.9rem;color:#1a3a5c;">{{ name }}</span>
+          <span style="font-size:.75rem;color:#6b7280;">共 {{ s.total }} 份</span>
+        </div>
+
+        {# On-time rate big number #}
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;">
+          <span style="font-size:1.8rem;font-weight:700;line-height:1;
+            color:{% if ot is not none %}{% if ot>=80 %}#059669{% elif ot>=50 %}#d97706{% else %}#dc2626{% endif %}{% else %}#9ca3af{% endif %};">
+            {% if ot is not none %}{{ ot }}%{% else %}—{% endif %}
+          </span>
+          <span style="font-size:.75rem;color:#6b7280;">按时完成率</span>
+        </div>
+        <div style="font-size:.72rem;color:#9ca3af;margin-bottom:12px;">
+          {% if ot is not none %}
+            按时 {{ s.on_time }} · 逾期 {{ s.late }}
+            {% if s.no_est %} · {{ s.no_est }} 条无 Est.日期{% endif %}
+          {% else %}
+            暂无 Estimated Completion 数据
+          {% endif %}
+        </div>
+
+        {# Weekly bar chart #}
+        <div style="display:flex;align-items:flex-end;gap:4px;height:48px;margin-bottom:4px;">
+          {% for w in recent_weeks %}
+          {% set cnt = s.weekly.get(w, 0) %}
+          {% set bar_h = ((cnt / s.max_weekly) * 44)|round|int if s.max_weekly > 0 and cnt > 0 else 0 %}
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0;">
+            <div style="width:100%;height:{{ bar_h }}px;
+              background:{% if cnt > 0 %}#1a3a5c{% else %}#e5e7eb{% endif %};
+              border-radius:3px 3px 0 0;min-height:2px;"></div>
+          </div>
+          {% endfor %}
+        </div>
+        <div style="display:flex;gap:4px;">
+          {% for w in recent_weeks %}
+          {% set cnt = s.weekly.get(w, 0) %}
+          <div style="flex:1;text-align:center;font-size:.6rem;
+            color:{% if cnt > 0 %}#1a3a5c{% else %}#d1d5db{% endif %};">
+            {{ cnt if cnt else '·' }}
+          </div>
+          {% endfor %}
+        </div>
+        <div style="display:flex;gap:4px;margin-top:2px;">
+          {% for w in recent_weeks %}
+          <div style="flex:1;text-align:center;font-size:.58rem;color:#d1d5db;overflow:hidden;">
+            W{{ w[-2:] }}
+          </div>
+          {% endfor %}
+        </div>
+
+        {# Pass/Fail strip #}
+        <div style="margin-top:10px;display:flex;gap:10px;font-size:.75rem;color:#6b7280;border-top:1px solid #f1f5f9;padding-top:8px;">
+          <span style="color:#059669;font-weight:600;">&#10003; {{ s.passed }}</span>
+          <span style="color:#dc2626;font-weight:600;">&#10007; {{ s.failed }}</span>
+          {% if s.partial %}<span style="color:#d97706;font-weight:600;">~ {{ s.partial }}</span>{% endif %}
+          <span style="margin-left:auto;">{{ s.last_date or '—' }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% else %}
+    <p style="color:#9ca3af;font-size:.875rem;text-align:center;padding:20px 0;">
+      暂无检验记录，提交检验报告后将显示统计数据。
+    </p>
+    {% endif %}
+  </div>
+
+  <!-- Per-region table -->
+  <div class="card">
+    <div class="card-title"><span class="lt" data-en="Per-Region Breakdown" data-zh="按区域统计">Per-Region Breakdown</span></div>
+    <div style="overflow-x:auto;">
+      <table class="rtable">
+        <thead>
+          <tr>
+            <th style="text-align:left;"><span class="lt" data-en="Region" data-zh="区域">Region</span></th>
+            <th><span class="lt" data-en="Total" data-zh="总数">Total</span></th>
+            <th><span class="lt" data-en="New" data-zh="新增">New</span></th>
+            <th><span class="lt" data-en="Not Shipped" data-zh="未发货">Not Shipped</span></th>
+            <th><span class="lt" data-en="Partial" data-zh="部分发货">Partial</span></th>
+            <th><span class="lt" data-en="Shipped" data-zh="已发货">Shipped</span></th>
+            <th><span class="lt" data-en="QA Alerts" data-zh="QA警告">QA Alerts</span></th>
+            <th><span class="lt" data-en="V-Trust Alerts" data-zh="V-Trust警告">V-Trust Alerts</span></th>
+            <th>&#10003; <span class="lt" data-en="Pass" data-zh="通过">Pass</span></th>
+            <th>&#10007; <span class="lt" data-en="Fail" data-zh="不通过">Fail</span></th>
+            <th>~ <span class="lt" data-en="Partial" data-zh="部分通过">Partial</span></th>
+            <th><span class="lt" data-en="Pending" data-zh="待检">Pending</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for region, s in region_stats.items() %}
+          <tr>
+            <td>{{ region }}</td>
+            <td>{{ s.total }}</td>
+            <td class="{{ 'n-new' if s.new else 'n-zero' }}">{{ s.new if s.new else '–' }}</td>
+            <td class="{{ 'n-not' if s.not_shipped else 'n-zero' }}">{{ s.not_shipped if s.not_shipped else '–' }}</td>
+            <td class="{{ 'n-partial' if s.partially_shipped else 'n-zero' }}">{{ s.partially_shipped if s.partially_shipped else '–' }}</td>
+            <td class="{{ 'n-shipped' if s.shipped else 'n-zero' }}">{{ s.shipped if s.shipped else '–' }}</td>
+            <td class="{{ 'n-qa' if s.qa_violations else 'n-zero' }}">{{ s.qa_violations if s.qa_violations else '–' }}</td>
+            <td class="{{ 'n-vt' if s.vtrust_violations else 'n-zero' }}">{{ s.vtrust_violations if s.vtrust_violations else '–' }}</td>
+            <td style="color:{% if s.insp_pass %}#059669{% else %}#d1d5db{% endif %};">{{ s.insp_pass if s.insp_pass else '–' }}</td>
+            <td style="color:{% if s.insp_fail %}#dc2626{% else %}#d1d5db{% endif %};">{{ s.insp_fail if s.insp_fail else '–' }}</td>
+            <td style="color:{% if s.insp_partial %}#d97706{% else %}#d1d5db{% endif %};">{{ s.insp_partial if s.insp_partial else '–' }}</td>
+            <td style="color:{% if s.insp_pending %}#6b7280{% else %}#d1d5db{% endif %};">{{ s.insp_pending if s.insp_pending else '–' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><span class="lt" data-en="TOTAL" data-zh="合计">TOTAL</span></td>
+            <td>{{ totals.total }}</td>
+            <td class="{{ 'n-new' if totals.new else 'n-zero' }}">{{ totals.new if totals.new else '–' }}</td>
+            <td class="{{ 'n-not' if totals.not_shipped else 'n-zero' }}">{{ totals.not_shipped if totals.not_shipped else '–' }}</td>
+            <td class="{{ 'n-partial' if totals.partially_shipped else 'n-zero' }}">{{ totals.partially_shipped if totals.partially_shipped else '–' }}</td>
+            <td class="{{ 'n-shipped' if totals.shipped else 'n-zero' }}">{{ totals.shipped if totals.shipped else '–' }}</td>
+            <td class="{{ 'n-qa' if totals.qa_violations else 'n-zero' }}">{{ totals.qa_violations if totals.qa_violations else '–' }}</td>
+            <td class="{{ 'n-vt' if totals.vtrust_violations else 'n-zero' }}">{{ totals.vtrust_violations if totals.vtrust_violations else '–' }}</td>
+            <td style="color:{% if totals.insp_pass %}#059669{% else %}#d1d5db{% endif %};">{{ totals.insp_pass if totals.insp_pass else '–' }}</td>
+            <td style="color:{% if totals.insp_fail %}#dc2626{% else %}#d1d5db{% endif %};">{{ totals.insp_fail if totals.insp_fail else '–' }}</td>
+            <td style="color:{% if totals.insp_partial %}#d97706{% else %}#d1d5db{% endif %};">{{ totals.insp_partial if totals.insp_partial else '–' }}</td>
+            <td style="color:{% if totals.insp_pending %}#6b7280{% else %}#d1d5db{% endif %};">{{ totals.insp_pending if totals.insp_pending else '–' }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+
+</div>
+</div>
+{% endblock %}

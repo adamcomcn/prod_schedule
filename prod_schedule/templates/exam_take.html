@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.exam_title }} — 答题{% endblock %}
+
+{% block extra_style %}
+.q-block { border:1px solid #e2e8f0; border-radius:8px; padding:16px 18px; margin-bottom:14px; }
+.q-block .qnum { font-size:.75rem; font-weight:700; color:#9ca3af; text-transform:uppercase;
+                 letter-spacing:.05em; margin-bottom:6px; }
+.q-block .qtext { font-size:.9rem; font-weight:600; color:#1a3a5c; margin-bottom:14px; line-height:1.5; }
+.option-label { display:flex; align-items:center; gap:12px; padding:10px 14px;
+                border:2px solid #e2e8f0; border-radius:8px; cursor:pointer;
+                margin-bottom:8px; font-size:.875rem; transition:all .15s; }
+.option-label:hover { border-color:#1a6fc4; background:#eff6ff; }
+.option-label input[type=radio] { display:none; }
+.option-label.selected { border-color:#1a3a5c; background:#eff6ff; }
+.option-circle { width:28px; height:28px; border-radius:50%; border:2px solid #d0d5dd;
+                 display:flex; align-items:center; justify-content:center;
+                 font-size:.8rem; font-weight:700; color:#6b7280; flex-shrink:0; transition:all .15s; }
+.option-label.selected .option-circle { background:#1a3a5c; border-color:#1a3a5c; color:#fff; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:720px; margin:0 auto;">
+
+  <div style="background:#1a3a5c; color:#fff; padding:20px 24px; border-radius:10px; margin-bottom:20px;">
+    <div style="font-size:.8rem; opacity:.7; margin-bottom:4px;">考试</div>
+    <h1 style="font-size:1.2rem; font-weight:700; margin-bottom:4px;">{{ plan.exam_title }}</h1>
+    <div style="font-size:.82rem; opacity:.75;">
+      {{ questions|length }} 道题 &nbsp;|&nbsp; 及格分: {{ plan.pass_score }}%
+      {% if plan.due_date %} &nbsp;|&nbsp; 截止: {{ plan.due_date }}{% endif %}
+    </div>
+  </div>
+
+  {% if not employees %}
+  <div class="card" style="text-align:center; padding:40px; color:#9ca3af;">
+    该培训计划尚未分配员工，请先在计划详情页分配员工
+  </div>
+  {% else %}
+  <form method="POST" id="exam-form">
+    <!-- 选择答题员工 -->
+    <div class="card" style="margin-bottom:16px;">
+      <div class="form-group" style="margin-bottom:0;">
+        <label style="font-weight:600;">你是哪位员工？ <span style="color:#dc2626;">*</span></label>
+        <select name="employee_id" required style="margin-top:8px;">
+          <option value="">— 请选择 —</option>
+          {% for emp in employees %}
+          <option value="{{ emp.id }}">{{ emp.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- Questions -->
+    {% for q in questions %}
+    <div class="q-block">
+      <div class="qnum">第 {{ loop.index }} 题 / 共 {{ questions|length }} 题</div>
+      <div class="qtext">{{ q.question }}</div>
+
+      {% for opt_letter, opt_text in [('A', q.option_a), ('B', q.option_b), ('C', q.option_c), ('D', q.option_d)] %}
+      {% if opt_text %}
+      <label class="option-label" id="label-{{ q.id }}-{{ opt_letter }}"
+             onclick="selectOption({{ q.id }}, '{{ opt_letter }}', this)">
+        <input type="radio" name="q_{{ q.id }}" value="{{ opt_letter }}" required>
+        <div class="option-circle">{{ opt_letter }}</div>
+        <span>{{ opt_text }}</span>
+      </label>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+
+    <div style="display:flex; justify-content:flex-end; margin-top:8px; gap:12px; align-items:center;">
+      <span style="font-size:.82rem; color:#6b7280;" id="progress-text">0 / {{ questions|length }} 题已作答</span>
+      <button type="submit" class="btn btn-success" style="padding:12px 28px; font-size:.95rem;">
+        &#10003; 提交答卷
+      </button>
+    </div>
+  </form>
+  {% endif %}
+
+</div>
+</div>
+
+<script>
+const totalQ = {{ questions|length }};
+let answered = {};
+
+function selectOption(qid, letter, labelEl) {
+  document.querySelectorAll(`label[id^="label-${qid}-"]`).forEach(l => l.classList.remove('selected'));
+  labelEl.classList.add('selected');
+  labelEl.querySelector('input').checked = true;
+  answered[qid] = letter;
+  document.getElementById('progress-text').textContent =
+    `${Object.keys(answered).length} / ${totalQ} 题已作答`;
+}
+
+document.getElementById('exam-form')?.addEventListener('submit', function(e) {
+  if (!document.querySelector('[name=employee_id]').value) {
+    e.preventDefault(); alert('请先选择你的姓名'); return;
+  }
+  if (Object.keys(answered).length < totalQ) {
+    if (!confirm(`还有 ${totalQ - Object.keys(answered).length} 道题未作答，确认提交？`)) {
+      e.preventDefault();
+    }
+  }
+});
+</script>
+{% endblock %}

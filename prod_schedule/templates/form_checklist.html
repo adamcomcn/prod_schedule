@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}{{ tpl.name }} — {{ job.get('Order Number','') }}{% endblock %}
+
+{% block extra_style %}
+/* Checklist table */
+.cl-table { width:100%; border-collapse:collapse; font-size:.85rem; }
+.cl-table th { background:#f8fafc; font-weight:600; padding:9px 12px; text-align:left;
+               border-bottom:2px solid #e2e8f0; font-size:.75rem;
+               text-transform:uppercase; letter-spacing:.04em; color:#6b7280; }
+.cl-table td { padding:10px 12px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+.cl-table tr:hover td { background:#fafafa; }
+
+.section-hdr td { background:#f1f5f9; font-weight:700; color:#1a3a5c;
+                  font-size:.82rem; text-transform:uppercase; letter-spacing:.04em;
+                  padding:8px 12px; }
+
+/* Pass/Fail/NA buttons */
+.pf-group { display:flex; gap:6px; white-space:nowrap; }
+.pf-btn   { display:none; }
+.pf-label { padding:5px 12px; border:1.5px solid #d0d5dd; border-radius:6px;
+            cursor:pointer; font-size:.8rem; font-weight:600; transition:all .12s; }
+.pf-btn:checked + .pf-label { border-color: var(--sel-color, #1a3a5c);
+                                background: var(--sel-bg, #eff6ff);
+                                color: var(--sel-color, #1a3a5c); }
+.pf-pass  { --sel-color:#059669; --sel-bg:#d1fae5; }
+.pf-fail  { --sel-color:#dc2626; --sel-bg:#fee2e2; }
+.pf-na    { --sel-color:#6b7280; --sel-bg:#f3f4f6; }
+.pf-label:hover { background:#f9fafb; }
+
+.condition-cell { font-size:.75rem; color:#dc2626; font-style:italic; }
+.action-cell    { font-size:.75rem; color:#6b7280; }
+.guideline-text { line-height:1.5; }
+
+/* Past responses */
+.past-resp { border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin-bottom:10px; }
+.result-Pass    { color:#059669; font-weight:700; }
+.result-Fail    { color:#dc2626; font-weight:700; }
+.result-Other   { color:#d97706; font-weight:700; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1000px; margin:0 auto;">
+
+  <!-- Header -->
+  <div style="background:#1a3a5c; color:#fff; padding:16px 22px; border-radius:10px; margin-bottom:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+      <div>
+        <div style="font-size:.75rem; opacity:.65; margin-bottom:3px;">检验表单</div>
+        <div style="font-size:1.1rem; font-weight:700;">{{ tpl.name }}</div>
+        <div style="font-size:.82rem; opacity:.75; margin-top:3px;">
+          {{ job.get('Order Number','—') }} &nbsp;|&nbsp;
+          {{ job.get('Item Code','') }} &nbsp;|&nbsp;
+          {{ job.get('Item Description','') }}
+        </div>
+      </div>
+      <a href="{{ url_for('inspect_form', job_key=job.job_key) }}"
+         style="color:rgba(255,255,255,.7); font-size:.8rem; align-self:center;">
+        &#8592; 切换到通用检验单
+      </a>
+    </div>
+  </div>
+
+  <!-- Submission form -->
+  <div class="card">
+    <form method="POST">
+      <input type="hidden" name="tpl_id" value="{{ tpl.id }}">
+
+      <!-- Header fields -->
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:0 20px; margin-bottom:16px;">
+        <div class="form-group" style="margin-bottom:8px;">
+          <label>DPL / Order No.</label>
+          <input type="text" name="dpl_number"
+                 value="{{ job.get('Order Number','') }}"
+                 placeholder="DPL number">
+        </div>
+        <div class="form-group" style="margin-bottom:8px;">
+          <label>Inspector Name *</label>
+          <input type="text" name="inspector" required placeholder="Full name">
+        </div>
+        <div class="form-group" style="margin-bottom:8px;">
+          <label>Inspection Date *</label>
+          <input type="date" name="insp_date" required value="{{ now_date }}">
+        </div>
+      </div>
+
+      <!-- Checklist table -->
+      <div style="overflow-x:auto; margin-bottom:16px;">
+        <table class="cl-table">
+          <thead>
+            <tr>
+              <th style="width:60px;">Part</th>
+              <th style="width:30px;">Q.</th>
+              <th>Inspection Guideline</th>
+              <th style="width:80px;">Condition</th>
+              <th style="width:120px;">Action</th>
+              <th style="width:160px; text-align:center;">Result</th>
+              <th style="width:140px;">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for sect_idx, sect in sections | enumerate %}
+            <tr class="section-hdr">
+              <td colspan="7">{{ sect.name }}</td>
+            </tr>
+            {% set prev_part = namespace(v='') %}
+            {% for q_idx, q in sect.questions | enumerate %}
+            {% set key = sect_idx|string + '_' + q_idx|string %}
+            <tr>
+              <td style="font-size:.78rem; font-weight:600; color:#374151;">
+                {% if q.part != prev_part.v %}
+                  {{ q.part }}
+                  {% set prev_part.v = q.part %}
+                {% endif %}
+              </td>
+              <td style="color:#9ca3af; font-size:.78rem;">{{ q.num }}</td>
+              <td class="guideline-text">{{ q.guideline }}</td>
+              <td class="condition-cell">{{ q.condition }}</td>
+              <td class="action-cell">{{ q.action }}</td>
+              <td>
+                <div class="pf-group">
+                  <input type="radio" class="pf-btn" name="ans_{{ key }}" id="p{{ key }}" value="Pass">
+                  <label class="pf-label pf-pass" for="p{{ key }}">✓</label>
+                  <input type="radio" class="pf-btn" name="ans_{{ key }}" id="f{{ key }}" value="Fail">
+                  <label class="pf-label pf-fail" for="f{{ key }}">✗</label>
+                  <input type="radio" class="pf-btn" name="ans_{{ key }}" id="n{{ key }}" value="N/A">
+                  <label class="pf-label pf-na" for="n{{ key }}">N/A</label>
+                </div>
+              </td>
+              <td>
+                <input type="text" name="note_{{ key }}"
+                       style="width:100%; font-size:.78rem; padding:4px 8px;"
+                       placeholder="Optional notes">
+              </td>
+            </tr>
+            {% endfor %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Overall result -->
+      <div style="display:grid; grid-template-columns:auto 1fr; gap:0 20px; align-items:start;">
+        <div class="form-group">
+          <label>Overall Result *</label>
+          <div style="display:flex; gap:10px; margin-top:6px;">
+            {% for res in ['Pass','Fail','Conditional Pass'] %}
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:.875rem; font-weight:600;">
+              <input type="radio" name="overall" value="{{ res }}" required>
+              <span style="color:{% if res=='Pass' %}#059669{% elif res=='Fail' %}#dc2626{% else %}#d97706{% endif %};">
+                {{ res }}
+              </span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Summary / Notes</label>
+          <textarea name="summary" rows="2"
+                    placeholder="Overall observations, recommended actions, or follow-up items..."></textarea>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:8px;">
+        <button type="submit" class="btn btn-success" style="padding:10px 24px;">
+          &#10003; Submit Inspection
+        </button>
+        <a href="{{ url_for('inspect_form', job_key=job.job_key) }}" class="btn btn-outline">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <!-- Past responses -->
+  {% if past_responses %}
+  <div class="card">
+    <div class="card-title">Past Inspection Reports ({{ past_responses|length }})</div>
+    {% for resp in past_responses %}
+    {% set ans = resp.answers | tojson | safe %}
+    <div class="past-resp">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <span class="result-{{ resp.overall or 'Other' }}" style="font-size:.95rem;">
+            {% if resp.overall == 'Pass' %}✅{% elif resp.overall == 'Fail' %}❌{% else %}⚠️{% endif %}
+            {{ resp.overall or '—' }}
+          </span>
+          <span style="font-size:.82rem; color:#374151; margin-left:10px;">
+            {{ resp.inspector or '—' }} &nbsp;|&nbsp; {{ resp.insp_date or '—' }}
+          </span>
+          {% if resp.dpl_number %}
+          <span style="font-size:.78rem; color:#9ca3af; margin-left:8px;">DPL: {{ resp.dpl_number }}</span>
+          {% endif %}
+        </div>
+        <span style="font-size:.72rem; color:#9ca3af;">{{ resp.submitted_at[:16] }}</span>
+      </div>
+      {% if resp.summary %}
+      <div style="margin-top:6px; font-size:.82rem; color:#374151;">{{ resp.summary }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+</div>
+{% endblock %}

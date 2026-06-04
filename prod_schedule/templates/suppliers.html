@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}供应商档案{% endblock %}
+
+{% block extra_style %}
+.mgmt-table { width:100%; border-collapse:collapse; font-size:.875rem; }
+.mgmt-table th { background:#f8fafc; font-weight:600; text-align:left; padding:10px 12px;
+                 border-bottom:2px solid #e2e8f0; font-size:.75rem;
+                 text-transform:uppercase; letter-spacing:.04em; color:#6b7280; }
+.mgmt-table td { padding:10px 12px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+.mgmt-table tbody tr:hover td { background:#f8fafc; }
+.action-btns { display:flex; gap:6px; }
+.btn-edit   { background:#e0f2fe; color:#0369a1; border:none; }
+.btn-edit:hover { background:#bae6fd; }
+.btn-del    { background:#fee2e2; color:#991b1b; border:none; }
+.btn-del:hover  { background:#fecaca; }
+.empty-state { text-align:center; padding:40px; color:#9ca3af; font-size:.9rem; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1100px; margin:0 auto;">
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;"><span class="lt" data-en="Supplier Directory" data-zh="供应商档案">Supplier Directory</span></h1>
+    <div style="display:flex; gap:8px;">
+      <form method="POST" action="{{ url_for('suppliers_import') }}">
+        <button type="submit" class="btn btn-outline" title="从当周排期提取供应商代码自动建档">
+          &#8659; <span class="lt" data-en="Import from Schedule" data-zh="从排期导入">Import from Schedule</span>
+        </button>
+      </form>
+      <a href="{{ url_for('supplier_new') }}" class="btn btn-primary">+ <span class="lt" data-en="New Supplier" data-zh="新增供应商">New Supplier</span></a>
+    </div>
+  </div>
+
+  <div class="card">
+    {% if suppliers %}
+    <div style="overflow-x:auto;">
+      <table class="mgmt-table">
+        <thead>
+          <tr>
+            <th><span class="lt" data-en="Supplier Name" data-zh="供应商名称">Supplier Name</span></th>
+            <th><span class="lt" data-en="Contact" data-zh="联系人">Contact</span></th>
+            <th><span class="lt" data-en="Phone" data-zh="电话">Phone</span></th>
+            <th><span class="lt" data-en="Email" data-zh="邮箱">Email</span></th>
+            <th><span class="lt" data-en="Address" data-zh="地址">Address</span></th>
+            <th><span class="lt" data-en="Country" data-zh="国家/地区">Country</span></th>
+            <th><span class="lt" data-en="Notes" data-zh="备注">Notes</span></th>
+            <th><span class="lt" data-en="Actions" data-zh="操作">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in suppliers %}
+          <tr>
+            <td><strong>{{ s.name }}</strong></td>
+            <td>{{ s.contact_person or '—' }}</td>
+            <td>{{ s.phone or '—' }}</td>
+            <td>{{ s.email or '—' }}</td>
+            <td style="max-width:200px;">{{ s.address or '—' }}</td>
+            <td>{{ s.country }}</td>
+            <td style="max-width:160px; color:#6b7280; font-size:.82rem;">{{ s.notes or '—' }}</td>
+            <td>
+              <div class="action-btns">
+                <a href="{{ url_for('supplier_edit', sid=s.id) }}" class="btn btn-sm btn-edit">编辑</a>
+                <form method="POST" action="{{ url_for('supplier_delete', sid=s.id) }}"
+                      onsubmit="return confirm('确认删除「{{ s.name }}」？')">
+                  <button type="submit" class="btn btn-sm btn-del">删除</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      暂无供应商数据<br>
+      <a href="{{ url_for('supplier_new') }}" style="margin-top:8px; display:inline-block;">点击新增供应商</a>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}{{ article.title }}{% endblock %}
+
+{% block extra_style %}
+.article-body { font-size:.9rem; line-height:1.8; color:#374151; white-space:pre-wrap; }
+
+/* Photo gallery */
+.photo-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+              gap:10px; margin-top:16px; }
+.photo-item { position:relative; border-radius:8px; overflow:hidden;
+              background:#f3f4f6; cursor:pointer; }
+.photo-item img { width:100%; height:180px; object-fit:cover; display:block;
+                  transition:transform .2s; }
+.photo-item:hover img { transform:scale(1.03); }
+.photo-item .photo-num { position:absolute; top:6px; left:6px; background:rgba(0,0,0,.55);
+                         color:#fff; border-radius:4px; padding:1px 7px;
+                         font-size:.72rem; font-weight:600; }
+
+/* Lightbox */
+.lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,.88);
+            z-index:2000; align-items:center; justify-content:center; }
+.lightbox.open { display:flex; }
+.lightbox img { max-width:90vw; max-height:88vh; border-radius:8px;
+                box-shadow:0 8px 40px rgba(0,0,0,.6); }
+.lightbox-close { position:absolute; top:16px; right:22px; color:#fff;
+                  font-size:2rem; cursor:pointer; line-height:1; }
+.lightbox-nav { position:absolute; top:50%; transform:translateY(-50%);
+                color:#fff; font-size:2.5rem; cursor:pointer; user-select:none;
+                background:rgba(0,0,0,.4); border-radius:50%; width:48px; height:48px;
+                display:flex; align-items:center; justify-content:center; }
+.lightbox-nav.prev { left:16px; }
+.lightbox-nav.next { right:16px; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:900px; margin:0 auto;">
+
+  <div style="margin-bottom:16px; display:flex; gap:12px; align-items:center;">
+    <a href="{{ url_for('knowledge') }}" style="font-size:.85rem; color:#6b7280;">&#8592; 返回知识库</a>
+    <a href="{{ url_for('kb_article_edit', aid=article.id) }}" class="btn btn-sm btn-outline" style="margin-left:auto;">编辑</a>
+    <form method="POST" action="{{ url_for('kb_article_delete', aid=article.id) }}"
+          onsubmit="return confirm('确认删除此文章？')">
+      <button type="submit" class="btn btn-sm"
+              style="background:#fee2e2;color:#991b1b;border:none;">删除</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div style="margin-bottom:12px;">
+      {% if article.tags %}
+        {% for tag in article.tags.split(',') %}
+        <span style="background:#e0f2fe;color:#0369a1;border-radius:4px;padding:1px 8px;font-size:.75rem;font-weight:600;margin-right:4px;">
+          {{ tag.strip() }}</span>
+        {% endfor %}
+      {% endif %}
+      {% if article.cat_name %}
+      <span style="font-size:.78rem; color:#9ca3af; margin-left:4px;">{{ article.cat_name }}</span>
+      {% endif %}
+    </div>
+
+    <h1 style="font-size:1.3rem; font-weight:700; color:#1a3a5c; margin-bottom:16px;">
+      {{ article.title }}
+    </h1>
+
+    <div class="article-body">{{ article.content }}</div>
+
+    <!-- Photo gallery -->
+    {% if images %}
+    <div style="margin-top:20px; padding-top:16px; border-top:1px solid #f0f0f0;">
+      <div style="font-size:.82rem; font-weight:600; color:#374151; margin-bottom:10px;">
+        &#128247; 缺陷照片（{{ images|length }} 张）
+        <span style="font-weight:400; color:#9ca3af;">— 点击查看大图</span>
+      </div>
+      <div class="photo-grid">
+        {% for img_path in images %}
+        <div class="photo-item" onclick="openLightbox({{ loop.index0 }})">
+          <img src="/static/kb_images/{{ img_path }}" alt="缺陷照片 {{ loop.index }}"
+               loading="lazy">
+          <span class="photo-num">{{ loop.index }} / {{ images|length }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div style="margin-top:16px; font-size:.75rem; color:#9ca3af; border-top:1px solid #f0f0f0; padding-top:10px;">
+      最后更新: {{ article.updated_at[:16] if article.updated_at else article.created_at[:16] }}
+    </div>
+  </div>
+
+  <!-- Lightbox -->
+  {% if images %}
+  <div class="lightbox" id="lightbox" onclick="if(event.target===this)closeLightbox()">
+    <span class="lightbox-close" onclick="closeLightbox()">&times;</span>
+    <span class="lightbox-nav prev" onclick="navLightbox(-1)">&#8249;</span>
+    <img id="lb-img" src="" alt="">
+    <span class="lightbox-nav next" onclick="navLightbox(1)">&#8250;</span>
+  </div>
+  <script>
+  const imgs = [{% for p in images %}"/static/kb_images/{{ p }}"{% if not loop.last %},{% endif %}{% endfor %}];
+  let cur = 0;
+  function openLightbox(i) {
+    cur = i; document.getElementById('lb-img').src = imgs[i];
+    document.getElementById('lightbox').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  function navLightbox(d) {
+    cur = (cur + d + imgs.length) % imgs.length;
+    document.getElementById('lb-img').src = imgs[cur];
+  }
+  document.addEventListener('keydown', e => {
+    if (!document.getElementById('lightbox').classList.contains('open')) return;
+    if (e.key === 'ArrowRight') navLightbox(1);
+    if (e.key === 'ArrowLeft')  navLightbox(-1);
+    if (e.key === 'Escape')     closeLightbox();
+  });
+  </script>
+  {% endif %}
+
+  {% if related_qs %}
+  <div class="card">
+    <div class="card-title">&#128218; 相关题目（{{ related_qs|length }} 题）</div>
+    {% for q in related_qs %}
+    <div style="padding:10px 0; border-bottom:1px solid #f1f5f9;">
+      <div style="font-size:.85rem; font-weight:500; margin-bottom:6px;">{{ loop.index }}. {{ q.question }}</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:.8rem; color:#6b7280;">
+        <span>A. {{ q.option_a }}</span><span>B. {{ q.option_b }}</span>
+        <span>C. {{ q.option_c }}</span><span>D. {{ q.option_d }}</span>
+      </div>
+      <div style="margin-top:6px; font-size:.78rem;">
+        <span style="background:#d1fae5;color:#065f46;padding:1px 8px;border-radius:4px;font-weight:600;">
+          答案: {{ q.answer }}</span>
+        {% if q.explanation %}
+        <span style="color:#6b7280; margin-left:8px;">{{ q.explanation }}</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+</div>
+{% endblock %}

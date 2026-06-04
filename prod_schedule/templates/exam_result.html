@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}考试结果{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:720px; margin:0 auto;">
+
+  <!-- Result banner -->
+  <div style="background:{{ '#d1fae5' if passed else '#fee2e2' }};
+              border:2px solid {{ '#10b981' if passed else '#ef4444' }};
+              border-radius:12px; padding:24px; text-align:center; margin-bottom:20px;">
+    <div style="font-size:3rem; margin-bottom:8px;">
+      {{ '🎉' if passed else '📝' }}
+    </div>
+    <div style="font-size:2rem; font-weight:700;
+                color:{{ '#065f46' if passed else '#991b1b' }};">
+      {{ score }}%
+    </div>
+    <div style="font-size:1rem; font-weight:600; margin-top:6px;
+                color:{{ '#065f46' if passed else '#991b1b' }};">
+      {{ '通过' if passed else '未通过' }} — 答对 {{ correct }} / {{ total }} 题
+    </div>
+    <div style="font-size:.85rem; color:#6b7280; margin-top:6px;">
+      及格线: {{ plan.pass_score }}%
+      &nbsp;|&nbsp; 试卷: {{ plan.exam_title }}
+    </div>
+  </div>
+
+  <!-- Question review -->
+  <div class="card">
+    <div class="card-title">答题详情</div>
+    {% for q in questions %}
+    {% set my_ans = answers.get(q.id|string, '') %}
+    {% set is_correct = my_ans == q.answer %}
+    <div style="padding:12px 0; border-bottom:1px solid #f1f5f9;">
+      <div style="display:flex; gap:10px; align-items:flex-start; margin-bottom:8px;">
+        <span style="font-size:1rem; flex-shrink:0;">{{ '✅' if is_correct else '❌' }}</span>
+        <div style="font-size:.875rem; font-weight:500; line-height:1.5;">{{ loop.index }}. {{ q.question }}</div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px;
+                  font-size:.8rem; margin-left:26px;">
+        {% for letter, text in [('A',q.option_a),('B',q.option_b),('C',q.option_c),('D',q.option_d)] %}
+        {% if text %}
+        <span style="padding:4px 8px; border-radius:5px;
+                     background:{% if letter==q.answer %}#d1fae5{% elif letter==my_ans and not is_correct %}#fee2e2{% else %}transparent{% endif %};
+                     color:{% if letter==q.answer %}#065f46{% elif letter==my_ans and not is_correct %}#991b1b{% else %}#374151{% endif %};
+                     font-weight:{% if letter==q.answer or letter==my_ans %}600{% else %}400{% endif %};">
+          {{ letter }}. {{ text }}
+          {% if letter == q.answer %} ✓{% endif %}
+          {% if letter == my_ans and not is_correct %} ← 你的答案{% endif %}
+        </span>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% if q.explanation %}
+      <div style="margin-left:26px; margin-top:6px; font-size:.78rem; color:#6b7280;">
+        解析: {{ q.explanation }}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div style="display:flex; gap:12px; justify-content:center; margin-top:16px;">
+    <a href="{{ url_for('training_plan', pid=plan.id) }}" class="btn btn-primary">返回培训计划</a>
+    <a href="{{ url_for('exam_take', pid=plan.id) }}" class="btn btn-outline">重新答题</a>
+  </div>
+
+</div>
+</div>
+{% endblock %}

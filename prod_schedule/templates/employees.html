@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}员工档案{% endblock %}
+
+{% block extra_style %}
+.mgmt-table { width:100%; border-collapse:collapse; font-size:.875rem; }
+.mgmt-table th { background:#f8fafc; font-weight:600; text-align:left; padding:10px 12px;
+                 border-bottom:2px solid #e2e8f0; font-size:.75rem;
+                 text-transform:uppercase; letter-spacing:.04em; color:#6b7280; }
+.mgmt-table td { padding:10px 12px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.mgmt-table tbody tr:hover td { background:#f8fafc; }
+.action-btns { display:flex; gap:6px; }
+.btn-edit { background:#e0f2fe; color:#0369a1; border:none; }
+.btn-edit:hover { background:#bae6fd; }
+.btn-del  { background:#fee2e2; color:#991b1b; border:none; }
+.btn-del:hover  { background:#fecaca; }
+.active-dot   { display:inline-block; width:8px; height:8px; border-radius:50%;
+                background:#10b981; margin-right:6px; }
+.inactive-dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+                background:#d1d5db; margin-right:6px; }
+.stationed-yes { background:#d1fae5; color:#065f46; padding:2px 8px; border-radius:10px;
+                 font-size:.72rem; font-weight:600; }
+.stationed-no  { background:#f3f4f6; color:#6b7280; padding:2px 8px; border-radius:10px;
+                 font-size:.72rem; font-weight:600; }
+.table-scroll { overflow-x:auto; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1100px; margin:0 auto;">
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">员工花名册</h1>
+    <a href="{{ url_for('employee_new') }}" class="btn btn-primary">+ 新增员工</a>
+  </div>
+
+  <div class="card" style="padding:0;">
+    {% if employees %}
+    <div class="table-scroll">
+    <table class="mgmt-table">
+      <thead>
+        <tr>
+          <th>姓名</th>
+          <th>性别</th>
+          <th>所属部门</th>
+          <th>手机号</th>
+          <th>职位</th>
+          <th>驻厂状态</th>
+          <th>驻厂地点</th>
+          <th>邮箱</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in employees %}
+        <tr>
+          <td><strong>{{ e.name }}</strong></td>
+          <td>{{ e.gender or '—' }}</td>
+          <td>{{ e.department or '—' }}</td>
+          <td>{{ e.mobile or e.phone or '—' }}</td>
+          <td>{{ e.role or '—' }}</td>
+          <td>
+            {% if e.is_stationed %}
+              <span class="stationed-yes">驻厂</span>
+            {% else %}
+              <span class="stationed-no">非驻厂</span>
+            {% endif %}
+          </td>
+          <td>{{ e.stationed_at or '—' }}</td>
+          <td>
+            {% if e.email %}
+              <a href="mailto:{{ e.email }}" style="font-size:.82rem;">{{ e.email }}</a>
+            {% else %}
+              <span style="color:#9ca3af; font-size:.82rem;">未设置</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if e.active %}
+              <span class="active-dot"></span><span style="font-size:.82rem;color:#059669;">在职</span>
+            {% else %}
+              <span class="inactive-dot"></span><span style="font-size:.82rem;color:#9ca3af;">停用</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="action-btns">
+              <a href="{{ url_for('employee_edit', eid=e.id) }}" class="btn btn-sm btn-edit">编辑</a>
+              <form method="POST" action="{{ url_for('employee_delete', eid=e.id) }}"
+                    onsubmit="return confirm('确认删除员工「{{ e.name }}」？')">
+                <button type="submit" class="btn btn-sm btn-del">删除</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div style="text-align:center; padding:40px; color:#9ca3af; font-size:.9rem;">
+      暂无员工，请点击「新增员工」添加
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+</div>
+{% endblock %}

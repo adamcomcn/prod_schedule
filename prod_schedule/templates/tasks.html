@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+{% block title %}检验任务{% endblock %}
+
+{% block extra_style %}
+/* ── urgency dots ── */
+.urgency-dot { width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0; }
+.urg-overdue { background:#dc2626; }
+.urg-urgent  { background:#f97316; }
+.urg-soon    { background:#f59e0b; }
+.urg-ok      { background:#10b981; }
+.urg-done    { background:#9ca3af; }
+
+/* ── task table ── */
+.task-table { width:100%; border-collapse:collapse; font-size:.85rem; }
+.task-table th { background:#f8fafc; font-weight:600; text-align:left; padding:10px 12px;
+                 border-bottom:2px solid #e2e8f0; font-size:.73rem;
+                 text-transform:uppercase; letter-spacing:.04em; color:#6b7280; }
+.task-table td { padding:9px 12px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.task-table tr.overdue td { background:#fff5f5; }
+.task-table tr.urgent  td { background:#fff8f0; }
+.task-table tbody tr:hover td { filter:brightness(.97); }
+.status-sel { font-size:.78rem; border:1px solid #d0d5dd; border-radius:6px;
+              padding:4px 8px; background:#fff; cursor:pointer; }
+.days-badge { display:inline-block; padding:2px 8px; border-radius:10px;
+              font-size:.75rem; font-weight:700; white-space:nowrap; }
+.days-overdue { background:#fee2e2; color:#991b1b; }
+.days-urgent  { background:#ffedd5; color:#c2410c; }
+.days-soon    { background:#fef3c7; color:#92400e; }
+.days-ok      { background:#d1fae5; color:#065f46; }
+.days-none    { background:#f3f4f6; color:#9ca3af; }
+.filter-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+.filter-bar a { padding:5px 14px; border-radius:20px; font-size:.8rem; font-weight:500;
+                border:1px solid #d0d5dd; color:#374151; text-decoration:none !important; }
+.filter-bar a.active { background:#1a3a5c; color:#fff; border-color:#1a3a5c; }
+.filter-bar a:hover:not(.active) { background:#f3f4f6; }
+
+/* ── stat cards grid ── */
+.stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+@media(max-width:860px){ .stat-grid { grid-template-columns:1fr; } }
+.stat-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px;
+             padding:18px 20px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+.stat-card-title { font-size:.72rem; font-weight:700; text-transform:uppercase;
+                   letter-spacing:.06em; color:#9ca3af; margin-bottom:14px; }
+
+/* ── status donut row ── */
+.status-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.status-label { font-size:.8rem; color:#374151; width:90px; flex-shrink:0; }
+.status-bar-wrap { flex:1; background:#f3f4f6; border-radius:4px; height:8px; overflow:hidden; }
+.status-bar { height:100%; border-radius:4px; }
+.status-count { font-size:.78rem; font-weight:700; color:#374151; width:30px;
+                text-align:right; flex-shrink:0; }
+
+/* ── horizontal bar (region / supplier) ── */
+.hbar-row { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+.hbar-label { font-size:.78rem; color:#374151; width:110px; flex-shrink:0;
+              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hbar-wrap  { flex:1; background:#f3f4f6; border-radius:4px; height:14px; position:relative; overflow:hidden; }
+.hbar-fill  { height:100%; border-radius:4px; }
+.hbar-text  { position:absolute; right:6px; top:50%; transform:translateY(-50%);
+              font-size:.68rem; font-weight:700; color:#fff; }
+.hbar-sub   { font-size:.7rem; color:#9ca3af; flex-shrink:0; width:80px; text-align:right; }
+
+/* ── urgency tiles ── */
+.urg-tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+.urg-tile  { border-radius:8px; padding:12px 10px; text-align:center; }
+.urg-tile .big  { font-size:1.6rem; font-weight:800; line-height:1; }
+.urg-tile .lbl  { font-size:.7rem; margin-top:4px; font-weight:500; opacity:.85; }
+.urg-tile-red    { background:#fee2e2; color:#991b1b; }
+.urg-tile-orange { background:#ffedd5; color:#c2410c; }
+.urg-tile-yellow { background:#fef3c7; color:#92400e; }
+.urg-tile-green  { background:#d1fae5; color:#065f46; }
+
+/* ── pass/fail strip ── */
+.pf-strip { height:18px; border-radius:6px; overflow:hidden; display:flex; margin-bottom:8px; }
+.pf-pass  { background:#10b981; }
+.pf-fail  { background:#ef4444; }
+
+/* ── summary chips (top bar) ── */
+.summary-chips { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; }
+.chip { display:flex; align-items:center; gap:6px; padding:8px 16px; border-radius:8px;
+        font-size:.82rem; font-weight:600; }
+.chip-red    { background:#fee2e2; color:#991b1b; }
+.chip-orange { background:#ffedd5; color:#c2410c; }
+.chip-green  { background:#d1fae5; color:#065f46; }
+.chip-grey   { background:#f3f4f6; color:#6b7280; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1300px; margin:0 auto;">
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">
+      <span class="lt" data-en="Inspection Task Tracker" data-zh="检验任务跟踪">Inspection Task Tracker</span>
+    </h1>
+    <span style="font-size:.8rem; color:#9ca3af;">
+      <span class="lt" data-en="Today:" data-zh="今日：">Today:</span> {{ today }}
+    </span>
+  </div>
+
+  {# ══════════════ STATS SECTION ══════════════ #}
+  {% if stats.total > 0 %}
+
+  {# ── Row 1: Status overview + Urgency ── #}
+  <div class="stat-grid">
+
+    {# Status Overview #}
+    <div class="stat-card">
+      <div class="stat-card-title">
+        <span class="lt" data-en="Task Status Overview" data-zh="任务状态分布">Task Status Overview</span>
+        <span style="float:right; font-size:.85rem; color:#374151; text-transform:none; letter-spacing:0;">
+          <strong>{{ stats.total }}</strong>
+          <span class="lt" data-en=" total" data-zh=" 条"> total</span>
+        </span>
+      </div>
+
+      {% set status_list = [
+        ('Pending',     stats.status_counts.get('Pending',0),     '#6b7280', '待处理'),
+        ('In Progress', stats.status_counts.get('In Progress',0), '#3b82f6', '进行中'),
+        ('Completed',   stats.status_counts.get('Completed',0),   '#10b981', '已完成'),
+        ('On Hold',     stats.status_counts.get('On Hold',0),     '#f59e0b', '暂停'),
+      ] %}
+      {% for label, cnt, color, zh in status_list %}
+      {% set pct = (cnt / stats.total * 100) | round(1) if stats.total else 0 %}
+      <div class="status-row">
+        <div class="status-label">
+          <span class="lt" data-en="{{ label }}" data-zh="{{ zh }}">{{ label }}</span>
+        </div>
+        <div class="status-bar-wrap">
+          <div class="status-bar" style="width:{{ pct }}%; background:{{ color }};"></div>
+        </div>
+        <div class="status-count">{{ cnt }}</div>
+        <div style="font-size:.72rem; color:#9ca3af; width:38px; text-align:right; flex-shrink:0;">
+          {{ pct }}%
+        </div>
+      </div>
+      {% endfor %}
+
+      {% set done_pct = (stats.status_counts.get('Completed',0) / stats.total * 100) | round(1) if stats.total else 0 %}
+      <div style="margin-top:14px; padding-top:12px; border-top:1px solid #f1f5f9;
+                  display:flex; align-items:center; gap:12px;">
+        <div style="font-size:.78rem; color:#6b7280;">
+          <span class="lt" data-en="Overall completion rate:" data-zh="整体完成率：">Overall completion rate:</span>
+        </div>
+        <div style="flex:1; background:#f3f4f6; border-radius:6px; height:10px; overflow:hidden;">
+          <div style="width:{{ done_pct }}%; height:100%; background:#10b981; border-radius:6px;"></div>
+        </div>
+        <div style="font-size:.85rem; font-weight:800; color:#10b981;">{{ done_pct }}%</div>
+      </div>
+    </div>
+
+    {# Urgency Distribution #}
+    <div class="stat-card">
+      <div class="stat-card-title">
+        <span class="lt" data-en="Urgency Distribution (Open Tasks)" data-zh="紧迫程度（未完成任务）">Urgency Distribution (Open Tasks)</span>
+      </div>
+      <div class="urg-tiles">
+        <div class="urg-tile urg-tile-red">
+          <div class="big">{{ stats.urg.get('overdue',0) }}</div>
+          <div class="lbl"><span class="lt" data-en="Overdue" data-zh="已逾期">Overdue</span></div>
+        </div>
+        <div class="urg-tile urg-tile-orange">
+          <div class="big">{{ stats.urg.get('week',0) }}</div>
+          <div class="lbl"><span class="lt" data-en="Due ≤7d" data-zh="7天内到期">Due ≤7d</span></div>
+        </div>
+        <div class="urg-tile urg-tile-yellow">
+          <div class="big">{{ stats.urg.get('fortnight',0) }}</div>
+          <div class="lbl"><span class="lt" data-en="Due ≤14d" data-zh="14天内到期">Due ≤14d</span></div>
+        </div>
+        <div class="urg-tile urg-tile-green">
+          <div class="big">{{ stats.urg.get('ok',0) }}</div>
+          <div class="lbl"><span class="lt" data-en="On Track" data-zh="充裕">On Track</span></div>
+        </div>
+      </div>
+
+      {% set no_date = stats.urg.get('no_date',0) %}
+      {% if no_date > 0 %}
+      <div style="margin-top:12px; font-size:.75rem; color:#9ca3af;">
+        ⚠ {{ no_date }}
+        <span class="lt" data-en=" tasks have no estimated completion date set"
+              data-zh=" 条任务未设置预计完工日期"> tasks have no estimated completion date set</span>
+      </div>
+      {% endif %}
+
+      {# Completion vs overdue summary #}
+      {% set open_total = stats.total - stats.status_counts.get('Completed',0) %}
+      {% if open_total > 0 %}
+      <div style="margin-top:14px; padding-top:12px; border-top:1px solid #f1f5f9;
+                  display:flex; justify-content:space-around; text-align:center;">
+        <div>
+          <div style="font-size:1.3rem; font-weight:800; color:#1a3a5c;">{{ open_total }}</div>
+          <div style="font-size:.7rem; color:#9ca3af; margin-top:2px;">
+            <span class="lt" data-en="Open Tasks" data-zh="未完成">Open Tasks</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:1.3rem; font-weight:800; color:#dc2626;">{{ stats.urg.get('overdue',0) }}</div>
+          <div style="font-size:.7rem; color:#9ca3af; margin-top:2px;">
+            <span class="lt" data-en="Overdue" data-zh="已逾期">Overdue</span>
+          </div>
+        </div>
+        <div>
+          {% set overdue_rate = (stats.urg.get('overdue',0) / open_total * 100) | round(1) if open_total else 0 %}
+          <div style="font-size:1.3rem; font-weight:800;
+                      color:{{ '#dc2626' if overdue_rate > 30 else '#f97316' if overdue_rate > 10 else '#10b981' }};">
+            {{ overdue_rate }}%
+          </div>
+          <div style="font-size:.7rem; color:#9ca3af; margin-top:2px;">
+            <span class="lt" data-en="Overdue Rate" data-zh="逾期率">Overdue Rate</span>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Row 2: By Region + By Supplier ── #}
+  <div class="stat-grid">
+
+    {# By Region #}
+    <div class="stat-card">
+      <div class="stat-card-title">
+        <span class="lt" data-en="Tasks by Region" data-zh="按地区">Tasks by Region</span>
+      </div>
+      {% if stats.region_stats %}
+        {% for region, rv in stats.region_stats %}
+        {% set pct = (rv['total'] / stats.max_region * 100) | round(1) %}
+        <div class="hbar-row">
+          <div class="hbar-label" title="{{ region }}">{{ region }}</div>
+          <div class="hbar-wrap">
+            <div class="hbar-fill" style="width:{{ pct }}%; background:#3b82f6;"></div>
+            <span class="hbar-text">{{ rv['total'] }}</span>
+          </div>
+          <div class="hbar-sub" style="text-align:right; font-size:.7rem; color:#6b7280;">
+            {% if rv['completed'] > 0 %}
+              <span style="color:#10b981;">✓{{ rv['completed'] }}</span>
+            {% endif %}
+            {% if rv['overdue'] > 0 %}
+              &nbsp;<span style="color:#dc2626;">⚠{{ rv['overdue'] }}</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div style="color:#9ca3af; font-size:.82rem; text-align:center; padding:20px 0;">
+          <span class="lt" data-en="No data" data-zh="暂无数据">No data</span>
+        </div>
+      {% endif %}
+    </div>
+
+    {# By Supplier (outstanding) #}
+    <div class="stat-card">
+      <div class="stat-card-title">
+        <span class="lt" data-en="Outstanding Tasks by Supplier (Top 8)" data-zh="未完成任务 — 按供应商（前8）">Outstanding Tasks by Supplier (Top 8)</span>
+      </div>
+      {% if stats.top_suppliers %}
+        {% for sup, sv in stats.top_suppliers %}
+        {% if sv['outstanding'] > 0 %}
+        {% set pct = (sv['outstanding'] / stats.max_sup * 100) | round(1) %}
+        <div class="hbar-row">
+          <div class="hbar-label" title="{{ sup }}">{{ sup }}</div>
+          <div class="hbar-wrap">
+            <div class="hbar-fill" style="width:{{ pct }}%; background:#f97316;"></div>
+            <span class="hbar-text">{{ sv['outstanding'] }}</span>
+          </div>
+          <div class="hbar-sub" style="text-align:right; font-size:.7rem; color:#6b7280;">
+            {% if sv['completed'] > 0 %}
+              <span style="color:#10b981;">✓{{ sv['completed'] }}</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+      {% else %}
+        <div style="color:#9ca3af; font-size:.82rem; text-align:center; padding:20px 0;">
+          <span class="lt" data-en="No outstanding tasks" data-zh="暂无未完成任务">No outstanding tasks</span>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Row 3: Inspection Results (if any) ── #}
+  {% set pf_total = stats.pass_ct + stats.fail_ct %}
+  {% if pf_total > 0 %}
+  <div class="stat-card" style="margin-bottom:20px;">
+    <div class="stat-card-title">
+      <span class="lt" data-en="Inspection Results (all time)" data-zh="检验结果汇总（全部）">Inspection Results (all time)</span>
+      <span style="float:right; font-size:.85rem; color:#374151; text-transform:none; letter-spacing:0;">
+        {{ pf_total }} <span class="lt" data-en=" reports" data-zh=" 份报告"> reports</span>
+      </span>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; align-items:center;">
+      <div style="text-align:center;">
+        <div style="font-size:2rem; font-weight:800; color:#10b981;">{{ stats.pass_ct }}</div>
+        <div style="font-size:.75rem; color:#6b7280; margin-top:2px;">
+          <span class="lt" data-en="Pass" data-zh="通过">Pass</span>
+        </div>
+      </div>
+      <div>
+        <div class="pf-strip">
+          <div class="pf-pass" style="width:{{ (stats.pass_ct / pf_total * 100) | round(1) }}%;"></div>
+          <div class="pf-fail" style="width:{{ (stats.fail_ct / pf_total * 100) | round(1) }}%;"></div>
+        </div>
+        {% set pass_rate = (stats.pass_ct / pf_total * 100) | round(1) %}
+        <div style="text-align:center; font-size:.78rem; color:#6b7280; margin-top:4px;">
+          <span style="color:#10b981; font-weight:700;">{{ pass_rate }}% pass rate</span>
+        </div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:2rem; font-weight:800; color:#ef4444;">{{ stats.fail_ct }}</div>
+        <div style="font-size:.75rem; color:#6b7280; margin-top:2px;">
+          <span class="lt" data-en="Fail" data-zh="不通过">Fail</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% endif %}{# end stats.total > 0 #}
+
+  {# ══════════════ FILTER BAR ══════════════ #}
+  <div class="filter-bar">
+    <span style="font-size:.8rem; color:#6b7280;">
+      <span class="lt" data-en="Filter:" data-zh="筛选：">Filter:</span>
+    </span>
+    <a href="{{ url_for('tasks') }}"                       class="{{ 'active' if not status_filter }}">
+      <span class="lt" data-en="All" data-zh="全部">All</span>
+      <span style="margin-left:4px; opacity:.6;">({{ stats.total if stats else 0 }})</span>
+    </a>
+    <a href="{{ url_for('tasks', status='Pending') }}"     class="{{ 'active' if status_filter=='Pending' }}">
+      <span class="lt" data-en="Pending" data-zh="待处理">Pending</span>
+      <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('Pending',0) if stats else 0 }})</span>
+    </a>
+    <a href="{{ url_for('tasks', status='In Progress') }}" class="{{ 'active' if status_filter=='In Progress' }}">
+      <span class="lt" data-en="In Progress" data-zh="进行中">In Progress</span>
+      <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('In Progress',0) if stats else 0 }})</span>
+    </a>
+    <a href="{{ url_for('tasks', status='Completed') }}"   class="{{ 'active' if status_filter=='Completed' }}">
+      <span class="lt" data-en="Completed" data-zh="已完成">Completed</span>
+      <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('Completed',0) if stats else 0 }})</span>
+    </a>
+    <a href="{{ url_for('tasks', status='On Hold') }}"     class="{{ 'active' if status_filter=='On Hold' }}">
+      <span class="lt" data-en="On Hold" data-zh="暂停">On Hold</span>
+      <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('On Hold',0) if stats else 0 }})</span>
+    </a>
+  </div>
+
+  {# ══════════════ TASK TABLE ══════════════ #}
+  <div class="card" style="padding:0; overflow:hidden;">
+    {% if tasks %}
+    <div style="overflow-x:auto;">
+      <table class="task-table">
+        <thead>
+          <tr>
+            <th style="width:12px;"></th>
+            <th><span class="lt" data-en="Region"          data-zh="区域">Region</span></th>
+            <th><span class="lt" data-en="Order No."       data-zh="订单号">Order No.</span></th>
+            <th><span class="lt" data-en="Item Code"       data-zh="产品编码">Item Code</span></th>
+            <th><span class="lt" data-en="Description"     data-zh="描述">Description</span></th>
+            <th><span class="lt" data-en="Qty"             data-zh="数量">Qty</span></th>
+            <th><span class="lt" data-en="Est. Completion" data-zh="预计完工">Est. Completion</span></th>
+            <th><span class="lt" data-en="Days Until Due"  data-zh="距今天数">Days Until Due</span></th>
+            <th><span class="lt" data-en="Inspection Result" data-zh="检验结果">Inspection Result</span></th>
+            <th><span class="lt" data-en="Task Status"     data-zh="任务状态">Task Status</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tasks %}
+          {% set insp_list = inspections.get(t.job_key, []) %}
+          {% set last_result = insp_list[-1].result if insp_list else '' %}
+
+          {% set est = (t.est_completion or '')[:10] %}
+          {% set today_str = today | string %}
+          {% if t.status == 'Completed' %}
+            {% set urg_cls = 'done' %}{% set row_cls = '' %}{% set days_label = '—' %}{% set days_cls = 'days-none' %}
+          {% elif not est %}
+            {% set urg_cls = 'ok' %}{% set row_cls = '' %}{% set days_label = '无截止日' %}{% set days_cls = 'days-none' %}
+          {% elif est < today_str %}
+            {% set urg_cls = 'overdue' %}{% set row_cls = 'overdue' %}
+            {% set days_label = '已逾期' %}{% set days_cls = 'days-overdue' %}
+          {% elif est <= today_str[:8] + '%02d'|format((today.day + 7)) %}
+            {% set urg_cls = 'urgent' %}{% set row_cls = 'urgent' %}
+            {% set days_label = est %}{% set days_cls = 'days-urgent' %}
+          {% elif est <= today_str[:8] + '%02d'|format((today.day + 14)) %}
+            {% set urg_cls = 'soon' %}{% set row_cls = '' %}
+            {% set days_label = est %}{% set days_cls = 'days-soon' %}
+          {% else %}
+            {% set urg_cls = 'ok' %}{% set row_cls = '' %}
+            {% set days_label = est %}{% set days_cls = 'days-ok' %}
+          {% endif %}
+
+          <tr class="{{ row_cls }}">
+            <td><span class="urgency-dot urg-{{ urg_cls }}"></span></td>
+            <td><strong>{{ t.region }}</strong></td>
+            <td>
+              <a href="{{ url_for('inspect_form', job_key=t.job_key) }}"
+                 style="font-weight:600;">{{ t.order_number }}</a>
+            </td>
+            <td><span style="font-family:monospace; background:#f3f4f6;
+                padding:2px 6px; border-radius:4px; font-size:.78rem;">
+                {{ t.item_code }}</span></td>
+            <td style="max-width:200px; font-size:.8rem; color:#374151;">
+              {{ t.description or '—' }}</td>
+            <td style="text-align:center;">{{ t.quantity or '—' }}</td>
+            <td style="font-size:.8rem; color:#6b7280; white-space:nowrap;">
+              {{ t.est_completion or '—' }}</td>
+            <td>
+              <span class="days-badge {{ days_cls }}">{{ days_label }}</span>
+            </td>
+            <td>
+              {% if last_result == 'Pass' %}
+                <span class="badge badge-new">&#10003; Pass</span>
+              {% elif last_result == 'Fail' %}
+                <span class="badge badge-not_shipped">&#10007; Fail</span>
+              {% elif last_result %}
+                <span class="badge badge-partially_shipped">~ {{ last_result }}</span>
+              {% elif insp_list %}
+                <span style="font-size:.75rem; color:#6b7280;">{{ insp_list|length }} report(s)</span>
+              {% else %}
+                <span style="font-size:.75rem; color:#9ca3af;">—</span>
+              {% endif %}
+            </td>
+            <td>
+              <form method="POST" action="{{ url_for('task_status_update', tid=t.id) }}"
+                    style="display:inline;">
+                <select name="status" class="status-sel"
+                        onchange="this.form.submit()"
+                        style="border-color: {% if t.status=='Completed' %}#10b981
+                               {% elif t.status=='In Progress' %}#3b82f6
+                               {% else %}#d0d5dd{% endif %};">
+                  {% for s in ['Pending','In Progress','Completed','On Hold'] %}
+                  <option {{ 'selected' if t.status == s }}>{{ s }}</option>
+                  {% endfor %}
+                </select>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="text-align:center; padding:50px; color:#9ca3af; font-size:.9rem;">
+      {% if status_filter %}
+        <span class="lt" data-en="No tasks with this status" data-zh="该状态下暂无任务">No tasks with this status</span>
+      {% else %}
+        暂无任务记录<br>
+        <span style="font-size:.8rem; margin-top:6px; display:block;">
+          上传新的生产排期后，系统会自动为新增订单创建检验任务
+        </span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div style="margin-top:12px; font-size:.78rem; color:#9ca3af; display:flex; gap:20px; flex-wrap:wrap;">
+    <span><span class="urgency-dot urg-overdue" style="vertical-align:middle;"></span> <span class="lt" data-en="Overdue" data-zh="已逾期">Overdue</span></span>
+    <span><span class="urgency-dot urg-urgent"  style="vertical-align:middle;"></span> <span class="lt" data-en="Due within 7 days" data-zh="7天内到期">Due within 7 days</span></span>
+    <span><span class="urgency-dot urg-soon"    style="vertical-align:middle;"></span> <span class="lt" data-en="Due within 14 days" data-zh="14天内到期">Due within 14 days</span></span>
+    <span><span class="urgency-dot urg-ok"      style="vertical-align:middle;"></span> <span class="lt" data-en="On track" data-zh="充裕">On track</span></span>
+    <span><span class="urgency-dot urg-done"    style="vertical-align:middle;"></span> <span class="lt" data-en="Completed" data-zh="已完成">Completed</span></span>
+  </div>
+
+</div>
+</div>
+{% endblock %}

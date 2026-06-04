@@ -1,0 +1,500 @@
+{% extends "base.html" %}
+{% block title %}Inspection — {{ job.get('Order Number', job.get('order number', '')) }}{% endblock %}
+
+{% block extra_style %}
+.inspect-layout { display: grid; grid-template-columns: 1fr 360px; gap: 20px;
+                  align-items: start; }
+@media (max-width: 900px) { .inspect-layout { grid-template-columns: 1fr; } }
+
+.job-header { background: #1a3a5c; color: #fff; padding: 16px 24px;
+              display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.job-header h2 { font-size: 1rem; font-weight: 700; }
+.job-header .meta { font-size: .8rem; opacity: .75; }
+.back-btn { color: rgba(255,255,255,.8); font-size: .85rem; margin-right: auto; }
+.back-btn:hover { color: #fff; }
+
+.section-title { font-weight: 600; font-size: .9rem; color: #1a3a5c;
+                 margin-bottom: 14px; padding-bottom: 8px;
+                 border-bottom: 2px solid #e8eaee; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+.result-group { display: flex; gap: 12px; }
+.result-btn { flex: 1; padding: 12px; border: 2px solid #d0d5dd; border-radius: 8px;
+              cursor: pointer; text-align: center; font-size: .9rem; font-weight: 600;
+              background: #fff; transition: all .15s; }
+.result-btn:hover { border-color: #1a6fc4; }
+.result-btn.selected-pass { border-color: #059669; background: #d1fae5; color: #065f46; }
+.result-btn.selected-fail { border-color: #dc2626; background: #fee2e2; color: #991b1b; }
+.result-btn.selected-partial { border-color: #f59e0b; background: #fef3c7; color: #92400e; }
+input[name=result] { display: none; }
+
+/* ── file upload ── */
+.drop-zone { border: 2px dashed #d0d5dd; border-radius: 10px; padding: 28px 20px;
+             text-align: center; cursor: pointer; transition: all .2s;
+             background: #fafbfc; }
+.drop-zone.drag-over { border-color: #1a6fc4; background: #eff6ff; }
+.drop-zone svg { margin-bottom: 8px; opacity: .5; }
+.drop-zone p { font-size: .85rem; color: #6b7280; margin-top: 6px; }
+.drop-zone strong { color: #1a6fc4; }
+#file-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.file-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+             background: #f3f4f6; border-radius: 6px; font-size: .8rem; }
+.file-item .file-icon { font-size: 1rem; }
+.file-item .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-item .file-size { color: #9ca3af; white-space: nowrap; }
+.file-item .remove-file { cursor: pointer; color: #ef4444; font-weight: bold;
+                          padding: 0 4px; border: none; background: none; }
+
+/* ── job info panel ── */
+.info-table { width: 100%; font-size: .82rem; border-collapse: collapse; }
+.info-table td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+.info-table td:first-child { color: #6b7280; font-weight: 500; width: 40%; white-space: nowrap; }
+
+/* ── past inspections ── */
+.past-item { border: 1px solid #e8eaee; border-radius: 8px; padding: 12px 14px;
+             margin-bottom: 10px; font-size: .82rem; }
+.past-item-header { display: flex; align-items: center; gap: 8px;
+                    margin-bottom: 6px; font-weight: 500; }
+.past-item-files a { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px;
+                     border: 1px solid #d0d5dd; border-radius: 4px; font-size: .75rem;
+                     color: #1a6fc4; }
+{% endblock %}
+
+{% block content %}
+<div class="job-header">
+  <a href="{{ url_for('index') }}" class="back-btn">&#8592; Back to Schedule</a>
+  <div>
+    <h2>Inspection — {{ job.get('Order Number', '') }}</h2>
+    <div class="meta">
+      {{ job.get('region', '') }} &nbsp;|&nbsp;
+      {{ job.get('Item Code', '') }} &nbsp;|&nbsp;
+      {{ job.get('Item Description', '') }}
+    </div>
+  </div>
+</div>
+
+<div class="page">
+
+  {% if matched_tpl %}
+  <div style="background:#eff6ff; border:1.5px solid #3b82f6; border-radius:10px;
+              padding:14px 18px; margin-bottom:16px; display:flex;
+              align-items:center; gap:14px; flex-wrap:wrap;">
+    <div style="flex:1; min-width:200px;">
+      <div style="font-weight:600; color:#1e40af; font-size:.9rem;">
+        &#128203; <span class="lt" data-en="Matched form template:" data-zh="找到对应检验表单：">Matched form template:</span> {{ matched_tpl.name }}
+      </div>
+      <div style="font-size:.78rem; color:#3b82f6; margin-top:2px;">
+        <span class="lt" data-en="Click to use the digital checklist — no Excel needed" data-zh="点击右侧按钮使用标准化数字检验单，无需 Excel">Click to use the digital checklist — no Excel needed</span>
+      </div>
+    </div>
+    <a href="{{ url_for('inspect_checklist', job_key=job.job_key, tpl=matched_tpl.id) }}"
+       class="btn btn-primary" style="white-space:nowrap;">
+      &#9654; <span class="lt" data-en="Use Form Template" data-zh="使用标准检验单">Use Form Template</span>
+    </a>
+  </div>
+  {% endif %}
+
+  <div class="inspect-layout">
+
+    <!-- LEFT: form -->
+    <div>
+      <div class="card">
+        <div class="section-title">&#128203; New Inspection Report</div>
+        <form method="POST"
+              action="{{ url_for('submit_inspection', job_key=job.job_key) }}"
+              enctype="multipart/form-data"
+              id="inspect-form">
+
+          <!-- hidden job fields -->
+          <input type="hidden" name="region"           value="{{ job.get('region', '') }}">
+          <input type="hidden" name="order_number"     value="{{ job.get('Order Number', '') }}">
+          <input type="hidden" name="item_code"        value="{{ job.get('Item Code', '') }}">
+          <input type="hidden" name="item_description" value="{{ job.get('Item Description', '') }}">
+          <input type="hidden" name="supplier"         value="{{ job.get('Supplier', '') }}">
+          <input type="hidden" name="quantity_ordered" value="{{ job.get('Quantity', '') }}">
+
+          <!-- inspector & date -->
+          <div class="row2">
+            <div class="form-group">
+              <label>Inspector Name *
+                {% if matched_category %}
+                <span style="font-weight:400; color:#6b7280; font-size:.75rem; margin-left:4px;">
+                  — {{ matched_category }}
+                </span>
+                {% endif %}
+              </label>
+              {% if auto_inspectors|length == 1 %}
+                <input type="text" name="inspector_name" required
+                       value="{{ auto_inspectors[0] }}"
+                       style="background:#f0fdf4; border-color:#86efac;">
+                <div style="font-size:.75rem; color:#059669; margin-top:3px;">
+                  &#10003; 已根据产品类别自动分配
+                </div>
+              {% elif auto_inspectors|length > 1 %}
+                <select name="inspector_name" required
+                        style="background:#f0fdf4; border-color:#86efac;">
+                  {% for name in auto_inspectors %}
+                  <option value="{{ name }}">{{ name }}</option>
+                  {% endfor %}
+                </select>
+                <div style="font-size:.75rem; color:#059669; margin-top:3px;">
+                  &#10003; 共 {{ auto_inspectors|length }} 名检验员，请选择
+                </div>
+              {% else %}
+                <input type="text" name="inspector_name" required
+                       placeholder="Full name">
+                {% if matched_category %}
+                <div style="font-size:.75rem; color:#f59e0b; margin-top:3px;">
+                  &#9888; 该产品类别暂未配置检验员
+                </div>
+                {% endif %}
+              {% endif %}
+            </div>
+            <div class="form-group">
+              <label>Inspection Date *</label>
+              <input type="date" name="inspection_date" required
+                     value="{{ now_date }}">
+            </div>
+          </div>
+
+          <!-- quantities -->
+          <div class="row3">
+            <div class="form-group">
+              <label>Quantity Ordered</label>
+              <input type="number" name="quantity_ordered_display"
+                     value="{{ job.get('Quantity', '') }}" readonly
+                     style="background:#f9fafb">
+            </div>
+            <div class="form-group">
+              <label>Quantity Inspected *</label>
+              <input type="number" name="quantity_inspected" required
+                     placeholder="0" min="0">
+            </div>
+            <div class="form-group">
+              <label>Quantity Passed</label>
+              <input type="number" name="quantity_passed"
+                     placeholder="0" min="0">
+            </div>
+          </div>
+
+          <!-- inspection result -->
+          <div class="form-group">
+            <label>Inspection Result *</label>
+            <input type="hidden" name="result" id="result-input" required>
+            <div class="result-group">
+              <button type="button" class="result-btn" data-val="Pass"
+                      onclick="setResult('Pass', this)">&#9989; Pass</button>
+              <button type="button" class="result-btn" data-val="Fail"
+                      onclick="setResult('Fail', this)">&#10060; Fail</button>
+              <button type="button" class="result-btn" data-val="Partial Pass"
+                      onclick="setResult('Partial Pass', this)">&#9888; Partial Pass</button>
+            </div>
+          </div>
+
+          <!-- defect codes checklist -->
+          <div class="form-group">
+            <label>Defects Found
+              <span style="font-size:.75rem; font-weight:400; color:#6b7280; margin-left:6px;">
+                Select all applicable defect codes
+              </span>
+            </label>
+            {% if defect_groups %}
+            <div style="border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;">
+              {% for cat_name, codes in defect_groups %}
+              <details style="border-bottom:1px solid #f0f0f0;" {% if loop.first %}open{% endif %}>
+                <summary style="padding:9px 14px; cursor:pointer; font-size:.82rem;
+                                font-weight:600; color:#374151; background:#f8fafc;
+                                list-style:none; display:flex; justify-content:space-between;
+                                align-items:center; user-select:none;">
+                  {{ cat_name }}
+                  <span style="font-size:.72rem; color:#9ca3af; font-weight:400;">
+                    {{ codes|length }} codes
+                  </span>
+                </summary>
+                <div style="padding:10px 14px; display:grid;
+                            grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:4px;">
+                  {% for dc in codes %}
+                  <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;
+                                padding:5px 6px; border-radius:5px; font-size:.8rem;
+                                transition:background .1s;"
+                         onmouseover="this.style.background='#f3f4f6'"
+                         onmouseout="this.style.background=''">
+                    <input type="checkbox" name="defect_codes" value="{{ dc.code }}"
+                           style="margin-top:2px; flex-shrink:0;">
+                    <span>
+                      <strong style="color:#1a3a5c;">{{ dc.code }}</strong>
+                      &nbsp;{{ dc.name }}
+                      {% if dc.name_cn %}
+                      <span style="color:#9ca3af; font-size:.73rem; display:block;">
+                        {{ dc.name_cn }}
+                      </span>
+                      {% endif %}
+                    </span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </details>
+              {% endfor %}
+            </div>
+            {% endif %}
+            <textarea name="defects" rows="2" style="margin-top:8px;"
+                      placeholder="Additional defect notes or details not covered by codes above..."></textarea>
+          </div>
+
+          <!-- shipping / packing -->
+          <div class="row2">
+            <div class="form-group">
+              <label>Crate / Packing Condition</label>
+              <select name="packing_condition">
+                <option value="">— Select —</option>
+                <option>Good</option>
+                <option>Minor damage</option>
+                <option>Significant damage</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Marking / Labelling</label>
+              <select name="marking">
+                <option value="">— Select —</option>
+                <option>Correct</option>
+                <option>Incorrect</option>
+                <option>Missing</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- notes -->
+          <div class="form-group">
+            <label>Additional Notes</label>
+            <textarea name="notes" rows="3"
+                      placeholder="Any additional observations, recommendations, or follow-up actions..."></textarea>
+          </div>
+
+          <!-- V-Trust section (valves only) -->
+          {% if is_valve %}
+          <div style="border:2px solid #f97316;border-radius:8px;padding:16px 18px;margin-bottom:16px;background:#fff7ed;">
+            <div style="font-weight:600;font-size:.9rem;color:#9a3412;margin-bottom:12px;">
+              &#127973; V-Trust Third-Party Inspection <span style="font-size:.75rem;font-weight:400;">(required for all valves)</span>
+            </div>
+            <div class="row2">
+              <div class="form-group" style="margin-bottom:12px">
+                <label>V-Trust Result</label>
+                <select name="vtrust_result">
+                  <option value="">— Not yet done —</option>
+                  <option value="Pass">Pass</option>
+                  <option value="Fail">Fail</option>
+                  <option value="In Progress">In Progress</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom:12px">
+                <label>V-Trust Inspection Date</label>
+                <input type="date" name="vtrust_date">
+              </div>
+            </div>
+            <div class="row2">
+              <div class="form-group" style="margin-bottom:12px">
+                <label>V-Trust Inspector Name</label>
+                <input type="text" name="vtrust_inspector" placeholder="V-Trust inspector">
+              </div>
+              <div class="form-group" style="margin-bottom:12px">
+                <label>Certificate / Reference No.</label>
+                <input type="text" name="vtrust_cert" placeholder="e.g. VT-2026-12345">
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>V-Trust Notes</label>
+              <textarea name="vtrust_notes" rows="2" placeholder="Any V-Trust findings or conditions..."></textarea>
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- file upload -->
+          <div class="form-group">
+            <label>Attachments (Photos, Videos, Documents)</label>
+            <div class="drop-zone" id="drop-zone"
+                 onclick="document.getElementById('file-input').click()"
+                 ondragover="handleDragOver(event)"
+                 ondragleave="handleDragLeave(event)"
+                 ondrop="handleDrop(event)">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
+                   stroke="#6b7280" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <p><strong>Click to upload</strong> or drag and drop here</p>
+              <p>Photos, videos, PDFs, documents &mdash; any file type</p>
+              <input type="file" id="file-input" name="attachments"
+                     multiple style="display:none"
+                     onchange="handleFiles(this.files)">
+            </div>
+            <div id="file-list"></div>
+          </div>
+
+          <div style="display:flex; gap:10px; margin-top:8px;">
+            <button type="submit" class="btn btn-success" style="flex:1">
+              &#10003; Submit Inspection Report
+            </button>
+            <button type="reset" class="btn btn-outline"
+                    onclick="clearResult()">Clear</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- RIGHT: job info + past inspections -->
+    <div>
+      <div class="card">
+        <div class="section-title">&#128230; Job Details</div>
+        <table class="info-table">
+          <tr><td>Order Number</td>  <td><strong>{{ job.get('Order Number', '—') }}</strong></td></tr>
+          <tr><td>PO Number</td>     <td>{{ job.get('Daemco Purchase Order', '—') }}</td></tr>
+          <tr><td>Order Date</td>    <td>{{ job.get('Order Date', '—') }}</td></tr>
+          <tr><td>Supplier</td>      <td>{{ job.get('Supplier', '—') }}</td></tr>
+          <tr><td>Item Code</td>     <td>{{ job.get('Item Code', '—') }}</td></tr>
+          <tr><td>Description</td>   <td style="white-space:normal">{{ job.get('Item Description', '—') }}</td></tr>
+          <tr><td>Quantity</td>      <td>{{ job.get('Quantity', '—') }}</td></tr>
+          <tr><td>Est. Completion</td><td>{{ job.get('Estimated Completion Date', '—') }}</td></tr>
+          <tr><td>Must Ship</td>     <td>{{ job.get('Must Ship Date', '—') }}</td></tr>
+          <tr><td>Region</td>        <td>{{ job.get('region', '—') }}</td></tr>
+        </table>
+      </div>
+
+      {% if past_inspections %}
+      <div class="card">
+        <div class="section-title">&#128196; Past Inspections ({{ past_inspections|length }})</div>
+        {% for p in past_inspections|reverse %}
+        <div class="past-item">
+          <div class="past-item-header">
+            {% if p.result == 'Pass' %}
+              <span class="badge badge-new">&#9989; Pass</span>
+            {% elif p.result == 'Fail' %}
+              <span class="badge" style="background:#fee2e2;color:#991b1b">&#10060; Fail</span>
+            {% else %}
+              <span class="badge badge-ongoing">&#9888; {{ p.result }}</span>
+            {% endif %}
+            <span>{{ p.inspector_name }}</span>
+            <span style="color:#9ca3af; margin-left:auto">{{ p.inspection_date }}</span>
+          </div>
+          <div>Inspected: {{ p.quantity_inspected }} /
+               {{ p.quantity_ordered }} ordered</div>
+          {% if p.get('defect_codes') %}
+          <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
+            {% for code in p.defect_codes %}
+            <span style="background:#fee2e2; color:#991b1b; border-radius:4px;
+                         padding:1px 7px; font-size:.72rem; font-weight:600;">{{ code }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if p.defects %}
+          <div style="margin-top:4px; color:#dc2626; font-size:.8rem;">{{ p.defects }}</div>
+          {% endif %}
+          {% if p.notes %}
+          <div style="margin-top:4px; color:#374151">Notes: {{ p.notes }}</div>
+          {% endif %}
+          {% if p.get('vtrust_result') %}
+          <div style="margin-top:6px;padding:4px 8px;background:#fff7ed;border-radius:4px;font-size:.78rem;">
+            &#127973; V-Trust: <strong>{{ p.vtrust_result }}</strong>
+            {% if p.get('vtrust_date') %} &mdash; {{ p.vtrust_date }}{% endif %}
+            {% if p.get('vtrust_cert') %} &mdash; Cert: {{ p.vtrust_cert }}{% endif %}
+          </div>
+          {% endif %}
+          {% if p.file_links %}
+          <div class="past-item-files" style="margin-top:6px">
+            {% for link in p.file_links %}
+              {% if link.startswith('http') %}
+                <a href="{{ link }}" target="_blank">&#128206; File {{ loop.index }}</a>
+              {% else %}
+                <span style="font-size:.75rem;color:#9ca3af">{{ link }}</span>
+              {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if not google_configured %}
+      <div class="card" style="border: 1px solid #fcd34d; background:#fffbeb;">
+        <div style="font-size:.85rem; color:#92400e;">
+          <strong>&#9888; Google not configured</strong><br>
+          Inspections are saved locally only.
+          <a href="{{ url_for('settings') }}">Configure Google Sheets/Drive</a>
+          to sync records and file uploads.
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<script>
+// Result selector
+function setResult(val, btn) {
+  document.getElementById('result-input').value = val;
+  document.querySelectorAll('.result-btn').forEach(b => {
+    b.className = 'result-btn';
+  });
+  const cls = val === 'Pass' ? 'selected-pass' : val === 'Fail' ? 'selected-fail' : 'selected-partial';
+  btn.className = 'result-btn ' + cls;
+}
+function clearResult() {
+  document.getElementById('result-input').value = '';
+  document.querySelectorAll('.result-btn').forEach(b => b.className = 'result-btn');
+}
+
+// File upload
+const dt = new DataTransfer();
+function handleFiles(files) {
+  Array.from(files).forEach(f => dt.items.add(f));
+  renderFileList();
+  document.getElementById('file-input').files = dt.files;
+}
+function handleDragOver(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.add('drag-over');
+}
+function handleDragLeave(e) {
+  document.getElementById('drop-zone').classList.remove('drag-over');
+}
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag-over');
+  handleFiles(e.dataTransfer.files);
+}
+function removeFile(idx) {
+  const newDt = new DataTransfer();
+  Array.from(dt.files).forEach((f, i) => { if (i !== idx) newDt.items.add(f); });
+  dt.clearData ? (() => {
+    while (dt.items.length) dt.items.remove(0);
+    Array.from(newDt.files).forEach(f => dt.items.add(f));
+  })() : null;
+  renderFileList();
+  document.getElementById('file-input').files = dt.files;
+}
+function renderFileList() {
+  const list = document.getElementById('file-list');
+  list.innerHTML = '';
+  Array.from(dt.files).forEach((f, i) => {
+    const icon = f.type.startsWith('image') ? '&#128247;'
+               : f.type.startsWith('video') ? '&#127909;'
+               : f.name.endsWith('.pdf')    ? '&#128441;' : '&#128196;';
+    const size = f.size > 1048576 ? (f.size/1048576).toFixed(1)+' MB'
+               : (f.size/1024).toFixed(0)+' KB';
+    list.innerHTML += `<div class="file-item">
+      <span class="file-icon">${icon}</span>
+      <span class="file-name">${f.name}</span>
+      <span class="file-size">${size}</span>
+      <button class="remove-file" type="button" onclick="removeFile(${i})">&#x2715;</button>
+    </div>`;
+  });
+}
+
+// Set today's date default
+document.querySelector('input[name=inspection_date]').value =
+  new Date().toISOString().split('T')[0];
+</script>
+{% endblock %}

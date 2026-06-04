@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:680px; margin:0 auto;">
+
+  <div style="margin-bottom:16px;">
+    <a href="{{ url_for('suppliers') }}" style="font-size:.85rem; color:#6b7280;">
+      &#8592; 返回供应商列表
+    </a>
+  </div>
+
+  <div class="card">
+    <div class="card-title">{{ title }}</div>
+
+    <form method="POST">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 20px;">
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>供应商名称 <span style="color:#dc2626;">*</span></label>
+          <input type="text" name="name" required
+                 value="{{ supplier.name if supplier else '' }}"
+                 placeholder="e.g. Reliable Valve Co.">
+        </div>
+
+        <div class="form-group">
+          <label>联系人</label>
+          <input type="text" name="contact_person"
+                 value="{{ supplier.contact_person if supplier else '' }}"
+                 placeholder="姓名">
+        </div>
+
+        <div class="form-group">
+          <label>电话</label>
+          <input type="text" name="phone"
+                 value="{{ supplier.phone if supplier else '' }}"
+                 placeholder="+86 ...">
+        </div>
+
+        <div class="form-group">
+          <label>邮箱</label>
+          <input type="text" name="email"
+                 value="{{ supplier.email if supplier else '' }}"
+                 placeholder="example@supplier.com">
+        </div>
+
+        <div class="form-group">
+          <label>国家/地区</label>
+          <select name="country">
+            {% for c in ['China','Australia','New Zealand','Fiji','Other'] %}
+            <option value="{{ c }}" {{ 'selected' if supplier and supplier.country == c else '' }}>
+              {{ c }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>地址</label>
+          <input type="text" name="address"
+                 value="{{ supplier.address if supplier else '' }}"
+                 placeholder="工厂/公司地址">
+        </div>
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>备注</label>
+          <textarea name="notes" rows="3"
+                    placeholder="其他说明，如认证信息、付款条件等">{{ supplier.notes if supplier else '' }}</textarea>
+        </div>
+
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <a href="{{ url_for('suppliers') }}" class="btn btn-outline">取消</a>
+      </div>
+    </form>
+  </div>
+
+</div>
+</div>
+{% endblock %}

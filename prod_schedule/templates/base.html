@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Production Schedule{% endblock %}</title>
+<style>
+/* ── reset & base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+       background: #f0f2f5; color: #1a1a2e; min-height: 100vh; overflow-x: hidden; }
+a { color: #1a6fc4; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── nav ── */
+.nav { background: #1a3a5c; color: #fff; padding: 0 24px; display: flex;
+       align-items: center; gap: 0; height: 56px; overflow-x: auto; }
+.nav-brand { font-weight: 700; font-size: 1rem; letter-spacing: .02em;
+             margin-right: auto; color: #fff; white-space: nowrap; }
+.nav-link { color: rgba(255,255,255,.75); padding: 0 12px; height: 56px;
+            display: flex; align-items: center; font-size: .82rem;
+            transition: color .15s, background .15s; white-space: nowrap; }
+.nav-link:hover, .nav-link.active { color: #fff; background: rgba(255,255,255,.1);
+                                     text-decoration: none; }
+
+/* ── language toggle ── */
+.lang-btn { background: rgba(255,255,255,.12); color: #fff;
+            border: 1px solid rgba(255,255,255,.3); border-radius: 6px;
+            padding: 4px 12px; font-size: .8rem; font-weight: 700;
+            cursor: pointer; margin-left: 8px; white-space: nowrap;
+            transition: background .15s; letter-spacing: .05em; }
+.lang-btn:hover { background: rgba(255,255,255,.22); }
+
+/* ── alerts ── */
+.alerts { padding: 0 24px; }
+.alert { padding: 12px 16px; border-radius: 6px; margin-top: 12px;
+         font-size: .875rem; display: flex; align-items: center; gap: 8px; }
+.alert-success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+.alert-error   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.alert-warning { background: #fffbeb; color: #92400e; border: 1px solid #fcd34d; }
+
+/* ── page wrapper ── */
+.page { padding: 20px 24px; }
+
+/* ── cards ── */
+.card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+        padding: 20px 24px; margin-bottom: 20px; }
+.card-title { font-weight: 600; font-size: 1rem; margin-bottom: 16px;
+              padding-bottom: 12px; border-bottom: 1px solid #e8eaee; }
+
+/* ── form elements ── */
+.form-group { margin-bottom: 16px; }
+label { display: block; font-size: .85rem; font-weight: 500; margin-bottom: 6px; color: #374151; }
+input[type=text], input[type=date], input[type=number], input[type=email],
+input[type=password], select, textarea {
+  width: 100%; border: 1px solid #d0d5dd; border-radius: 6px;
+  padding: 9px 12px; font-size: .875rem; outline: none;
+  transition: border-color .15s, box-shadow .15s; background: #fff; }
+input:focus, select:focus, textarea:focus {
+  border-color: #1a6fc4; box-shadow: 0 0 0 3px rgba(26,111,196,.12); }
+textarea { resize: vertical; min-height: 80px; }
+
+/* ── buttons ── */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px;
+       border-radius: 6px; font-size: .875rem; font-weight: 500; cursor: pointer;
+       border: none; transition: all .15s; text-decoration: none !important; }
+.btn-primary   { background: #1a3a5c; color: #fff; }
+.btn-primary:hover { background: #234d7a; color: #fff; }
+.btn-success   { background: #059669; color: #fff; }
+.btn-success:hover { background: #047857; color: #fff; }
+.btn-sm { padding: 5px 12px; font-size: .8rem; }
+.btn-outline { background: transparent; border: 1px solid #d0d5dd; color: #374151; }
+.btn-outline:hover { background: #f9fafb; }
+
+/* ── status badges ── */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px;
+         font-size: .72rem; font-weight: 600; letter-spacing: .03em; white-space: nowrap; }
+.badge-new               { background: #d1fae5; color: #065f46; }
+.badge-not_shipped       { background: #fee2e2; color: #991b1b; }
+.badge-partially_shipped { background: #fef3c7; color: #92400e; }
+.badge-shipped           { background: #e5e7eb; color: #6b7280; }
+
+{% block extra_style %}{% endblock %}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="{{ url_for('dashboard') }}" class="nav-brand"
+     style="display:flex;align-items:center;gap:10px;text-decoration:none;">
+    <img src="{{ url_for('static', filename='daemco_logo.png') }}" alt="Daemco"
+         style="height:26px;filter:brightness(0) invert(1);flex-shrink:0;">
+    <span style="color:rgba(255,255,255,.45);font-size:.68rem;font-weight:400;
+                 border-left:1px solid rgba(255,255,255,.2);padding-left:10px;white-space:nowrap;"
+          class="lt" data-en="Production Schedule" data-zh="生产排期">Production Schedule</span>
+  </a>
+  <a href="{{ url_for('dashboard') }}"
+     class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
+    <span class="lt" data-en="Dashboard" data-zh="仪表板">Dashboard</span></a>
+  <a href="{{ url_for('index') }}"
+     class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">
+    <span class="lt" data-en="Schedule" data-zh="排期">Schedule</span></a>
+  <a href="{{ url_for('tasks') }}"
+     class="nav-link {% if request.endpoint in ['tasks'] %}active{% endif %}">
+    <span class="lt" data-en="Tasks" data-zh="任务">Tasks</span></a>
+  <a href="{{ url_for('orders') }}"
+     class="nav-link {% if request.endpoint in ['orders','order_new','order_edit'] %}active{% endif %}">
+    <span class="lt" data-en="Orders" data-zh="订单">Orders</span></a>
+  <a href="{{ url_for('employees') }}"
+     class="nav-link {% if request.endpoint in ['employees','employee_new','employee_edit'] %}active{% endif %}">
+    <span class="lt" data-en="Employees" data-zh="员工">Employees</span></a>
+  <a href="{{ url_for('regions') }}"
+     class="nav-link {% if request.endpoint == 'regions' %}active{% endif %}">
+    <span class="lt" data-en="Regions" data-zh="区域">Regions</span></a>
+  <a href="{{ url_for('hr_portal') }}"
+     class="nav-link {% if request.endpoint and request.endpoint.startswith('hr') or request.endpoint in ['leave_new','leave_approve','leave_reject','expense_new','expense_approve','expense_reject'] %}active{% endif %}">
+    <span class="lt" data-en="HR" data-zh="人事">HR</span></a>
+  <a href="{{ url_for('suppliers') }}"
+     class="nav-link {% if request.endpoint in ['suppliers','supplier_new','supplier_edit'] %}active{% endif %}">
+    <span class="lt" data-en="Suppliers" data-zh="供应商">Suppliers</span></a>
+  <a href="{{ url_for('products') }}"
+     class="nav-link {% if request.endpoint in ['products','product_new','product_edit'] %}active{% endif %}">
+    <span class="lt" data-en="Products" data-zh="产品">Products</span></a>
+  <a href="{{ url_for('knowledge') }}"
+     class="nav-link {% if request.endpoint in ['knowledge','kb_article','kb_article_new','kb_article_edit'] %}active{% endif %}">
+    <span class="lt" data-en="Knowledge" data-zh="知识库">Knowledge</span></a>
+  <a href="{{ url_for('training') }}"
+     class="nav-link {% if request.endpoint in ['training','training_plan','exam_take'] %}active{% endif %}">
+    <span class="lt" data-en="Training" data-zh="培训">Training</span></a>
+  <a href="{{ url_for('form_templates_page') }}"
+     class="nav-link {% if request.endpoint in ['form_templates_page','inspect_checklist'] %}active{% endif %}">
+    <span class="lt" data-en="Forms" data-zh="检验模板">Forms</span></a>
+  <a href="{{ url_for('settings') }}"
+     class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}">
+    <span class="lt" data-en="Settings" data-zh="设置">Settings</span></a>
+  <button id="lang-btn" class="lang-btn" onclick="toggleLang()">中文</button>
+</nav>
+
+<div class="alerts">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+</div>
+
+{% block content %}{% endblock %}
+
+<script>
+// ── i18n language switcher ────────────────────────────────────────────────────
+(function () {
+  var LANG = localStorage.getItem('lang') || 'en';
+
+  function applyLang(l) {
+    LANG = l;
+    localStorage.setItem('lang', l);
+    document.documentElement.lang = l;
+    document.querySelectorAll('.lt').forEach(function (el) {
+      var txt = el.getAttribute('data-' + l);
+      if (txt !== null) el.textContent = txt;
+    });
+    var btn = document.getElementById('lang-btn');
+    if (btn) btn.textContent = l === 'en' ? '中文' : 'EN';
+  }
+
+  window.toggleLang = function () { applyLang(LANG === 'en' ? 'zh' : 'en'); };
+
+  // Apply saved preference on every page load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { applyLang(LANG); });
+  } else {
+    applyLang(LANG);
+  }
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

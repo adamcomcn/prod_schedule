@@ -1,0 +1,574 @@
+{% extends "base.html" %}
+{% block title %}人事管理{% endblock %}
+
+{% block extra_style %}
+.hr-tab-bar { background:#fff; border-bottom:2px solid #e0e4ea; padding:0 24px;
+              display:flex; gap:0; overflow-x:auto; }
+.hr-tab-btn { border:none; background:none; padding:13px 18px; cursor:pointer;
+              font-size:.85rem; font-weight:500; color:#6b7280;
+              border-bottom:3px solid transparent; margin-bottom:-2px;
+              white-space:nowrap; transition:color .15s; }
+.hr-tab-btn:hover { color:#1a3a5c; }
+.hr-tab-btn.active { color:#1a3a5c; border-bottom-color:#1a3a5c; }
+
+.hr-content { padding:20px 28px; max-width:1400px; margin:0 auto; }
+.two-col { display:grid; grid-template-columns:360px 1fr; gap:24px; align-items:start; }
+@media(max-width:780px) { .two-col { grid-template-columns:1fr; } }
+
+.form-card { background:#fff; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.08);
+             padding:22px; }
+.form-card-title { font-weight:700; font-size:.95rem; color:#1a3a5c; margin-bottom:16px;
+                   padding-bottom:12px; border-bottom:1px solid #e8eaee; }
+.stat-table { width:100%; border-collapse:collapse; font-size:.9rem; }
+.stat-table th { background:#f8fafc; font-weight:600; text-align:left; padding:11px 16px;
+                 border-bottom:2px solid #e2e8f0; font-size:.78rem; text-transform:uppercase;
+                 letter-spacing:.04em; color:#6b7280; }
+.stat-table td { padding:11px 16px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.stat-table tbody tr:hover td { background:#f8fafc; }
+
+.status-pending  { background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:10px; font-size:.72rem; font-weight:600; }
+.status-approved { background:#d1fae5; color:#065f46; padding:2px 8px; border-radius:10px; font-size:.72rem; font-weight:600; }
+.status-rejected { background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:10px; font-size:.72rem; font-weight:600; }
+.status-late     { background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:10px; font-size:.72rem; font-weight:600; }
+.status-normal   { background:#d1fae5; color:#065f46; padding:2px 8px; border-radius:10px; font-size:.72rem; font-weight:600; }
+
+.filter-bar { display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+.filter-bar a { font-size:.8rem; padding:4px 12px; border-radius:16px; border:1px solid #e2e8f0;
+                color:#6b7280; text-decoration:none; transition:all .1s; }
+.filter-bar a.active, .filter-bar a:hover { background:#1a3a5c; color:#fff; border-color:#1a3a5c; }
+
+/* modal */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4);
+                 z-index:100; align-items:center; justify-content:center; }
+.modal-overlay.open { display:flex; }
+.modal-box { background:#fff; border-radius:10px; padding:24px; width:420px;
+             max-width:calc(100vw - 32px); box-shadow:0 8px 32px rgba(0,0,0,.15);
+             max-height:90vh; overflow-y:auto; }
+.modal-title { font-weight:700; font-size:1rem; margin-bottom:16px; color:#1a3a5c; }
+{% endblock %}
+
+{% block content %}
+
+<div class="hr-tab-bar">
+  {% for t, label in [('attendance','出勤打卡'),('stats','出勤统计'),('leave','请假申请'),('expense','费用报销')] %}
+  <button class="hr-tab-btn {% if tab == t %}active{% endif %}"
+          onclick="location.href='{{ url_for('hr_portal', tab=t) }}'">{{ label }}</button>
+  {% endfor %}
+</div>
+
+<div class="hr-content">
+
+{# ── 出勤打卡 ── #}
+{% if tab == 'attendance' %}
+<div class="two-col">
+  <!-- 入厂打卡 -->
+  <div>
+    <div class="form-card">
+      <div class="form-card-title">&#9654; 入厂打卡</div>
+      <!-- GPS status banner -->
+      <div id="gpsStatus" style="display:flex; align-items:center; gap:8px; padding:8px 10px;
+           border-radius:6px; font-size:.8rem; margin-bottom:12px; background:#f1f5f9; color:#6b7280;">
+        <span id="gpsIcon">&#9711;</span>
+        <span id="gpsText">正在获取 GPS 位置...</span>
+      </div>
+      <form method="POST" action="{{ url_for('hr_checkin') }}" id="checkinForm">
+        <input type="hidden" name="lat" id="checkinLat">
+        <input type="hidden" name="lng" id="checkinLng">
+        <div class="form-group">
+          <label>员工 *</label>
+          <select name="employee_id" required>
+            <option value="">— 选择员工 —</option>
+            {% for e in emp_list %}
+            <option value="{{ e.id }}">{{ e.name }}{% if e.department %} · {{ e.department }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>日期</label>
+          <input type="date" name="work_date" value="{{ today }}">
+        </div>
+        <div class="form-group">
+          <label>入厂时间</label>
+          <input type="time" name="checkin_time" value="{{ now_time }}">
+        </div>
+        <div class="form-group">
+          <label>打卡地点</label>
+          <input type="text" name="checkin_location" placeholder="如：厂区大门">
+        </div>
+        <div class="form-group">
+          <label>备注</label>
+          <input type="text" name="notes" placeholder="">
+        </div>
+        <button type="submit" class="btn btn-primary">入厂打卡</button>
+      </form>
+    </div>
+
+    <div class="form-card" style="margin-top:16px;">
+      <div class="form-card-title">&#9654; 出厂打卡</div>
+      <!-- GPS status banner (reuses same gpsStatus above) -->
+      <form method="POST" action="{{ url_for('hr_checkout') }}" id="checkoutForm">
+        <input type="hidden" name="lat" id="checkoutLat">
+        <input type="hidden" name="lng" id="checkoutLng">
+        <div class="form-group">
+          <label>员工 *</label>
+          <select name="employee_id" required>
+            <option value="">— 选择员工 —</option>
+            {% for e in emp_list %}
+            <option value="{{ e.id }}">{{ e.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>日期</label>
+          <input type="date" name="work_date" value="{{ today }}">
+        </div>
+        <div class="form-group">
+          <label>出厂时间</label>
+          <input type="time" name="checkout_time" value="{{ now_time }}">
+        </div>
+        <div class="form-group">
+          <label>打卡地点</label>
+          <input type="text" name="checkout_location" placeholder="如：厂区大门">
+        </div>
+        <div class="form-group">
+          <label>加班时长（分钟）</label>
+          <input type="number" name="overtime_mins" value="0" min="0">
+        </div>
+        <button type="submit" class="btn btn-success">出厂打卡</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 打卡记录（可选日期） -->
+  <div class="form-card" style="overflow-x:auto;">
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+                margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid #e8eaee;">
+      <span style="font-weight:600; font-size:.95rem; color:#1a3a5c;">打卡记录</span>
+      <form method="GET" action="{{ url_for('hr_portal') }}"
+            style="display:flex; align-items:center; gap:8px; margin:0;">
+        <input type="hidden" name="tab" value="attendance">
+        <input type="date" name="view_date" value="{{ view_date }}"
+               style="padding:5px 10px; font-size:.82rem; border:1px solid #d0d5dd;
+                      border-radius:6px; outline:none;"
+               onchange="this.form.submit()">
+        {% if view_date != today %}
+        <a href="{{ url_for('hr_portal', tab='attendance') }}"
+           style="font-size:.78rem; color:#6b7280; text-decoration:underline; white-space:nowrap;">
+           回到今天
+        </a>
+        {% endif %}
+      </form>
+      <span style="font-size:.82rem; font-weight:600;
+                   color:{% if view_date == today %}#059669{% else %}#9a3412{% endif %};">
+        {% if view_date == today %}今天 — {% endif %}{{ view_date }}
+        {% if today_records %}（{{ today_records|length }} 条）{% endif %}
+      </span>
+    </div>
+
+    {% if today_records %}
+    <table class="stat-table" style="min-width:600px;">
+      <thead>
+        <tr>
+          <th>员工</th><th>入厂</th><th>入厂坐标</th><th>出厂</th><th>出厂坐标</th><th>状态</th><th>加班(分)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in today_records %}
+        <tr>
+          <td><strong>{{ r.emp_name }}</strong></td>
+          <td>{{ r.checkin_time or '—' }}</td>
+          <td>
+            {% if r.checkin_lat and r.checkin_lng %}
+              <a href="https://maps.google.com/?q={{ r.checkin_lat }},{{ r.checkin_lng }}"
+                 target="_blank"
+                 style="font-family:monospace; font-size:.82rem; color:#0369a1; white-space:nowrap;">
+                {{ '%.5f'|format(r.checkin_lat) }}, {{ '%.5f'|format(r.checkin_lng) }}
+              </a>
+              {% if r.gps_verified %}
+                <span style="background:#d1fae5;color:#065f46;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:3px;">✓验证</span>
+              {% endif %}
+            {% elif r.checkin_location %}
+              <span style="font-size:.78rem;color:#6b7280;">{{ r.checkin_location }}</span>
+            {% else %}
+              <span style="color:#d1d5db;">—</span>
+            {% endif %}
+          </td>
+          <td>{{ r.checkout_time or '—' }}</td>
+          <td>
+            {% if r.checkout_lat and r.checkout_lng %}
+              <a href="https://maps.google.com/?q={{ r.checkout_lat }},{{ r.checkout_lng }}"
+                 target="_blank"
+                 style="font-family:monospace; font-size:.82rem; color:#0369a1; white-space:nowrap;">
+                {{ '%.5f'|format(r.checkout_lat) }}, {{ '%.5f'|format(r.checkout_lng) }}
+              </a>
+            {% elif r.checkout_location %}
+              <span style="font-size:.78rem;color:#6b7280;">{{ r.checkout_location }}</span>
+            {% else %}
+              <span style="color:#d1d5db;">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if r.status == 'Late' %}
+              <span class="status-late">迟到</span>
+            {% else %}
+              <span class="status-normal">正常</span>
+            {% endif %}
+          </td>
+          <td>{{ r.overtime_mins or 0 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="text-align:center; padding:30px; color:#9ca3af; font-size:.85rem;">
+      {{ view_date }} 暂无打卡记录
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── 出勤统计 ── #}
+{% elif tab == 'stats' %}
+<div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+  <label style="font-weight:600; font-size:.85rem;">统计月份：</label>
+  <form method="GET" style="display:flex; gap:8px; align-items:center;">
+    <input type="hidden" name="tab" value="stats">
+    <input type="month" name="month" value="{{ month }}"
+           style="padding:7px 10px; border:1px solid #d0d5dd; border-radius:6px; font-size:.85rem;">
+    <button type="submit" class="btn btn-primary btn-sm">查询</button>
+  </form>
+</div>
+
+<div class="form-card">
+  <div class="form-card-title">出勤统计 — {{ month }}</div>
+  <table class="stat-table">
+    <thead>
+      <tr>
+        <th>员工</th><th>部门</th><th>出勤天数</th><th>迟到次数</th>
+        <th>总加班(小时)</th><th>出勤率</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set work_days = 22 %}
+      {% for r in stats_rows %}
+      {% set rate = [(r.days_present / work_days * 100)|round(1), 100]|min %}
+      <tr>
+        <td><strong>{{ r.name }}</strong></td>
+        <td>{{ r.department or '—' }}</td>
+        <td>{{ r.days_present }}</td>
+        <td>
+          {% if r.days_late %}
+            <span style="color:#dc2626; font-weight:600;">{{ r.days_late }}</span>
+          {% else %}0{% endif %}
+        </td>
+        <td>{{ ((r.total_overtime_mins or 0) / 60)|round(1) }}</td>
+        <td>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div style="flex:1; background:#e5e7eb; border-radius:4px; height:8px; max-width:80px;">
+              <div style="width:{{ rate }}%; background:{% if rate >= 90 %}#10b981{% elif rate >= 75 %}#f59e0b{% else %}#ef4444{% endif %}; height:100%; border-radius:4px;"></div>
+            </div>
+            <span style="font-size:.8rem; font-weight:600; color:{% if rate >= 90 %}#059669{% elif rate >= 75 %}#d97706{% else %}#dc2626{% endif %};">{{ rate }}%</span>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="text-align:center; padding:30px; color:#9ca3af;">暂无数据</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin-top:10px; font-size:.75rem; color:#9ca3af;">* 出勤率以每月 22 个工作日为基准计算</p>
+</div>
+
+{# ── 请假申请 ── #}
+{% elif tab == 'leave' %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+  <div class="filter-bar">
+    {% for f, label in [('Pending','待审批'),('Approved','已批准'),('Rejected','已拒绝'),('all','全部')] %}
+    <a href="{{ url_for('hr_portal', tab='leave', leave_filter=f) }}"
+       class="{{ 'active' if leave_filter == f }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="openModal('leaveModal')">+ 新增请假</button>
+</div>
+
+<div class="form-card" style="padding:0;">
+  <table class="stat-table">
+    <thead>
+      <tr>
+        <th>员工</th><th>假期类型</th><th>开始日期</th><th>结束日期</th>
+        <th>天数</th><th>原因</th><th>状态</th><th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lr in leaves %}
+      <tr>
+        <td><strong>{{ lr.emp_name }}</strong></td>
+        <td>
+          {% set type_map = {'Annual':'年假','Sick':'病假','Personal':'事假','Unpaid':'无薪假'} %}
+          {{ type_map.get(lr.leave_type, lr.leave_type) }}
+        </td>
+        <td>{{ lr.start_date }}</td>
+        <td>{{ lr.end_date }}</td>
+        <td>{{ lr.days }}</td>
+        <td style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          {{ lr.reason or '—' }}</td>
+        <td>
+          {% if lr.status == 'Pending' %}<span class="status-pending">待审批</span>
+          {% elif lr.status == 'Approved' %}<span class="status-approved">已批准</span>
+          {% else %}<span class="status-rejected">已拒绝</span>{% endif %}
+        </td>
+        <td>
+          <div style="display:flex; gap:4px;">
+            {% if lr.status == 'Pending' %}
+            <form method="POST" action="{{ url_for('leave_approve', lid=lr.id) }}" style="display:inline">
+              <button class="btn btn-sm" style="background:#d1fae5;color:#065f46;border:none;">批准</button>
+            </form>
+            <form method="POST" action="{{ url_for('leave_reject', lid=lr.id) }}" style="display:inline">
+              <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;">拒绝</button>
+            </form>
+            {% endif %}
+            <form method="POST" action="{{ url_for('leave_delete', lid=lr.id) }}" style="display:inline"
+                  onsubmit="return confirm('确认删除此请假记录？')">
+              <button class="btn btn-sm btn-outline">删除</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center; padding:30px; color:#9ca3af;">暂无记录</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── 费用报销 ── #}
+{% elif tab == 'expense' %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+  <div class="filter-bar">
+    {% for f, label in [('Pending','待审批'),('Approved','已批准'),('Rejected','已拒绝'),('all','全部')] %}
+    <a href="{{ url_for('hr_portal', tab='expense', expense_filter=f) }}"
+       class="{{ 'active' if expense_filter == f }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="openModal('expenseModal')">+ 新增报销</button>
+</div>
+
+<div class="form-card" style="padding:0;">
+  <table class="stat-table">
+    <thead>
+      <tr>
+        <th>员工</th><th>日期</th><th>类型</th><th>金额(元)</th>
+        <th>说明</th><th>发票</th><th>状态</th><th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ec in expenses %}
+      <tr>
+        <td><strong>{{ ec.emp_name }}</strong></td>
+        <td>{{ ec.claim_date }}</td>
+        <td>
+          {% set type_map = {'Transport':'交通','Hotel':'住宿','Meal':'餐费','Other':'其他'} %}
+          {{ type_map.get(ec.claim_type, ec.claim_type) }}
+        </td>
+        <td style="font-weight:600;">¥ {{ '%.2f'|format(ec.amount) }}</td>
+        <td style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          {{ ec.description or '—' }}</td>
+        <td>
+          {% if ec.invoice_path %}
+          <a href="{{ url_for('expense_invoice', eid=ec.id) }}" target="_blank"
+             class="btn btn-sm btn-outline" style="font-size:.72rem;">查看</a>
+          {% else %}
+          <span style="color:#9ca3af; font-size:.75rem;">无</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if ec.status == 'Pending' %}<span class="status-pending">待审批</span>
+          {% elif ec.status == 'Approved' %}<span class="status-approved">已批准</span>
+          {% else %}<span class="status-rejected">已拒绝</span>{% endif %}
+        </td>
+        <td>
+          <div style="display:flex; gap:4px;">
+            {% if ec.status == 'Pending' %}
+            <form method="POST" action="{{ url_for('expense_approve', eid=ec.id) }}" style="display:inline">
+              <button class="btn btn-sm" style="background:#d1fae5;color:#065f46;border:none;">批准</button>
+            </form>
+            <form method="POST" action="{{ url_for('expense_reject', eid=ec.id) }}" style="display:inline">
+              <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;">拒绝</button>
+            </form>
+            {% endif %}
+            <form method="POST" action="{{ url_for('expense_delete', eid=ec.id) }}" style="display:inline"
+                  onsubmit="return confirm('确认删除此报销记录？')">
+              <button class="btn btn-sm btn-outline">删除</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center; padding:30px; color:#9ca3af;">暂无记录</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+</div>
+
+<!-- 请假申请 modal -->
+<div class="modal-overlay" id="leaveModal">
+  <div class="modal-box">
+    <div class="modal-title">新增请假申请</div>
+    <form method="POST" action="{{ url_for('leave_new') }}">
+      <input type="hidden" name="tab" value="leave">
+      <div class="form-group">
+        <label>员工 *</label>
+        <select name="employee_id" required>
+          <option value="">— 选择员工 —</option>
+          {% for e in emp_list %}
+          <option value="{{ e.id }}">{{ e.name }}{% if e.department %} · {{ e.department }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>假期类型</label>
+        <select name="leave_type">
+          <option value="Annual">年假</option>
+          <option value="Sick">病假</option>
+          <option value="Personal">事假</option>
+          <option value="Unpaid">无薪假</option>
+        </select>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>开始日期 *</label>
+          <input type="date" name="start_date" required>
+        </div>
+        <div class="form-group">
+          <label>结束日期 *</label>
+          <input type="date" name="end_date" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>原因</label>
+        <textarea name="reason" rows="2" placeholder="请假原因..."></textarea>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn btn-primary">提交申请</button>
+        <button type="button" class="btn btn-outline" onclick="closeModal('leaveModal')">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 费用报销 modal -->
+<div class="modal-overlay" id="expenseModal">
+  <div class="modal-box">
+    <div class="modal-title">新增报销申请</div>
+    <form method="POST" action="{{ url_for('expense_new') }}" enctype="multipart/form-data">
+      <div class="form-group">
+        <label>员工 *</label>
+        <select name="employee_id" required>
+          <option value="">— 选择员工 —</option>
+          {% for e in emp_list %}
+          <option value="{{ e.id }}">{{ e.name }}{% if e.department %} · {{ e.department }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>报销类型</label>
+          <select name="claim_type">
+            <option value="Transport">交通</option>
+            <option value="Hotel">住宿</option>
+            <option value="Meal">餐费</option>
+            <option value="Other">其他</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>日期 *</label>
+          <input type="date" name="claim_date" value="{{ today }}" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>金额（元）*</label>
+        <input type="number" name="amount" step="0.01" min="0" required placeholder="0.00">
+      </div>
+      <div class="form-group">
+        <label>说明</label>
+        <input type="text" name="description" placeholder="如：广州→深圳高铁">
+      </div>
+      <div class="form-group">
+        <label>发票附件（PDF / JPG / PNG）</label>
+        <input type="file" name="invoice" accept=".pdf,.jpg,.jpeg,.png"
+               style="font-size:.83rem;">
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn btn-primary">提交报销</button>
+        <button type="button" class="btn btn-outline" onclick="closeModal('expenseModal')">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+});
+
+// ── GPS location for attendance check-in/out ──────────────────────────────────
+(function () {
+  var lat = null, lng = null;
+  var statusEl  = document.getElementById('gpsStatus');
+  var iconEl    = document.getElementById('gpsIcon');
+  var textEl    = document.getElementById('gpsText');
+
+  function setStatus(ok, msg) {
+    if (!statusEl) return;
+    if (ok === null) {
+      statusEl.style.background = '#f1f5f9'; statusEl.style.color = '#6b7280';
+      iconEl.textContent = '⊙';
+    } else if (ok) {
+      statusEl.style.background = '#d1fae5'; statusEl.style.color = '#065f46';
+      iconEl.textContent = '✓';
+    } else {
+      statusEl.style.background = '#fee2e2'; statusEl.style.color = '#991b1b';
+      iconEl.textContent = '✗';
+    }
+    textEl.textContent = msg;
+  }
+
+  function fillCoords(la, ln) {
+    ['checkinLat','checkoutLat'].forEach(function(id) {
+      var el = document.getElementById(id); if (el) el.value = la;
+    });
+    ['checkinLng','checkoutLng'].forEach(function(id) {
+      var el = document.getElementById(id); if (el) el.value = ln;
+    });
+  }
+
+  if (!navigator.geolocation) {
+    setStatus(false, '浏览器不支持 GPS 定位，如已配置地点验证将无法打卡');
+    return;
+  }
+
+  setStatus(null, '正在获取 GPS 位置...');
+  navigator.geolocation.getCurrentPosition(
+    function (pos) {
+      lat = pos.coords.latitude;
+      lng = pos.coords.longitude;
+      fillCoords(lat, lng);
+      setStatus(true, 'GPS 已定位  纬度 ' + lat.toFixed(5) + '  经度 ' + lng.toFixed(5) + '  精度 ±' + Math.round(pos.coords.accuracy) + ' 米');
+    },
+    function (err) {
+      var msg = '无法获取位置';
+      if (err.code === 1) msg = '位置权限被拒绝，如已配置地点验证将无法打卡';
+      else if (err.code === 2) msg = '无法确定位置（信号弱）';
+      else if (err.code === 3) msg = '定位超时，请重试';
+      setStatus(false, msg);
+    },
+    { timeout: 10000, maximumAge: 60000, enableHighAccuracy: true }
+  );
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+
+{% block extra_style %}
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 768px) { .settings-grid { grid-template-columns: 1fr; } }
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps li { counter-increment: step; display: flex; gap: 12px;
+            margin-bottom: 14px; font-size: .875rem; line-height: 1.5; }
+.steps li::before { content: counter(step); background: #1a3a5c; color: #fff;
+                     border-radius: 50%; width: 24px; height: 24px; display: flex;
+                     align-items: center; justify-content: center;
+                     font-size: .75rem; font-weight: 700; flex-shrink: 0; }
+.code { background: #f3f4f6; border-radius: 4px; padding: 2px 6px;
+        font-family: monospace; font-size: .82rem; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+              margin-right: 6px; }
+.dot-green { background: #10b981; }
+.dot-red   { background: #ef4444; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <div style="max-width: 900px; margin: 0 auto;">
+
+    <div class="settings-grid">
+      <!-- Google config form -->
+      <div class="card">
+        <div class="card-title">&#9881; Google Integration</div>
+
+        <div style="margin-bottom: 14px; font-size: .85rem;">
+          <span class="status-dot {{ 'dot-green' if credentials_exist else 'dot-red' }}"></span>
+          Credentials file: <strong>{{ 'Uploaded' if credentials_exist else 'Not uploaded' }}</strong>
+          &nbsp;&nbsp;
+          <span class="status-dot {{ 'dot-green' if config.sheet_id else 'dot-red' }}"></span>
+          Google Sheet: <strong>{{ 'Configured' if config.sheet_id else 'Not set' }}</strong>
+          &nbsp;&nbsp;
+          <span class="status-dot {{ 'dot-green' if config.drive_folder_id else 'dot-red' }}"></span>
+          Drive Folder: <strong>{{ 'Configured' if config.drive_folder_id else 'Not set' }}</strong>
+        </div>
+
+        <form method="POST" enctype="multipart/form-data">
+          <div class="form-group">
+            <label>Service Account Credentials (JSON file)</label>
+            <input type="file" name="credentials" accept=".json">
+            {% if credentials_exist %}
+            <div style="font-size:.78rem; color:#059669; margin-top:4px;">
+              &#9989; credentials.json is uploaded
+            </div>
+            {% endif %}
+          </div>
+
+          <div class="form-group">
+            <label>Google Sheets ID</label>
+            <input type="text" name="sheet_id" value="{{ config.sheet_id }}"
+                   placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
+            <div style="font-size:.78rem; color:#6b7280; margin-top:4px;">
+              Found in the spreadsheet URL: /spreadsheets/d/<strong>SHEET_ID</strong>/edit
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Google Drive Folder ID</label>
+            <input type="text" name="drive_folder_id" value="{{ config.drive_folder_id }}"
+                   placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j">
+            <div style="font-size:.78rem; color:#6b7280; margin-top:4px;">
+              Found in the folder URL: /drive/folders/<strong>FOLDER_ID</strong>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Valve Item Code Prefixes (V-Trust required)</label>
+            <input type="text" name="valve_prefixes"
+                   value="{{ config.get('valve_prefixes', ['RSV'])|join(', ') }}"
+                   placeholder="e.g. RSV, BFV, BV">
+            <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
+              Comma-separated prefixes. Any item whose code starts with one of these,
+              or whose description contains "valve", will require V-Trust inspection.
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary">Save Settings</button>
+        </form>
+      </div>
+
+      <!-- Setup guide -->
+      <div class="card">
+        <div class="card-title">&#128218; Setup Guide</div>
+        <ol class="steps">
+          <li>
+            <div>
+              Go to <strong>console.cloud.google.com</strong> and create a new project
+              (e.g. "Production Schedule").
+            </div>
+          </li>
+          <li>
+            <div>
+              Enable these two APIs:<br>
+              &bull; <strong>Google Sheets API</strong><br>
+              &bull; <strong>Google Drive API</strong>
+            </div>
+          </li>
+          <li>
+            <div>
+              Go to <strong>IAM &amp; Admin &rarr; Service Accounts</strong>,
+              create a service account, and download the JSON key.
+              Upload that JSON file above.
+            </div>
+          </li>
+          <li>
+            <div>
+              Create a Google Sheet. Add a tab called
+              <span class="code">Inspections</span>.
+              Share the sheet with the service account email
+              (e.g. <span class="code">my-sa@project.iam.gserviceaccount.com</span>)
+              as <strong>Editor</strong>.
+            </div>
+          </li>
+          <li>
+            <div>
+              Create a Google Drive folder for inspection attachments.
+              Share it with the same service account email as <strong>Editor</strong>.
+              Paste the folder ID above.
+            </div>
+          </li>
+          <li>
+            <div>
+              In the Inspections sheet, add these headers in row 1:<br>
+              <span class="code">Job Key, Region, Order #, Item Code,
+              Description, Supplier, Qty Ordered, Inspector,
+              Date, Qty Inspected, Result, Defects, Notes, Files, Submitted At</span>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Email notification config -->
+    <div class="card" style="margin-top:0;">
+      <div class="card-title">&#128231; 邮件通知设置</div>
+      <p style="font-size:.85rem; color:#6b7280; margin-bottom:16px;">
+        每次上传新排期后，系统自动向
+        <a href="{{ url_for('employees') }}">员工档案</a>
+        中在职员工发送新任务通知邮件。
+      </p>
+      <form method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="sheet_id"        value="{{ config.sheet_id }}">
+        <input type="hidden" name="drive_folder_id" value="{{ config.drive_folder_id }}">
+        <input type="hidden" name="valve_prefixes"
+               value="{{ config.get('valve_prefixes', ['RSV'])|join(', ') }}">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 20px;">
+          <div class="form-group">
+            <label>SMTP 服务器</label>
+            <input type="text" name="smtp_host"
+                   value="{{ config.get('smtp_host','') }}" placeholder="smtp.gmail.com">
+          </div>
+          <div class="form-group">
+            <label>端口</label>
+            <input type="text" name="smtp_port"
+                   value="{{ config.get('smtp_port','587') }}" placeholder="587">
+          </div>
+          <div class="form-group">
+            <label>发件邮箱</label>
+            <input type="email" name="smtp_user"
+                   value="{{ config.get('smtp_user','') }}" placeholder="yourname@gmail.com">
+          </div>
+          <div class="form-group">
+            <label>邮箱密码 / App Password</label>
+            <input type="password" name="smtp_pass"
+                   placeholder="{{ '已保存（留空不修改）' if config.get('smtp_pass') else '输入密码' }}">
+            <div style="font-size:.75rem; color:#6b7280; margin-top:4px;">
+              Gmail：开启两步验证后生成
+              <a href="https://myaccount.google.com/apppasswords" target="_blank">App Password</a>
+            </div>
+          </div>
+        </div>
+        {% set smtp_ok = config.get('smtp_host') and config.get('smtp_user') and config.get('smtp_pass') %}
+        <div style="font-size:.82rem; margin-bottom:14px;">
+          <span style="display:inline-block; width:8px; height:8px; border-radius:50; margin-right:6px;
+                       background:{{ '#10b981' if smtp_ok else '#ef4444' }};border-radius:50%;"></span>
+          邮件通知：<strong>{{ '已配置' if smtp_ok else '未配置' }}</strong>
+        </div>
+        <button type="submit" class="btn btn-primary">保存邮件设置</button>
+      </form>
+    </div>
+
+    <!-- 打卡地点管理 -->
+    <div class="card" style="margin-top:0;">
+      <div class="card-title">&#128205; 打卡地点管理（GPS 验证）</div>
+      <p style="font-size:.85rem; color:#6b7280; margin-bottom:14px;">
+        配置允许打卡的办公/厂区坐标。员工打卡时系统自动获取 GPS，距离超出半径则拒绝打卡。<br>
+        <strong>不配置任何地点则关闭验证</strong>（向后兼容）。
+      </p>
+
+      {% set locs = config.get('office_locations', []) %}
+      {% if locs %}
+      <table style="width:100%; font-size:.83rem; border-collapse:collapse; margin-bottom:14px;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">名称</th>
+            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">纬度</th>
+            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">经度</th>
+            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">半径(米)</th>
+            <th style="padding:7px 10px; border-bottom:1px solid #e2e8f0;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for i, loc in enumerate(locs) %}
+          <tr style="border-bottom:1px solid #f1f5f9;">
+            <td style="padding:7px 10px; font-weight:600;">{{ loc.name }}</td>
+            <td style="padding:7px 10px; font-family:monospace;">{{ loc.lat }}</td>
+            <td style="padding:7px 10px; font-family:monospace;">{{ loc.lng }}</td>
+            <td style="padding:7px 10px;">{{ loc.radius }}</td>
+            <td style="padding:7px 10px;">
+              <form method="POST" action="{{ url_for('office_location_delete', idx=i) }}"
+                    onsubmit="return confirm('删除地点「{{ loc.name }}」？')">
+                <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;">删除</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p style="font-size:.82rem; color:#9ca3af; margin-bottom:14px;">暂未配置打卡地点，GPS 验证已关闭</p>
+      {% endif %}
+
+      <!-- 添加新地点 -->
+      <form method="POST" action="{{ url_for('office_location_add') }}">
+        <div style="display:grid; grid-template-columns:2fr 1fr 1fr 80px; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+          <div>
+            <label style="font-size:.78rem; font-weight:500; color:#6b7280; display:block; margin-bottom:3px;">地点名称 *</label>
+            <input type="text" name="loc_name" placeholder="如：总部办公室" id="locName"
+                   style="width:100%; padding:7px 10px; font-size:.83rem; border:1px solid #d0d5dd; border-radius:6px;">
+          </div>
+          <div>
+            <label style="font-size:.78rem; font-weight:500; color:#6b7280; display:block; margin-bottom:3px;">纬度 *</label>
+            <input type="text" name="lat" id="locLat" placeholder="23.1291"
+                   style="width:100%; padding:7px 10px; font-size:.83rem; border:1px solid #d0d5dd; border-radius:6px; font-family:monospace;">
+          </div>
+          <div>
+            <label style="font-size:.78rem; font-weight:500; color:#6b7280; display:block; margin-bottom:3px;">经度 *</label>
+            <input type="text" name="lng" id="locLng" placeholder="113.2644"
+                   style="width:100%; padding:7px 10px; font-size:.83rem; border:1px solid #d0d5dd; border-radius:6px; font-family:monospace;">
+          </div>
+          <div>
+            <label style="font-size:.78rem; font-weight:500; color:#6b7280; display:block; margin-bottom:3px;">半径(米)</label>
+            <input type="number" name="radius" value="500" min="50" max="5000"
+                   style="width:100%; padding:7px 10px; font-size:.83rem; border:1px solid #d0d5dd; border-radius:6px;">
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px; align-items:center;">
+          <button type="submit" class="btn btn-primary btn-sm">添加地点</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="fillMyLocation()">&#128205; 使用当前位置</button>
+          <span id="gpsSettingStatus" style="font-size:.78rem; color:#6b7280;"></span>
+        </div>
+      </form>
+    </div>
+
+    <!-- Excel password config -->
+    <div class="card">
+      <div class="card-title">&#128196; Excel Settings</div>
+      <div style="font-size: .875rem;">
+        <p style="margin-bottom:8px;">
+          The Excel password is currently hardcoded as
+          <span class="code">castings1</span>.
+          When you upload the schedule, the app decrypts it automatically.
+        </p>
+        <p style="color:#6b7280;">
+          If the password changes, update the <span class="code">EXCEL_PASSWORD</span>
+          constant in <span class="code">app.py</span>.
+        </p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function fillMyLocation() {
+  var s = document.getElementById('gpsSettingStatus');
+  s.textContent = '正在获取位置...';
+  if (!navigator.geolocation) { s.textContent = '浏览器不支持定位'; return; }
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    document.getElementById('locLat').value = pos.coords.latitude.toFixed(6);
+    document.getElementById('locLng').value = pos.coords.longitude.toFixed(6);
+    s.style.color = '#059669';
+    s.textContent = '已填入（精度 ±' + Math.round(pos.coords.accuracy) + ' 米）';
+  }, function() {
+    s.style.color = '#dc2626';
+    s.textContent = '定位失败，请手动输入经纬度';
+  });
+}
+</script>
+{% endblock %}

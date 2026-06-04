@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:620px; margin:0 auto;">
+
+  <div style="margin-bottom:16px;">
+    <a href="{{ url_for('employees') }}" style="font-size:.85rem; color:#6b7280;">&#8592; 返回员工列表</a>
+  </div>
+
+  <!-- 基础信息 -->
+  <div class="card">
+    <div class="card-title">{{ title }}</div>
+    <form method="POST">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>姓名 <span style="color:#dc2626;">*</span></label>
+          <input type="text" name="name" required
+                 value="{{ employee.name if employee else '' }}" placeholder="全名">
+        </div>
+
+        <div class="form-group">
+          <label>性别</label>
+          <select name="gender">
+            <option value="">— 未填写 —</option>
+            {% for g in ['男','女'] %}
+            <option {{ 'selected' if employee and employee.gender == g }}>{{ g }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>所属部门</label>
+          <input type="text" name="department"
+                 value="{{ employee.department if employee else '' }}"
+                 placeholder="如：质检部">
+        </div>
+
+        <div class="form-group">
+          <label>手机号 <span style="font-size:.78rem;color:#6b7280;">（主联系）</span></label>
+          <input type="text" name="mobile"
+                 value="{{ employee.mobile if employee else '' }}"
+                 placeholder="+86 138...">
+        </div>
+
+        <div class="form-group">
+          <label>电话 / 微信</label>
+          <input type="text" name="phone"
+                 value="{{ employee.phone if employee else '' }}"
+                 placeholder="其他联系方式">
+        </div>
+
+        <div class="form-group">
+          <label>职位</label>
+          <select name="role">
+            {% for r in ['Inspector','Senior Inspector','QC Manager','QC Lead','Other'] %}
+            <option {{ 'selected' if employee and employee.role == r }}>{{ r }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>驻厂状态</label>
+          <select name="is_stationed">
+            <option value="0" {{ 'selected' if not employee or not employee.is_stationed }}>否 — 非驻厂</option>
+            <option value="1" {{ 'selected' if employee and employee.is_stationed }}>是 — 驻厂</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>驻厂地点（供应商工厂）</label>
+          <input type="text" name="stationed_at"
+                 value="{{ employee.stationed_at if employee else '' }}"
+                 placeholder="如 Reliable Factory, Guangzhou">
+        </div>
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>邮箱 <span style="font-size:.78rem; color:#6b7280;">— 用于接收新任务通知</span></label>
+          <input type="email" name="email"
+                 value="{{ employee.email if employee else '' }}"
+                 placeholder="inspector@example.com">
+        </div>
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+            <input type="checkbox" name="active" value="1"
+                   {{ 'checked' if not employee or employee.active }}>
+            在职（取消勾选则停止发送通知）
+          </label>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button type="submit" class="btn btn-primary">保存基础信息</button>
+        <a href="{{ url_for('employees') }}" class="btn btn-outline">取消</a>
+      </div>
+    </form>
+  </div>
+
+  <!-- 工作信息（仅编辑模式） -->
+  {% if employee %}
+  <div class="card" style="margin-top:16px;">
+    <div class="card-title">工作信息</div>
+    <form method="POST" action="{{ url_for('employee_work_info_save', eid=employee.id) }}">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
+
+        <div class="form-group">
+          <label>直属上级</label>
+          <select name="supervisor_id">
+            <option value="">— 无 —</option>
+            {% for emp in all_employees %}
+            <option value="{{ emp.id }}"
+              {{ 'selected' if work_info and work_info.supervisor_id == emp.id }}>
+              {{ emp.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>技能等级</label>
+          <select name="skill_level">
+            <option value="">— 未评级 —</option>
+            {% for lvl in ['初级','中级','高级','组长'] %}
+            <option {{ 'selected' if work_info and work_info.skill_level == lvl }}>{{ lvl }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>出差/状态</label>
+          <select name="travel_status">
+            {% for s in ['在岗','出差中','休假中'] %}
+            <option {{ 'selected' if work_info and work_info.travel_status == s }}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>备注（加班/特殊安排）</label>
+          <input type="text" name="overtime_notes"
+                 value="{{ work_info.overtime_notes if work_info else '' }}"
+                 placeholder="如：每周六上午加班">
+        </div>
+
+        {% if cats %}
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>可检验产品类别</label>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">
+            {% set sel_cats = (work_info.product_categories or '').split(',') if work_info else [] %}
+            {% for cat in cats %}
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;
+                          background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;
+                          padding:5px 10px;font-size:.83rem;">
+              <input type="checkbox" name="product_category_ids" value="{{ cat.id }}"
+                     {{ 'checked' if cat.id|string in sel_cats }}>
+              {{ cat.name }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <div style="margin-top:4px;">
+        <button type="submit" class="btn btn-primary">保存工作信息</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+</div>
+</div>
+{% endblock %}

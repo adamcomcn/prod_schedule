@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}订单管理{% endblock %}
+
+{% block extra_style %}
+.status-pill { display:inline-block; padding:2px 10px; border-radius:12px;
+               font-size:.75rem; font-weight:600; white-space:nowrap; }
+.status-Pending    { background:#fef3c7; color:#92400e; }
+.status-InProgress { background:#dbeafe; color:#1e40af; }
+.status-Shipped    { background:#d1fae5; color:#065f46; }
+.status-OnHold     { background:#fee2e2; color:#991b1b; }
+.mgmt-table { width:100%; border-collapse:collapse; font-size:.875rem; }
+.mgmt-table th { background:#f8fafc; font-weight:600; text-align:left; padding:10px 12px;
+                 border-bottom:2px solid #e2e8f0; font-size:.75rem;
+                 text-transform:uppercase; letter-spacing:.04em; color:#6b7280; }
+.mgmt-table td { padding:10px 12px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.mgmt-table tbody tr:hover td { background:#f8fafc; }
+.action-btns { display:flex; gap:6px; flex-wrap:wrap; }
+.btn-edit    { background:#e0f2fe; color:#0369a1; border:none; }
+.btn-edit:hover  { background:#bae6fd; }
+.btn-del     { background:#fee2e2; color:#991b1b; border:none; }
+.btn-del:hover   { background:#fecaca; }
+.btn-inspect { background:#d1fae5; color:#065f46; border:none; }
+.btn-inspect:hover { background:#a7f3d0; }
+.filter-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+.filter-bar a { padding:5px 14px; border-radius:20px; font-size:.8rem; font-weight:500;
+                border:1px solid #d0d5dd; color:#374151; text-decoration:none !important; }
+.filter-bar a.active { background:#1a3a5c; color:#fff; border-color:#1a3a5c; }
+.filter-bar a:hover:not(.active) { background:#f3f4f6; }
+.empty-state { text-align:center; padding:40px; color:#9ca3af; font-size:.9rem; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1200px; margin:0 auto;">
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;"><span class="lt" data-en="Order Management" data-zh="订单管理">Order Management</span></h1>
+    <a href="{{ url_for('order_new') }}" class="btn btn-primary">+ <span class="lt" data-en="New Order" data-zh="新增订单">New Order</span></a>
+  </div>
+
+  <!-- Status filter -->
+  <div class="filter-bar">
+    <span style="font-size:.8rem; color:#6b7280;"><span class="lt" data-en="Filter:" data-zh="筛选：">Filter:</span></span>
+    <a href="{{ url_for('orders') }}" class="{{ 'active' if not status_filter }}"><span class="lt" data-en="All" data-zh="全部">All</span></a>
+    {% for s in ['Pending','In Progress','Shipped','On Hold'] %}
+    <a href="{{ url_for('orders', status=s) }}"
+       class="{{ 'active' if status_filter == s }}">{{ s }}</a>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    {% if orders %}
+    <div style="overflow-x:auto;">
+      <table class="mgmt-table">
+        <thead>
+          <tr>
+            <th><span class="lt" data-en="Order No." data-zh="单号">Order No.</span></th>
+            <th><span class="lt" data-en="Region" data-zh="区域">Region</span></th>
+            <th><span class="lt" data-en="Item Code" data-zh="产品编码">Item Code</span></th>
+            <th><span class="lt" data-en="Description" data-zh="描述">Description</span></th>
+            <th><span class="lt" data-en="Supplier" data-zh="供应商">Supplier</span></th>
+            <th><span class="lt" data-en="Qty" data-zh="数量">Qty</span></th>
+            <th><span class="lt" data-en="Status" data-zh="状态">Status</span></th>
+            <th><span class="lt" data-en="Order Date" data-zh="下单日期">Order Date</span></th>
+            <th><span class="lt" data-en="ETA" data-zh="预计交期">ETA</span></th>
+            <th><span class="lt" data-en="Inspection" data-zh="检验状态">Inspection</span></th>
+            <th><span class="lt" data-en="Actions" data-zh="操作">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in orders %}
+          {% set jk = o.region + '|' + o.order_number + '|' + o.item_code %}
+          {% set insp_list = inspections.get(jk, []) %}
+          {% set last_result = insp_list[-1].result if insp_list else '' %}
+          <tr>
+            <td><strong>{{ o.order_number }}</strong></td>
+            <td>{{ o.region or '—' }}</td>
+            <td><span style="font-family:monospace; background:#f3f4f6;
+                padding:2px 6px; border-radius:4px; font-size:.8rem;">
+                {{ o.item_code or '—' }}</span></td>
+            <td style="max-width:180px; font-size:.82rem;">{{ o.description or '—' }}</td>
+            <td>{{ o.supplier_name or '—' }}</td>
+            <td>{{ o.quantity or '—' }}</td>
+            <td>
+              <span class="status-pill status-{{ o.status.replace(' ','') }}">
+                {{ o.status }}
+              </span>
+            </td>
+            <td>{{ o.order_date or '—' }}</td>
+            <td>{{ o.eta or '—' }}</td>
+            <td>
+              {% if last_result == 'Pass' %}
+                <span class="badge badge-new">&#10003; Pass</span>
+              {% elif last_result == 'Fail' %}
+                <span class="badge badge-not_shipped">&#10007; Fail</span>
+              {% elif last_result %}
+                <span class="badge badge-partially_shipped">~ {{ last_result }}</span>
+              {% elif insp_list %}
+                <span class="badge" style="background:#dbeafe;color:#1e40af;">{{ insp_list|length }} report(s)</span>
+              {% else %}
+                <span style="color:#9ca3af; font-size:.78rem;">Pending</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="action-btns">
+                <a href="{{ url_for('inspect_form', job_key=jk) }}"
+                   class="btn btn-sm btn-inspect">检验</a>
+                <a href="{{ url_for('order_edit', oid=o.id) }}"
+                   class="btn btn-sm btn-edit">编辑</a>
+                <form method="POST" action="{{ url_for('order_delete', oid=o.id) }}"
+                      onsubmit="return confirm('确认删除订单 {{ o.order_number }}？')">
+                  <button type="submit" class="btn btn-sm btn-del">删除</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      {% if status_filter %}
+        暂无「{{ status_filter }}」状态的订单
+      {% else %}
+        暂无手动录入的订单，请点击「新增订单」添加<br>
+        <span style="font-size:.8rem; margin-top:6px; display:block;">
+          每周 Excel 排期中的订单请在
+          <a href="{{ url_for('index') }}">Schedule 页面</a>查看
+        </span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+</div>
+{% endblock %}

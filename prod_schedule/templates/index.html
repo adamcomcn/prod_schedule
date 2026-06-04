@@ -1,0 +1,624 @@
+{% extends "base.html" %}
+{% block title %}Production Schedule{% endblock %}
+
+{% block extra_style %}
+.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.toolbar .upload-form { display: flex; align-items: center; gap: 8px; }
+.upload-info { font-size: .8rem; color: #6b7280; }
+.tab-bar { background: #fff; border-bottom: 2px solid #e0e4ea; padding: 0 24px;
+           display: flex; gap: 0; overflow-x: auto; position: sticky; top: 0; z-index: 10; }
+.tab-btn { border: none; background: none; padding: 13px 18px; cursor: pointer;
+           font-size: .85rem; font-weight: 500; color: #6b7280;
+           border-bottom: 3px solid transparent; margin-bottom: -2px;
+           white-space: nowrap; transition: color .15s; }
+.tab-btn:hover { color: #1a3a5c; }
+.tab-btn.active { color: #1a3a5c; border-bottom-color: #1a3a5c; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.table-toolbar { display: flex; align-items: center; gap: 12px; padding: 14px 24px 10px;
+                 background: #fff; flex-wrap: wrap; }
+.search-box { border: 1px solid #d0d5dd; border-radius: 6px; padding: 8px 12px;
+              font-size: .875rem; width: 260px; outline: none; }
+.search-box:focus { border-color: #1a3a5c; box-shadow: 0 0 0 3px rgba(26,58,92,.1); }
+.row-count { font-size: .8rem; color: #888; margin-left: auto; }
+
+.legend { display: flex; gap: 12px; font-size: .78rem; }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+
+.table-wrap { overflow: auto; background: #fff; }
+table { border-collapse: collapse; min-width: 100%; font-size: .8rem; }
+thead th { position: sticky; top: 0; background: #1a3a5c; color: #fff;
+           padding: 10px 12px; text-align: left; white-space: nowrap;
+           cursor: pointer; user-select: none; }
+thead th:hover { background: #234d7a; }
+.sort-icon { margin-left: 4px; opacity: .6; font-size: .7rem; }
+tbody tr { transition: background .1s; }
+tbody tr:nth-child(even) { background: #f8f9fc; }
+tbody tr:hover { background: #eef2f7; }
+tbody tr.row-new               { border-left: 3px solid #10b981; }
+tbody tr.row-not_shipped       { border-left: 3px solid #ef4444; }
+tbody tr.row-partially_shipped { border-left: 3px solid #f59e0b; }
+tbody tr.row-shipped           { border-left: 3px solid #9ca3af; opacity: .55; }
+tr.shipped-divider td { background: #f3f4f6; color: #6b7280; font-size: .75rem;
+                        font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+                        padding: 6px 12px; border-top: 2px solid #e5e7eb; }
+tbody td { padding: 7px 12px; border-bottom: 1px solid #e8eaee; white-space: nowrap; }
+td.inspect-col { text-align: center; }
+.hidden { display: none !important; }
+
+.no-data { text-align: center; padding: 60px 24px; color: #9ca3af; }
+.no-data svg { margin-bottom: 12px; opacity: .4; }
+
+.file-upload-area { border: 2px dashed #d0d5dd; border-radius: 8px; padding: 10px 14px;
+                    cursor: pointer; transition: border-color .15s; display: inline-block; }
+.file-upload-area:hover { border-color: #1a6fc4; }
+
+/* ── typo warning panel ── */
+.typo-panel { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px;
+              margin: 16px 24px 0; padding: 14px 18px; }
+.typo-panel-header { display: flex; align-items: center; gap: 8px; font-weight: 600;
+                     font-size: .9rem; color: #92400e; margin-bottom: 10px; cursor: pointer; }
+.typo-panel-header .chevron { transition: transform .2s; }
+.typo-panel-header .chevron.open { transform: rotate(180deg); }
+.typo-list { display: flex; flex-direction: column; gap: 8px; }
+.typo-item { background: #fff; border: 1px solid #fcd34d; border-radius: 6px;
+             padding: 10px 14px; font-size: .82rem; }
+.typo-item-header { font-weight: 600; color: #92400e; margin-bottom: 6px; }
+.typo-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.typo-col { background: #f9fafb; border-radius: 4px; padding: 6px 10px; }
+.typo-col label { font-size: .72rem; color: #6b7280; font-weight: 600;
+                  text-transform: uppercase; display: block; margin-bottom: 3px; }
+.diff-mismatch { background: #fef3c7; border-radius: 3px; padding: 1px 3px; }
+.badge-typo { background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; }
+tbody tr.row-typo { border-left: 3px solid #f59e0b; }
+tbody tr.row-qa-warn td { background: #fde8e8 !important; }
+tbody tr.row-qa-warn { border-left: 3px solid #dc2626 !important; }
+tbody tr.row-qa-warn:hover td { background: #fbd5d5 !important; }
+tbody tr.row-vtrust-warn td { background: #fff7ed !important; }
+tbody tr.row-vtrust-warn { border-left: 3px solid #f97316 !important; }
+tbody tr.row-vtrust-warn:hover td { background: #ffedd5 !important; }
+tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
+{% endblock %}
+
+{% block content %}
+<div class="page" style="padding-bottom:0; padding-top: 16px;">
+  <div class="toolbar">
+    <form method="POST" action="{{ url_for('upload_excel') }}" enctype="multipart/form-data"
+          class="upload-form">
+      <label class="file-upload-area" title="Upload new Excel schedule">
+        <input type="file" name="file" accept=".xlsx,.xls" style="display:none"
+               onchange="this.closest('form').querySelector('.file-name').textContent = this.files[0]?.name || 'No file'; this.closest('form').querySelector('.auto-submit-btn').click()">
+        &#128196; Choose Excel file
+      </label>
+      <input type="hidden" name="password" value="castings1">
+      <span class="file-name upload-info">No file chosen</span>
+      <button class="auto-submit-btn btn btn-primary" type="submit" style="display:none">Upload</button>
+    </form>
+    {% if upload_date %}
+      <span class="upload-info">Last uploaded: <strong>{{ upload_date }}</strong></span>
+    {% endif %}
+    {% if not google_configured %}
+      <a href="{{ url_for('settings') }}" class="btn btn-outline btn-sm">
+        &#9888; Configure Google Sheets/Drive
+      </a>
+    {% endif %}
+  </div>
+</div>
+
+{% if typo_flags %}
+<div class="typo-panel" id="typoPanel">
+  <div class="typo-panel-header" onclick="toggleTypoPanel()">
+    <span>&#9888;</span>
+    <span>{{ typo_flags|length }} possible typo{{ 's' if typo_flags|length != 1 }} detected &mdash; review before actioning</span>
+    <span class="chevron open" id="typoChevron">&#9660;</span>
+  </div>
+  <div class="typo-list" id="typoList">
+    {% for t in typo_flags %}
+    <div class="typo-item">
+      <div class="typo-item-header">
+        &#9888; [{{ t.sheet }}] &mdash; {{ t.reason }} ({{ t.score }}% similar)
+      </div>
+      <div class="typo-compare">
+        <div class="typo-col">
+          <label>This week (flagged as NEW)</label>
+          <div>Order: <strong>{{ t.curr_order }}</strong></div>
+          <div>Item:&nbsp;&nbsp;<strong>{{ t.curr_item }}</strong></div>
+        </div>
+        <div class="typo-col">
+          <label>Last week (showing as SHIPPED)</label>
+          <div>Order: <strong>{{ t.prev_order }}</strong></div>
+          <div>Item:&nbsp;&nbsp;<strong>{{ t.prev_item }}</strong></div>
+        </div>
+      </div>
+      <div style="margin-top:8px; font-size:.78rem; color:#6b7280;">
+        If this is a typo in the supplier's file, ask them to correct it.
+        If it is genuinely a new job, no action needed.
+        <a href="{{ url_for('inspect_form', job_key=t.curr_key) }}" target="_blank"
+           style="margin-left:8px;">Open inspection &rarr;</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if data %}
+<div class="tab-bar" id="tabBar">
+  {% for sheet in data.keys() %}
+  <button class="tab-btn {% if loop.first %}active{% endif %}"
+          onclick="switchTab({{ loop.index0 }})">{{ sheet }}</button>
+  {% endfor %}
+</div>
+
+{% for sheet_name, rows in data.items() %}
+{% set si = loop.index0 %}
+<div class="tab-panel {% if loop.first %}active{% endif %}" id="panel-{{ si }}">
+  <div class="table-toolbar">
+    <input type="text" class="search-box"
+           placeholder="Search {{ sheet_name }}..."
+           oninput="filterTable({{ si }}, this.value)">
+    <div class="legend">
+      <span class="legend-item"><span class="badge badge-new">NEW</span> New this week</span>
+      <span class="legend-item"><span class="badge badge-not_shipped">NOT SHIPPED</span> Still waiting</span>
+      <span class="legend-item"><span class="badge badge-partially_shipped">PARTIAL</span> Qty reduced</span>
+      <span class="legend-item"><span class="badge badge-shipped">SHIPPED</span> Gone from schedule</span>
+      <span class="legend-item"><span class="badge" style="background:#ffedd5;color:#9a3412;border:1px solid #f97316">V-Trust</span> Valve — no V-Trust</span>
+    </div>
+    {% set shipped_count = shipped_rows.get(sheet_name, [])|length %}
+    <span class="row-count" id="count-{{ si }}">
+      {{ [rows|length - 1, 0]|max }} active
+      {% if shipped_count %} + {{ shipped_count }} shipped{% endif %}
+    </span>
+  </div>
+
+  {% if rows|length > 1 %}
+  <div class="table-wrap">
+    <table id="table-{{ si }}">
+      <thead>
+        <tr>
+          <th style="min-width:90px">Status</th>
+          {% for h in rows[0] %}
+          <th onclick="sortTable({{ si }}, {{ loop.index0 + 1 }})">
+            {{ h }}<span class="sort-icon">&#x21C5;</span>
+          </th>
+          {% endfor %}
+          <th style="min-width:130px">Inspection Status</th>
+          <th style="min-width:120px">V-Trust</th>
+          <th style="min-width:100px">Report</th>
+        </tr>
+      </thead>
+      <tbody id="tbody-{{ si }}">
+        {% set headers = rows[0] %}
+
+        {# find QA BRTs column index once per sheet #}
+        {% set ns_qa = namespace(idx=-1) %}
+        {% for h in headers %}
+          {% if 'qa brt' in h|lower %}{% set ns_qa.idx = loop.index0 %}{% endif %}
+        {% endfor %}
+
+        {% for row in rows[1:] %}
+          {% set ns = namespace(order='', po='', item='') %}
+          {% for h in headers %}
+            {% if h|lower == 'daemco purchase order' %}{% set ns.po    = row[loop.index0] %}{% endif %}
+            {% if h|lower == 'order number'          %}{% set ns.order = row[loop.index0] %}{% endif %}
+            {% if h|lower == 'item code'             %}{% set ns.item  = row[loop.index0] %}{% endif %}
+          {% endfor %}
+          {% set job_key = sheet_name ~ '|' ~ (ns.po if ns.po else ns.order) ~ '|' ~ ns.item %}
+          {% set status = statuses.get(job_key, '') %}
+          {# QA alert: shipped or partially shipped but QA BRTs not confirmed #}
+          {% set qa_val = (row[ns_qa.idx] if ns_qa.idx >= 0 and ns_qa.idx < row|length else '')|lower|trim %}
+          {% set qa_warn = status in ['shipped', 'partially_shipped'] and qa_val not in ['yes', 'y'] %}
+          {# V-Trust alert: valve item shipped/partial without V-Trust pass #}
+          {% set insp = inspections.get(job_key, []) %}
+          {% set vtrust_val = '' %}
+          {% for r in insp|reverse %}{% if r.get('vtrust_result') and not vtrust_val %}{% set vtrust_val = r.vtrust_result %}{% endif %}{% endfor %}
+          {% set is_v = job_key in valve_keys %}
+          {% set vtrust_warn = is_v and status in ['shipped', 'partially_shipped'] and vtrust_val|lower != 'pass' %}
+        <tr class="row-{{ status }}{% if qa_warn %} row-qa-warn{% endif %}{% if vtrust_warn %} row-vtrust-warn{% endif %}" data-key="{{ job_key }}">
+          <td>
+            {% if status == 'new' %}
+              <span class="badge badge-new">NEW</span>
+            {% elif status == 'not_shipped' %}
+              <span class="badge badge-not_shipped">NOT SHIPPED</span>
+            {% elif status == 'partially_shipped' %}
+              <span class="badge badge-partially_shipped">PARTIAL</span>
+            {% elif status == 'typo' %}
+              <span class="badge badge-typo">&#9888; TYPO?</span>
+            {% endif %}
+            {% if qa_warn %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; No QA BRT</span>{% endif %}
+          </td>
+          {% for cell in row %}
+          <td>{{ cell }}</td>
+          {% endfor %}
+          <td class="inspect-col">
+            {% if insp %}
+              {% set last = insp[-1] %}
+              {% set result = last.result|lower %}
+              {% if result == 'pass' %}
+                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; Pass</span>
+              {% elif result == 'fail' %}
+                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; Fail</span>
+              {% else %}
+                <span class="badge badge-partially_shipped">~ {{ last.result }}</span>
+              {% endif %}
+              {% if insp|length > 1 %}
+                <span style="font-size:.72rem;color:#6b7280;display:block;margin-top:2px">{{ insp|length }} reports</span>
+              {% endif %}
+              <span style="font-size:.72rem;color:#9ca3af;display:block">{{ last.inspection_date }}</span>
+            {% else %}
+              <span class="badge badge-shipped">Pending</span>
+            {% endif %}
+          </td>
+          <td class="inspect-col">
+            {% if is_v %}
+              {% if vtrust_val|lower == 'pass' %}
+                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; Pass</span>
+              {% elif vtrust_val|lower == 'fail' %}
+                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; Fail</span>
+              {% elif vtrust_val %}
+                <span class="badge badge-partially_shipped">~ {{ vtrust_val }}</span>
+              {% else %}
+                <span class="badge" style="background:#ffedd5;color:#9a3412">Pending</span>
+              {% endif %}
+            {% else %}
+              <span style="color:#9ca3af;font-size:.75rem">N/A</span>
+            {% endif %}
+          </td>
+          <td class="inspect-col">
+            {% if ns.order %}
+            <a href="{{ url_for('inspect_form', job_key=job_key) }}"
+               class="btn btn-sm {% if insp %}btn-outline{% else %}btn-success{% endif %}" target="_blank">
+              &#128203; {% if insp %}View{% else %}Inspect{% endif %}
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+
+        {# ── shipped rows from previous week ── #}
+        {% if shipped_rows.get(sheet_name) %}
+        <tr class="shipped-divider">
+          <td colspan="{{ rows[0]|length + 2 }}">
+            &#9989; Shipped this week &mdash; {{ shipped_rows[sheet_name]|length }} job(s) no longer on schedule
+          </td>
+        </tr>
+        {% for row in shipped_rows[sheet_name] %}
+          {% set ns2 = namespace(order='', po='', item='') %}
+          {% for h in headers %}
+            {% if h|lower == 'daemco purchase order' %}{% set ns2.po    = row[loop.index0] %}{% endif %}
+            {% if h|lower == 'order number'          %}{% set ns2.order = row[loop.index0] %}{% endif %}
+            {% if h|lower == 'item code'             %}{% set ns2.item  = row[loop.index0] %}{% endif %}
+          {% endfor %}
+          {% set shipped_key = sheet_name ~ '|' ~ (ns2.po if ns2.po else ns2.order) ~ '|' ~ ns2.item %}
+          {% set insp2 = inspections.get(shipped_key, []) %}
+          {% set vtrust_val2 = '' %}
+          {% for r in insp2|reverse %}{% if r.get('vtrust_result') and not vtrust_val2 %}{% set vtrust_val2 = r.vtrust_result %}{% endif %}{% endfor %}
+          {% set is_v2 = shipped_key in valve_keys %}
+          {% set vtrust_warn2 = is_v2 and vtrust_val2|lower != 'pass' %}
+          {% set qa_val2 = (row[ns_qa.idx] if ns_qa.idx >= 0 and ns_qa.idx < row|length else '')|lower|trim %}
+          {% set qa_warn2 = qa_val2 not in ['yes', 'y'] %}
+        <tr class="row-shipped{% if qa_warn2 %} row-qa-warn{% endif %}{% if vtrust_warn2 %} row-vtrust-warn{% endif %}" data-key="{{ shipped_key }}">
+          <td>
+            <span class="badge badge-shipped">SHIPPED</span>
+            {% if qa_warn2 %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; No QA BRT</span>{% endif %}
+          </td>
+          {% for i in range(headers|length) %}
+          <td>{{ row[i] if i < row|length else '' }}</td>
+          {% endfor %}
+          <td class="inspect-col">
+            {% if insp2 %}
+              {% set last2 = insp2[-1] %}
+              {% set result2 = last2.result|lower %}
+              {% if result2 == 'pass' %}
+                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; Pass</span>
+              {% elif result2 == 'fail' %}
+                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; Fail</span>
+              {% else %}
+                <span class="badge badge-partially_shipped">~ {{ last2.result }}</span>
+              {% endif %}
+              {% if insp2|length > 1 %}
+                <span style="font-size:.72rem;color:#6b7280;display:block;margin-top:2px">{{ insp2|length }} reports</span>
+              {% endif %}
+              <span style="font-size:.72rem;color:#9ca3af;display:block">{{ last2.inspection_date }}</span>
+            {% else %}
+              <span class="badge badge-shipped">Pending</span>
+            {% endif %}
+          </td>
+          <td class="inspect-col">
+            {% if is_v2 %}
+              {% if vtrust_val2|lower == 'pass' %}
+                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; Pass</span>
+              {% elif vtrust_val2|lower == 'fail' %}
+                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; Fail</span>
+              {% elif vtrust_val2 %}
+                <span class="badge badge-partially_shipped">~ {{ vtrust_val2 }}</span>
+              {% else %}
+                <span class="badge" style="background:#ffedd5;color:#9a3412">Pending</span>
+              {% endif %}
+            {% else %}
+              <span style="color:#9ca3af;font-size:.75rem">N/A</span>
+            {% endif %}
+          </td>
+          <td class="inspect-col">
+            {% if ns2.order %}
+            <a href="{{ url_for('inspect_form', job_key=shipped_key) }}"
+               class="btn btn-sm {% if insp2 %}btn-outline{% else %}btn-success{% endif %}" target="_blank">
+              &#128203; {% if insp2 %}View{% else %}Inspect{% endif %}
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="no-data">No data in this sheet</div>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% else %}
+<div class="card" style="margin: 24px; text-align: center; padding: 60px;">
+  <div style="font-size: 3rem; margin-bottom: 16px;">&#128196;</div>
+  <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px;">No schedule loaded yet</div>
+  <div style="color: #6b7280; margin-bottom: 20px;">Upload the weekly Excel file above to get started.</div>
+</div>
+{% endif %}
+
+{# ── Outstanding Inspections (persistent across weeks) ── #}
+{% if outstanding_jobs %}
+<div style="margin: 0 0 0 0; padding: 0 0 24px 0;">
+
+  {# KPI bar #}
+  <div style="display:flex; gap:16px; padding: 12px 24px; flex-wrap:wrap; align-items:center;">
+    <div style="font-size:.85rem; font-weight:700; color:#1a3a5c;">&#9888; Outstanding Inspections</div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <span style="background:#fee2e2; color:#991b1b; border-radius:20px; padding:4px 14px; font-size:.78rem; font-weight:600;">
+        {{ outstanding_jobs|length }} 未完成
+      </span>
+      {% if kpi_overdue %}
+      <span style="background:#fef3c7; color:#92400e; border-radius:20px; padding:4px 14px; font-size:.78rem; font-weight:600;">
+        &#9888; {{ kpi_overdue }} 已逾期
+      </span>
+      {% endif %}
+      {% if kpi_total %}
+      {% set pct = ((kpi_done / kpi_total) * 100)|round|int %}
+      <span style="background:#d1fae5; color:#065f46; border-radius:20px; padding:4px 14px; font-size:.78rem; font-weight:600;">
+        &#10003; 完成率 {{ pct }}% ({{ kpi_done }}/{{ kpi_total }})
+      </span>
+      {% endif %}
+    </div>
+    <button onclick="toggleOutstanding()" id="outBtn"
+            style="margin-left:auto; background:none; border:1px solid #d0d5dd; border-radius:6px;
+                   padding:4px 12px; font-size:.78rem; cursor:pointer; color:#6b7280;">
+      收起 &#9650;
+    </button>
+  </div>
+
+  <div id="outstandingBody">
+  {% for sheet_name, jobs in outstanding_by_sheet.items() %}
+  <div style="margin-bottom:16px;">
+    <div style="background:#1a3a5c; color:#fff; font-size:.75rem; font-weight:700;
+                text-transform:uppercase; letter-spacing:.06em; padding:6px 24px;">
+      {{ sheet_name }} — {{ jobs|length }} 条待处理
+    </div>
+    <div style="overflow-x:auto; background:#fff;">
+      <table style="border-collapse:collapse; width:100%; font-size:.78rem;">
+        <thead>
+          <tr style="background:#fff7ed;">
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">逾期</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Order #</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Item Code</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Description</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Supplier</th>
+            <th style="padding:8px 12px; text-align:center; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Qty</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Est. Completion</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Must Ship</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Shipped Week</th>
+            <th style="padding:8px 12px; border-bottom:2px solid #fed7aa;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+          {% set overdue = job.est_completion and job.est_completion < today_str %}
+          {% set insp = inspections.get(job.job_key, []) %}
+          <tr style="border-bottom:1px solid #f1f5f9;
+                     {{ 'background:#fff7ed;' if overdue else '' }}">
+            <td style="padding:7px 12px; text-align:center;">
+              {% if overdue %}
+              <span style="color:#dc2626; font-weight:700; font-size:.8rem;">&#9888; 逾期</span>
+              {% else %}
+              <span style="color:#9ca3af; font-size:.75rem;">—</span>
+              {% endif %}
+            </td>
+            <td style="padding:7px 12px; font-family:monospace; font-size:.75rem; white-space:nowrap;">{{ job.order_number or '—' }}</td>
+            <td style="padding:7px 12px; font-family:monospace; font-size:.75rem; white-space:nowrap;">{{ job.item_code or '—' }}</td>
+            <td style="padding:7px 12px; max-width:200px; overflow:hidden; text-overflow:ellipsis;">{{ job.item_desc or '—' }}</td>
+            <td style="padding:7px 12px; white-space:nowrap;">{{ job.supplier or '—' }}</td>
+            <td style="padding:7px 12px; text-align:center;">{{ job.quantity or '—' }}</td>
+            <td style="padding:7px 12px; white-space:nowrap;
+                       {{ 'color:#dc2626; font-weight:600;' if overdue else '' }}">
+              {{ job.est_completion or '—' }}
+            </td>
+            <td style="padding:7px 12px; white-space:nowrap;">{{ job.must_ship or '—' }}</td>
+            <td style="padding:7px 12px; font-size:.72rem; color:#9ca3af; white-space:nowrap;">{{ job.week_label or '—' }}</td>
+            <td style="padding:7px 12px;">
+              {% set insp_result = insp[-1].result|lower if insp else '' %}
+              {% if insp %}
+                {% if insp_result == 'pass' %}
+                  <span style="background:#d1fae5;color:#065f46;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10003; {{ insp[-1].inspection_date }}</span>
+                {% else %}
+                  <span style="background:#fef3c7;color:#92400e;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">~ {{ insp_result }}</span>
+                {% endif %}
+                <br>
+              {% endif %}
+              <a href="{{ url_for('inspect_form', job_key=job.job_key) }}"
+                 class="btn btn-sm {% if insp %}btn-outline{% else %}btn-success{% endif %}"
+                 target="_blank" style="margin-top:4px; font-size:.72rem; padding:3px 10px;">
+                &#128203; {% if insp %}查看{% else %}开始检验{% endif %}
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+  </div>
+
+</div>
+{% endif %}
+
+{# ── Completed Inspection History ── #}
+{% if completed_jobs %}
+<div style="padding: 0 24px 32px;">
+  <div style="border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
+    <div onclick="toggleHistory()" style="display:flex; align-items:center; gap:10px;
+         padding:12px 18px; background:#f8fafc; cursor:pointer; user-select:none;">
+      <span style="font-size:.85rem; font-weight:700; color:#1a3a5c;">&#9989; 已完成检验历史</span>
+      <span style="background:#d1fae5; color:#065f46; border-radius:20px;
+                   padding:2px 10px; font-size:.75rem; font-weight:600;">
+        {{ completed_jobs|length }} 条
+      </span>
+      <span id="histChevron" style="margin-left:auto; color:#6b7280; font-size:.8rem;">&#9660; 展开</span>
+    </div>
+    <div id="historyBody" style="display:none; overflow-x:auto;">
+      <table style="border-collapse:collapse; width:100%; font-size:.78rem;">
+        <thead>
+          <tr style="background:#f0fdf4;">
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Region</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Order #</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Item Code</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Description</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Supplier</th>
+            <th style="padding:8px 12px; text-align:center; border-bottom:1px solid #bbf7d0; color:#065f46;">Qty</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Est. Completion</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Shipped Week</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">完成时间</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">检验结果</th>
+            <th style="padding:8px 12px; border-bottom:1px solid #bbf7d0;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in completed_jobs %}
+          {% set insp = inspections.get(job.job_key, []) %}
+          {% set last_insp = insp[-1] if insp else none %}
+          <tr style="border-bottom:1px solid #f1f5f9;">
+            <td style="padding:7px 12px; font-size:.75rem; color:#6b7280;">{{ job.sheet }}</td>
+            <td style="padding:7px 12px; font-family:monospace; font-size:.75rem; white-space:nowrap;">{{ job.order_number or '—' }}</td>
+            <td style="padding:7px 12px; font-family:monospace; font-size:.75rem; white-space:nowrap;">{{ job.item_code or '—' }}</td>
+            <td style="padding:7px 12px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ job.item_desc }}">{{ job.item_desc or '—' }}</td>
+            <td style="padding:7px 12px; white-space:nowrap;">{{ job.supplier or '—' }}</td>
+            <td style="padding:7px 12px; text-align:center;">{{ job.quantity or '—' }}</td>
+            <td style="padding:7px 12px; white-space:nowrap; font-size:.75rem;">{{ job.est_completion or '—' }}</td>
+            <td style="padding:7px 12px; font-size:.72rem; color:#9ca3af; white-space:nowrap;">{{ job.week_label or '—' }}</td>
+            <td style="padding:7px 12px; font-size:.72rem; color:#059669; white-space:nowrap;">
+              {{ job.completed_at[:10] if job.completed_at else '—' }}
+            </td>
+            <td style="padding:7px 12px; white-space:nowrap;">
+              {% if last_insp %}
+                {% if last_insp.result|lower == 'pass' %}
+                  <span style="background:#d1fae5;color:#065f46;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10003; Pass</span>
+                {% elif last_insp.result|lower == 'fail' %}
+                  <span style="background:#fee2e2;color:#991b1b;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10007; Fail</span>
+                {% else %}
+                  <span style="background:#f3f4f6;color:#374151;border-radius:12px;padding:2px 8px;font-size:.72rem;">{{ last_insp.result }}</span>
+                {% endif %}
+                <span style="font-size:.7rem; color:#9ca3af; margin-left:4px;">{{ last_insp.inspector_name }}</span>
+              {% else %}
+                <span style="color:#9ca3af; font-size:.75rem;">—</span>
+              {% endif %}
+            </td>
+            <td style="padding:7px 12px;">
+              <a href="{{ url_for('inspect_form', job_key=job.job_key) }}"
+                 class="btn btn-sm btn-outline" target="_blank"
+                 style="font-size:.72rem; padding:3px 10px;">
+                &#128203; 查看
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script>
+function fitTableWraps() {
+  document.querySelectorAll('.table-wrap').forEach(function(wrap) {
+    var top = wrap.getBoundingClientRect().top;
+    wrap.style.maxHeight = (window.innerHeight - top - 8) + 'px';
+  });
+}
+window.addEventListener('resize', fitTableWraps);
+document.addEventListener('DOMContentLoaded', fitTableWraps);
+
+function toggleHistory() {
+  var body = document.getElementById('historyBody');
+  var chev = document.getElementById('histChevron');
+  if (!body) return;
+  var hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  chev.innerHTML = hidden ? '&#9650; 收起' : '&#9660; 展开';
+}
+
+function toggleOutstanding() {
+  var body = document.getElementById('outstandingBody');
+  var btn  = document.getElementById('outBtn');
+  if (!body) return;
+  var hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  btn.innerHTML = hidden ? '收起 &#9650;' : '展开 &#9660;';
+}
+
+function toggleTypoPanel() {
+  const list = document.getElementById('typoList');
+  const chevron = document.getElementById('typoChevron');
+  const open = list.style.display !== 'none';
+  list.style.display = open ? 'none' : 'flex';
+  chevron.classList.toggle('open', !open);
+}
+
+function switchTab(idx) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', i===idx));
+  document.querySelectorAll('.tab-panel').forEach((p,i) => p.classList.toggle('active', i===idx));
+  fitTableWraps();
+}
+
+function filterTable(idx, query) {
+  const q = query.toLowerCase();
+  const tbody = document.getElementById('tbody-' + idx);
+  if (!tbody) return;
+  const rows = tbody.querySelectorAll('tr');
+  let vis = 0;
+  rows.forEach(r => {
+    const match = r.textContent.toLowerCase().includes(q);
+    r.classList.toggle('hidden', !match);
+    if (match) vis++;
+  });
+  document.getElementById('count-' + idx).textContent = vis + ' rows';
+}
+
+const sortState = {};
+function sortTable(tIdx, col) {
+  const key = tIdx + '_' + col;
+  const asc = sortState[key] = !sortState[key];
+  const tbody = document.getElementById('tbody-' + tIdx);
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  rows.sort((a, b) => {
+    const va = a.cells[col] ? a.cells[col].textContent.trim() : '';
+    const vb = b.cells[col] ? b.cells[col].textContent.trim() : '';
+    const na = parseFloat(va), nb = parseFloat(vb);
+    const cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb);
+    return asc ? cmp : -cmp;
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+</script>
+{% endblock %}

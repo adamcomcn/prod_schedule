@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.title }}{% endblock %}
+
+{% block extra_style %}
+.assign-card { border:1px solid #e2e8f0; border-radius:8px; padding:14px 16px; margin-bottom:10px; }
+.score-bar { display:flex; align-items:center; gap:10px; }
+.score-fill { height:10px; border-radius:5px; transition:width .3s; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:900px; margin:0 auto;">
+
+  <div style="margin-bottom:16px; display:flex; gap:12px; align-items:center;">
+    <a href="{{ url_for('training') }}" style="font-size:.85rem; color:#6b7280;">&#8592; 培训管理</a>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+      <div>
+        <h1 style="font-size:1.2rem; font-weight:700; color:#1a3a5c; margin-bottom:6px;">
+          {{ plan.title }}
+        </h1>
+        <div style="font-size:.85rem; color:#6b7280;">
+          试卷: <strong>{{ plan.exam_title or '未分配' }}</strong>
+          {% if plan.pass_score %} &nbsp;|&nbsp; 及格分: {{ plan.pass_score }}%{% endif %}
+          {% if plan.due_date %} &nbsp;|&nbsp; 截止: {{ plan.due_date }}{% endif %}
+        </div>
+        {% if plan.notes %}
+        <div style="font-size:.82rem; color:#374151; margin-top:6px;">{{ plan.notes }}</div>
+        {% endif %}
+      </div>
+      <a href="{{ url_for('exam_take', pid=plan.id) }}" class="btn btn-success" style="flex-shrink:0;">
+        &#9997; 开始答题
+      </a>
+    </div>
+  </div>
+
+  <!-- Assignment results -->
+  <div class="card">
+    <div class="card-title">参与员工 & 考试结果</div>
+
+    {% if assignments %}
+      {% for a in assignments %}
+      <div class="assign-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:600; font-size:.9rem;">{{ a.emp_name }}</div>
+            <div style="font-size:.78rem; color:#9ca3af;">{{ a.email }}</div>
+          </div>
+          <div style="text-align:right;">
+            {% if a.status == 'Completed' %}
+              {% set passed = a.passed %}
+              <div style="font-size:1.2rem; font-weight:700;
+                          color:{{ '#059669' if passed else '#dc2626' }};">
+                {{ a.score }}%
+              </div>
+              <div style="font-size:.75rem; font-weight:600;
+                          color:{{ '#059669' if passed else '#dc2626' }};">
+                {{ '✓ 通过' if passed else '✗ 未通过' }}
+              </div>
+              <div style="font-size:.72rem; color:#9ca3af; margin-top:2px;">
+                完成时间: {{ a.completed_at[:16] if a.completed_at else '—' }}
+              </div>
+            {% else %}
+              <span class="badge badge-partially_shipped" style="font-size:.8rem;">{{ a.status }}</span>
+            {% endif %}
+          </div>
+        </div>
+        {% if a.status == 'Completed' and a.score is not none %}
+        <div class="score-bar" style="margin-top:10px;">
+          <div style="flex:1; background:#e5e7eb; border-radius:5px; height:10px; overflow:hidden;">
+            <div class="score-fill" style="width:{{ a.score }}%;
+                 background:{{ '#10b981' if a.passed else '#ef4444' }};"></div>
+          </div>
+          <span style="font-size:.75rem; color:#6b7280; white-space:nowrap;">
+            及格线: {{ plan.pass_score }}%
+          </span>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+    <div style="color:#9ca3af; font-size:.85rem; text-align:center; padding:20px;">
+      暂无分配员工
+    </div>
+    {% endif %}
+
+    <!-- Assign employees -->
+    <form method="POST" action="{{ url_for('plan_assign', pid=plan.id) }}"
+          style="margin-top:16px; padding-top:16px; border-top:1px solid #f0f0f0;">
+      <div style="font-size:.82rem; font-weight:600; color:#374151; margin-bottom:10px;">
+        分配员工：
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+        {% for emp in all_employees %}
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:.85rem;">
+          <input type="checkbox" name="employee_ids" value="{{ emp.id }}"
+                 {{ 'checked' if emp.id in assigned_ids }}>
+          {{ emp.name }}
+        </label>
+        {% endfor %}
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">更新分配</button>
+    </form>
+  </div>
+
+  <!-- Exam preview -->
+  {% if exam_questions %}
+  <div class="card">
+    <div class="card-title">试卷题目预览（{{ exam_questions|length }} 题）</div>
+    {% for q in exam_questions %}
+    <div style="padding:10px 0; border-bottom:1px solid #f1f5f9;">
+      <div style="font-size:.85rem; font-weight:500; margin-bottom:5px;">
+        {{ loop.index }}. {{ q.question }}</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px 16px;
+                  font-size:.78rem; color:#6b7280;">
+        <span>A. {{ q.option_a }}</span><span>B. {{ q.option_b }}</span>
+        <span>C. {{ q.option_c }}</span><span>D. {{ q.option_d }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+</div>
+{% endblock %}

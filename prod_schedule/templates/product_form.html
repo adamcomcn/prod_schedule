@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block extra_style %}
+.img-preview { width:120px; height:120px; object-fit:cover; border-radius:8px;
+               border:1px solid #e2e8f0; display:block; margin-bottom:8px; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:680px; margin:0 auto;">
+
+  <div style="margin-bottom:16px;">
+    <a href="{{ url_for('products', tab='archive') }}" style="font-size:.85rem; color:#6b7280;">
+      &#8592; 返回产品档案
+    </a>
+  </div>
+
+  <div class="card">
+    <div class="card-title">{{ title }}</div>
+
+    <form method="POST" enctype="multipart/form-data">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 20px;">
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>产品名称 <span style="color:#dc2626;">*</span></label>
+          <input type="text" name="name" required
+                 value="{{ product.name if product else '' }}"
+                 placeholder="完整产品名称">
+        </div>
+
+        <div class="form-group">
+          <label>产品编码</label>
+          <input type="text" name="item_code"
+                 value="{{ product.item_code if product else '' }}"
+                 placeholder="如 RSV0150FL">
+        </div>
+
+        <div class="form-group">
+          <label>产品类别</label>
+          <select name="category_id">
+            <option value="">— 选择类别 —</option>
+            {% for c in cats %}
+            <option value="{{ c.id }}"
+              {{ 'selected' if product and product.category_id == c.id else '' }}>
+              {% if c.code %}[{{ c.code }}] {% endif %}{{ c.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>供应商</label>
+          <select name="supplier_id">
+            <option value="">— 选择供应商 —</option>
+            {% for s in sup_opts %}
+            <option value="{{ s.id }}"
+              {{ 'selected' if product and product.supplier_id == s.id else '' }}>
+              {{ s.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label><span class="lt" data-en="Sub Category" data-zh="子类别">Sub Category</span></label>
+          <input type="text" name="sub_category"
+                 value="{{ product.sub_category if product else '' }}"
+                 placeholder="e.g. DI Fittings - Socket Bend">
+        </div>
+
+        <div class="form-group">
+          <label><span class="lt" data-en="Crate Qty" data-zh="每箱数量">Crate Qty</span></label>
+          <input type="number" name="crate_qty" min="0"
+                 value="{{ product.crate_qty if product else '' }}"
+                 placeholder="件数">
+        </div>
+
+        <div class="form-group">
+          <label><span class="lt" data-en="Inspect Pcs (per crate)" data-zh="检验件数(每箱)">Inspect Pcs (per crate)</span></label>
+          <input type="text" name="inspect_pcs"
+                 value="{{ product.inspect_pcs if product else '' }}"
+                 placeholder="如 5 或 10%">
+        </div>
+
+        <div class="form-group">
+          <label><span class="lt" data-en="Time to Inspect (Mins/Pc)" data-zh="检验用时(分钟/件)">Time to Inspect (Mins/Pc)</span></label>
+          <input type="number" name="inspect_mins" step="0.1" min="0"
+                 value="{{ product.inspect_mins if product else '' }}"
+                 placeholder="分钟">
+        </div>
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label><span class="lt" data-en="Notes" data-zh="备注">Notes</span></label>
+          <textarea name="description" rows="3"
+                    placeholder="Check points, special requirements...">{{ product.description if product else '' }}</textarea>
+        </div>
+
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>产品图片</label>
+          {% if product and product.image_path %}
+          <img src="{{ url_for('product_image', filename=product.image_path) }}"
+               class="img-preview" id="preview-img" alt="当前图片">
+          <div style="font-size:.78rem; color:#6b7280; margin-bottom:6px;">
+            上传新图片将替换当前图片
+          </div>
+          {% else %}
+          <img id="preview-img" class="img-preview" style="display:none;" alt="">
+          {% endif %}
+          <input type="file" name="image" accept="image/*"
+                 onchange="previewImage(this)">
+          <div style="font-size:.78rem; color:#6b7280; margin-top:4px;">
+            支持 JPG、PNG、GIF 格式
+          </div>
+        </div>
+
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <a href="{{ url_for('products', tab='archive') }}" class="btn btn-outline">取消</a>
+      </div>
+    </form>
+  </div>
+
+</div>
+</div>
+
+<script>
+function previewImage(input) {
+  const img = document.getElementById('preview-img');
+  if (input.files && input.files[0]) {
+    const reader = new FileReader();
+    reader.onload = e => { img.src = e.target.result; img.style.display = 'block'; };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+</script>
+{% endblock %}
