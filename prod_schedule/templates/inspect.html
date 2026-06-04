@@ -1,64 +1,85 @@
 {% extends "base.html" %}
-{% block title %}Inspection — {{ job.get('Order Number', job.get('order number', '')) }}{% endblock %}
+{% block title %}Inspection — {{ job.get('Order Number', '') }}{% endblock %}
 
 {% block extra_style %}
-.inspect-layout { display: grid; grid-template-columns: 1fr 360px; gap: 20px;
-                  align-items: start; }
-@media (max-width: 900px) { .inspect-layout { grid-template-columns: 1fr; } }
+.inspect-layout { display:grid; grid-template-columns:1fr 360px; gap:20px; align-items:start; }
+@media(max-width:900px){ .inspect-layout { grid-template-columns:1fr; } }
 
-.job-header { background: #1a3a5c; color: #fff; padding: 16px 24px;
-              display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.job-header h2 { font-size: 1rem; font-weight: 700; }
-.job-header .meta { font-size: .8rem; opacity: .75; }
-.back-btn { color: rgba(255,255,255,.8); font-size: .85rem; margin-right: auto; }
-.back-btn:hover { color: #fff; }
+.job-header { background:#1a3a5c; color:#fff; padding:16px 24px;
+              display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.job-header h2 { font-size:1rem; font-weight:700; }
+.job-header .meta { font-size:.8rem; opacity:.75; }
+.back-btn { color:rgba(255,255,255,.8); font-size:.85rem; margin-right:auto; }
+.back-btn:hover { color:#fff; }
 
-.section-title { font-weight: 600; font-size: .9rem; color: #1a3a5c;
-                 margin-bottom: 14px; padding-bottom: 8px;
-                 border-bottom: 2px solid #e8eaee; }
-.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.section-title { font-weight:600; font-size:.9rem; color:#1a3a5c;
+                 margin-bottom:14px; padding-bottom:8px;
+                 border-bottom:2px solid #e8eaee; }
+.row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
 
-.result-group { display: flex; gap: 12px; }
-.result-btn { flex: 1; padding: 12px; border: 2px solid #d0d5dd; border-radius: 8px;
-              cursor: pointer; text-align: center; font-size: .9rem; font-weight: 600;
-              background: #fff; transition: all .15s; }
-.result-btn:hover { border-color: #1a6fc4; }
-.result-btn.selected-pass { border-color: #059669; background: #d1fae5; color: #065f46; }
-.result-btn.selected-fail { border-color: #dc2626; background: #fee2e2; color: #991b1b; }
-.result-btn.selected-partial { border-color: #f59e0b; background: #fef3c7; color: #92400e; }
-input[name=result] { display: none; }
+.result-group { display:flex; gap:12px; }
+.result-btn { flex:1; padding:12px; border:2px solid #d0d5dd; border-radius:8px;
+              cursor:pointer; text-align:center; font-size:.9rem; font-weight:600;
+              background:#fff; transition:all .15s; }
+.result-btn:hover { border-color:#1a6fc4; }
+.result-btn.selected-pass    { border-color:#059669; background:#d1fae5; color:#065f46; }
+.result-btn.selected-fail    { border-color:#dc2626; background:#fee2e2; color:#991b1b; }
+.result-btn.selected-partial { border-color:#f59e0b; background:#fef3c7; color:#92400e; }
+input[name=result] { display:none; }
 
-/* ── file upload ── */
-.drop-zone { border: 2px dashed #d0d5dd; border-radius: 10px; padding: 28px 20px;
-             text-align: center; cursor: pointer; transition: all .2s;
-             background: #fafbfc; }
-.drop-zone.drag-over { border-color: #1a6fc4; background: #eff6ff; }
-.drop-zone svg { margin-bottom: 8px; opacity: .5; }
-.drop-zone p { font-size: .85rem; color: #6b7280; margin-top: 6px; }
-.drop-zone strong { color: #1a6fc4; }
-#file-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
-.file-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-             background: #f3f4f6; border-radius: 6px; font-size: .8rem; }
-.file-item .file-icon { font-size: 1rem; }
-.file-item .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-item .file-size { color: #9ca3af; white-space: nowrap; }
-.file-item .remove-file { cursor: pointer; color: #ef4444; font-weight: bold;
-                          padding: 0 4px; border: none; background: none; }
+/* ── Evidence cards ── */
+.ev-card { border-radius:10px; border:1.5px solid #e2e8f0; margin-bottom:14px;
+           overflow:hidden; }
+.ev-header { padding:12px 16px; display:flex; align-items:center; gap:10px;
+             font-weight:700; font-size:.88rem; }
+.ev-required-badge { margin-left:auto; font-size:.68rem; font-weight:700; padding:2px 8px;
+                     border-radius:10px; background:rgba(0,0,0,.12); white-space:nowrap; }
+.ev-body { padding:14px 16px; }
+.ev-guidance { background:#f8fafc; border:1px solid #e2e8f0; border-radius:7px;
+               padding:10px 14px; margin-bottom:12px; font-size:.78rem; color:#374151;
+               white-space:pre-wrap; line-height:1.6; }
+.ev-guidance summary { font-size:.78rem; font-weight:600; color:#6b7280; cursor:pointer;
+                       list-style:none; display:flex; align-items:center; gap:6px; }
+.ev-guidance summary::before { content:'📌'; }
 
-/* ── job info panel ── */
-.info-table { width: 100%; font-size: .82rem; border-collapse: collapse; }
-.info-table td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
-.info-table td:first-child { color: #6b7280; font-weight: 500; width: 40%; white-space: nowrap; }
+/* small drop zone per evidence type */
+.ev-drop { border:1.5px dashed #d0d5dd; border-radius:8px; padding:16px;
+           text-align:center; cursor:pointer; transition:all .2s; background:#fafbfc;
+           font-size:.8rem; color:#6b7280; }
+.ev-drop:hover, .ev-drop.drag-over { border-color:#1a6fc4; background:#eff6ff; }
+.ev-file-list { margin-top:8px; display:flex; flex-direction:column; gap:5px; }
+.ev-file-item { display:flex; align-items:center; gap:8px; padding:5px 9px;
+                background:#f3f4f6; border-radius:5px; font-size:.77rem; }
+.ev-file-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ev-file-size { color:#9ca3af; flex-shrink:0; }
+.ev-remove { cursor:pointer; color:#ef4444; font-weight:bold; border:none;
+             background:none; padding:0 3px; }
 
-/* ── past inspections ── */
-.past-item { border: 1px solid #e8eaee; border-radius: 8px; padding: 12px 14px;
-             margin-bottom: 10px; font-size: .82rem; }
-.past-item-header { display: flex; align-items: center; gap: 8px;
-                    margin-bottom: 6px; font-weight: 500; }
-.past-item-files a { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px;
-                     border: 1px solid #d0d5dd; border-radius: 4px; font-size: .75rem;
-                     color: #1a6fc4; }
+/* Pass/Fail per evidence */
+.ev-result-row { display:flex; gap:8px; margin-top:10px; }
+.ev-result-btn { flex:1; padding:7px; border:1.5px solid #d0d5dd; border-radius:7px;
+                 cursor:pointer; text-align:center; font-size:.8rem; font-weight:600;
+                 background:#fff; transition:all .15s; }
+.ev-result-btn:hover { border-color:#1a6fc4; }
+.ev-result-btn.sel-pass { border-color:#059669; background:#d1fae5; color:#065f46; }
+.ev-result-btn.sel-fail { border-color:#dc2626; background:#fee2e2; color:#991b1b; }
+.ev-result-btn.sel-na   { border-color:#9ca3af; background:#f3f4f6; color:#6b7280; }
+
+/* job info */
+.info-table { width:100%; font-size:.82rem; border-collapse:collapse; }
+.info-table td { padding:6px 8px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
+.info-table td:first-child { color:#6b7280; font-weight:500; width:40%; white-space:nowrap; }
+
+/* past inspections */
+.past-item { border:1px solid #e8eaee; border-radius:8px; padding:12px 14px;
+             margin-bottom:10px; font-size:.82rem; }
+.past-item-header { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-weight:500; }
+.ev-tag { display:inline-flex; align-items:center; gap:4px; padding:2px 8px;
+          border-radius:10px; font-size:.72rem; font-weight:600; margin:2px 3px 2px 0; }
+.ev-tag-pass { background:#d1fae5; color:#065f46; }
+.ev-tag-fail { background:#fee2e2; color:#991b1b; }
+.ev-tag-pend { background:#f3f4f6; color:#6b7280; }
 {% endblock %}
 
 {% block content %}
@@ -82,15 +103,15 @@ input[name=result] { display: none; }
               align-items:center; gap:14px; flex-wrap:wrap;">
     <div style="flex:1; min-width:200px;">
       <div style="font-weight:600; color:#1e40af; font-size:.9rem;">
-        &#128203; <span class="lt" data-en="Matched form template:" data-zh="找到对应检验表单：">Matched form template:</span> {{ matched_tpl.name }}
+        &#128203; Matched form template: {{ matched_tpl.name }}
       </div>
       <div style="font-size:.78rem; color:#3b82f6; margin-top:2px;">
-        <span class="lt" data-en="Click to use the digital checklist — no Excel needed" data-zh="点击右侧按钮使用标准化数字检验单，无需 Excel">Click to use the digital checklist — no Excel needed</span>
+        Click to use the digital checklist — no Excel needed
       </div>
     </div>
     <a href="{{ url_for('inspect_checklist', job_key=job.job_key, tpl=matched_tpl.id) }}"
        class="btn btn-primary" style="white-space:nowrap;">
-      &#9654; <span class="lt" data-en="Use Form Template" data-zh="使用标准检验单">Use Form Template</span>
+      &#9654; Use Form Template
     </a>
   </div>
   {% endif %}
@@ -106,7 +127,6 @@ input[name=result] { display: none; }
               enctype="multipart/form-data"
               id="inspect-form">
 
-          <!-- hidden job fields -->
           <input type="hidden" name="region"           value="{{ job.get('region', '') }}">
           <input type="hidden" name="order_number"     value="{{ job.get('Order Number', '') }}">
           <input type="hidden" name="item_code"        value="{{ job.get('Item Code', '') }}">
@@ -114,7 +134,7 @@ input[name=result] { display: none; }
           <input type="hidden" name="supplier"         value="{{ job.get('Supplier', '') }}">
           <input type="hidden" name="quantity_ordered" value="{{ job.get('Quantity', '') }}">
 
-          <!-- inspector & date -->
+          <!-- Inspector & Date -->
           <div class="row2">
             <div class="form-group">
               <label>Inspector Name *
@@ -125,62 +145,115 @@ input[name=result] { display: none; }
                 {% endif %}
               </label>
               {% if auto_inspectors|length == 1 %}
-                <input type="text" name="inspector_name" required
-                       value="{{ auto_inspectors[0] }}"
+                <input type="text" name="inspector_name" required value="{{ auto_inspectors[0] }}"
                        style="background:#f0fdf4; border-color:#86efac;">
-                <div style="font-size:.75rem; color:#059669; margin-top:3px;">
-                  &#10003; 已根据产品类别自动分配
-                </div>
+                <div style="font-size:.75rem; color:#059669; margin-top:3px;">&#10003; 已根据产品类别自动分配</div>
               {% elif auto_inspectors|length > 1 %}
-                <select name="inspector_name" required
-                        style="background:#f0fdf4; border-color:#86efac;">
-                  {% for name in auto_inspectors %}
-                  <option value="{{ name }}">{{ name }}</option>
-                  {% endfor %}
+                <select name="inspector_name" required style="background:#f0fdf4; border-color:#86efac;">
+                  {% for n in auto_inspectors %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
                 </select>
-                <div style="font-size:.75rem; color:#059669; margin-top:3px;">
-                  &#10003; 共 {{ auto_inspectors|length }} 名检验员，请选择
-                </div>
+                <div style="font-size:.75rem; color:#059669; margin-top:3px;">&#10003; 共 {{ auto_inspectors|length }} 名检验员，请选择</div>
               {% else %}
-                <input type="text" name="inspector_name" required
-                       placeholder="Full name">
+                <input type="text" name="inspector_name" required placeholder="Full name">
                 {% if matched_category %}
-                <div style="font-size:.75rem; color:#f59e0b; margin-top:3px;">
-                  &#9888; 该产品类别暂未配置检验员
-                </div>
+                <div style="font-size:.75rem; color:#f59e0b; margin-top:3px;">&#9888; 该产品类别暂未配置检验员</div>
                 {% endif %}
               {% endif %}
             </div>
             <div class="form-group">
               <label>Inspection Date *</label>
-              <input type="date" name="inspection_date" required
-                     value="{{ now_date }}">
+              <input type="date" name="inspection_date" required value="{{ now_date }}">
             </div>
           </div>
 
-          <!-- quantities -->
+          <!-- Quantities -->
           <div class="row3">
             <div class="form-group">
               <label>Quantity Ordered</label>
               <input type="number" name="quantity_ordered_display"
-                     value="{{ job.get('Quantity', '') }}" readonly
-                     style="background:#f9fafb">
+                     value="{{ job.get('Quantity', '') }}" readonly style="background:#f9fafb">
             </div>
             <div class="form-group">
               <label>Quantity Inspected *</label>
-              <input type="number" name="quantity_inspected" required
-                     placeholder="0" min="0">
+              <input type="number" name="quantity_inspected" required placeholder="0" min="0">
             </div>
             <div class="form-group">
               <label>Quantity Passed</label>
-              <input type="number" name="quantity_passed"
-                     placeholder="0" min="0">
+              <input type="number" name="quantity_passed" placeholder="0" min="0">
             </div>
           </div>
 
-          <!-- inspection result -->
+          <!-- Evidence uploads per type -->
+          {% if evidence_reqs %}
+          <div style="margin-bottom:6px;">
+            <div class="section-title" style="margin-top:16px;">
+              &#128196; Required Evidence
+              <span style="font-size:.75rem; font-weight:400; color:#6b7280; margin-left:8px;">
+                Upload files and mark Pass / Fail for each item
+              </span>
+            </div>
+
+            {% for ev in evidence_reqs %}
+            <div class="ev-card">
+              <div class="ev-header" style="background:{{ ev.bg }}; color:{{ ev.color }};">
+                <span>{{ ev.icon }} {{ ev.label }}</span>
+                <span class="ev-required-badge">Required</span>
+              </div>
+              <div class="ev-body">
+
+                <!-- Guidance -->
+                <details class="ev-guidance">
+                  <summary>Inspector Guidance</summary>
+                  <div style="margin-top:8px; padding-top:8px; border-top:1px solid #e2e8f0;">
+                    {{ ev.guidance }}
+                  </div>
+                </details>
+
+                <!-- File drop zone -->
+                <div class="ev-drop"
+                     id="drop-{{ ev.type }}"
+                     onclick="document.getElementById('ev-file-{{ ev.type }}').click()"
+                     ondragover="evDragOver(event,'{{ ev.type }}')"
+                     ondragleave="evDragLeave(event,'{{ ev.type }}')"
+                     ondrop="evDrop(event,'{{ ev.type }}')">
+                  <div>&#128193; <strong>Click to upload</strong> or drag &amp; drop</div>
+                  <div style="margin-top:4px; font-size:.72rem; color:#9ca3af;">
+                    {{ ev.accepts }}
+                  </div>
+                  <input type="file" id="ev-file-{{ ev.type }}"
+                         name="ev_file_{{ ev.type }}"
+                         multiple
+                         accept="{{ ev.accepts }}"
+                         style="display:none"
+                         onchange="evHandleFiles(this.files,'{{ ev.type }}')">
+                </div>
+                <div id="ev-list-{{ ev.type }}" class="ev-file-list"></div>
+
+                <!-- Pass / Fail -->
+                <input type="hidden" name="ev_result_{{ ev.type }}"
+                       id="ev-result-{{ ev.type }}">
+                <div class="ev-result-row">
+                  <button type="button" class="ev-result-btn"
+                          onclick="evSetResult('{{ ev.type }}','Pass',this)">&#9989; Pass</button>
+                  <button type="button" class="ev-result-btn"
+                          onclick="evSetResult('{{ ev.type }}','Fail',this)">&#10060; Fail</button>
+                  <button type="button" class="ev-result-btn"
+                          onclick="evSetResult('{{ ev.type }}','N/A',this)">— N/A</button>
+                </div>
+
+                <!-- Notes -->
+                <textarea name="ev_notes_{{ ev.type }}" rows="1"
+                          style="margin-top:8px; font-size:.8rem;"
+                          placeholder="Notes for {{ ev.label }}…"></textarea>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <!-- Overall Inspection Result -->
           <div class="form-group">
-            <label>Inspection Result *</label>
+            <label>Overall Inspection Result *</label>
             <input type="hidden" name="result" id="result-input" required>
             <div class="result-group">
               <button type="button" class="result-btn" data-val="Pass"
@@ -192,11 +265,11 @@ input[name=result] { display: none; }
             </div>
           </div>
 
-          <!-- defect codes checklist -->
+          <!-- Defect codes -->
           <div class="form-group">
             <label>Defects Found
               <span style="font-size:.75rem; font-weight:400; color:#6b7280; margin-left:6px;">
-                Select all applicable defect codes
+                Select all applicable
               </span>
             </label>
             {% if defect_groups %}
@@ -208,27 +281,21 @@ input[name=result] { display: none; }
                                 list-style:none; display:flex; justify-content:space-between;
                                 align-items:center; user-select:none;">
                   {{ cat_name }}
-                  <span style="font-size:.72rem; color:#9ca3af; font-weight:400;">
-                    {{ codes|length }} codes
-                  </span>
+                  <span style="font-size:.72rem; color:#9ca3af; font-weight:400;">{{ codes|length }} codes</span>
                 </summary>
                 <div style="padding:10px 14px; display:grid;
                             grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:4px;">
                   {% for dc in codes %}
                   <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;
-                                padding:5px 6px; border-radius:5px; font-size:.8rem;
-                                transition:background .1s;"
+                                padding:5px 6px; border-radius:5px; font-size:.8rem;"
                          onmouseover="this.style.background='#f3f4f6'"
                          onmouseout="this.style.background=''">
                     <input type="checkbox" name="defect_codes" value="{{ dc.code }}"
                            style="margin-top:2px; flex-shrink:0;">
                     <span>
-                      <strong style="color:#1a3a5c;">{{ dc.code }}</strong>
-                      &nbsp;{{ dc.name }}
+                      <strong style="color:#1a3a5c;">{{ dc.code }}</strong>&nbsp;{{ dc.name }}
                       {% if dc.name_cn %}
-                      <span style="color:#9ca3af; font-size:.73rem; display:block;">
-                        {{ dc.name_cn }}
-                      </span>
+                      <span style="color:#9ca3af; font-size:.73rem; display:block;">{{ dc.name_cn }}</span>
                       {% endif %}
                     </span>
                   </label>
@@ -239,10 +306,10 @@ input[name=result] { display: none; }
             </div>
             {% endif %}
             <textarea name="defects" rows="2" style="margin-top:8px;"
-                      placeholder="Additional defect notes or details not covered by codes above..."></textarea>
+                      placeholder="Additional defect notes…"></textarea>
           </div>
 
-          <!-- shipping / packing -->
+          <!-- Packing / Marking -->
           <div class="row2">
             <div class="form-group">
               <label>Crate / Packing Condition</label>
@@ -264,80 +331,18 @@ input[name=result] { display: none; }
             </div>
           </div>
 
-          <!-- notes -->
+          <!-- Notes -->
           <div class="form-group">
             <label>Additional Notes</label>
             <textarea name="notes" rows="3"
-                      placeholder="Any additional observations, recommendations, or follow-up actions..."></textarea>
-          </div>
-
-          <!-- V-Trust section (valves only) -->
-          {% if is_valve %}
-          <div style="border:2px solid #f97316;border-radius:8px;padding:16px 18px;margin-bottom:16px;background:#fff7ed;">
-            <div style="font-weight:600;font-size:.9rem;color:#9a3412;margin-bottom:12px;">
-              &#127973; V-Trust Third-Party Inspection <span style="font-size:.75rem;font-weight:400;">(required for all valves)</span>
-            </div>
-            <div class="row2">
-              <div class="form-group" style="margin-bottom:12px">
-                <label>V-Trust Result</label>
-                <select name="vtrust_result">
-                  <option value="">— Not yet done —</option>
-                  <option value="Pass">Pass</option>
-                  <option value="Fail">Fail</option>
-                  <option value="In Progress">In Progress</option>
-                </select>
-              </div>
-              <div class="form-group" style="margin-bottom:12px">
-                <label>V-Trust Inspection Date</label>
-                <input type="date" name="vtrust_date">
-              </div>
-            </div>
-            <div class="row2">
-              <div class="form-group" style="margin-bottom:12px">
-                <label>V-Trust Inspector Name</label>
-                <input type="text" name="vtrust_inspector" placeholder="V-Trust inspector">
-              </div>
-              <div class="form-group" style="margin-bottom:12px">
-                <label>Certificate / Reference No.</label>
-                <input type="text" name="vtrust_cert" placeholder="e.g. VT-2026-12345">
-              </div>
-            </div>
-            <div class="form-group" style="margin-bottom:0">
-              <label>V-Trust Notes</label>
-              <textarea name="vtrust_notes" rows="2" placeholder="Any V-Trust findings or conditions..."></textarea>
-            </div>
-          </div>
-          {% endif %}
-
-          <!-- file upload -->
-          <div class="form-group">
-            <label>Attachments (Photos, Videos, Documents)</label>
-            <div class="drop-zone" id="drop-zone"
-                 onclick="document.getElementById('file-input').click()"
-                 ondragover="handleDragOver(event)"
-                 ondragleave="handleDragLeave(event)"
-                 ondrop="handleDrop(event)">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
-                   stroke="#6b7280" stroke-width="1.5">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/>
-                <line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
-              <p><strong>Click to upload</strong> or drag and drop here</p>
-              <p>Photos, videos, PDFs, documents &mdash; any file type</p>
-              <input type="file" id="file-input" name="attachments"
-                     multiple style="display:none"
-                     onchange="handleFiles(this.files)">
-            </div>
-            <div id="file-list"></div>
+                      placeholder="Additional observations, recommendations, or follow-up actions…"></textarea>
           </div>
 
           <div style="display:flex; gap:10px; margin-top:8px;">
             <button type="submit" class="btn btn-success" style="flex:1">
               &#10003; Submit Inspection Report
             </button>
-            <button type="reset" class="btn btn-outline"
-                    onclick="clearResult()">Clear</button>
+            <button type="reset" class="btn btn-outline" onclick="clearAll()">Clear</button>
           </div>
         </form>
       </div>
@@ -348,23 +353,39 @@ input[name=result] { display: none; }
       <div class="card">
         <div class="section-title">&#128230; Job Details</div>
         <table class="info-table">
-          <tr><td>Order Number</td>  <td><strong>{{ job.get('Order Number', '—') }}</strong></td></tr>
-          <tr><td>PO Number</td>     <td>{{ job.get('Daemco Purchase Order', '—') }}</td></tr>
-          <tr><td>Order Date</td>    <td>{{ job.get('Order Date', '—') }}</td></tr>
-          <tr><td>Supplier</td>      <td>{{ job.get('Supplier', '—') }}</td></tr>
-          <tr><td>Item Code</td>     <td>{{ job.get('Item Code', '—') }}</td></tr>
-          <tr><td>Description</td>   <td style="white-space:normal">{{ job.get('Item Description', '—') }}</td></tr>
-          <tr><td>Quantity</td>      <td>{{ job.get('Quantity', '—') }}</td></tr>
+          <tr><td>Order Number</td>   <td><strong>{{ job.get('Order Number', '—') }}</strong></td></tr>
+          <tr><td>PO Number</td>      <td>{{ job.get('Daemco Purchase Order', '—') }}</td></tr>
+          <tr><td>Order Date</td>     <td>{{ job.get('Order Date', '—') }}</td></tr>
+          <tr><td>Supplier</td>       <td>{{ job.get('Supplier', '—') }}</td></tr>
+          <tr><td>Item Code</td>      <td>{{ job.get('Item Code', '—') }}</td></tr>
+          <tr><td>Description</td>    <td style="white-space:normal">{{ job.get('Item Description', '—') }}</td></tr>
+          <tr><td>Quantity</td>       <td>{{ job.get('Quantity', '—') }}</td></tr>
           <tr><td>Est. Completion</td><td>{{ job.get('Estimated Completion Date', '—') }}</td></tr>
-          <tr><td>Must Ship</td>     <td>{{ job.get('Must Ship Date', '—') }}</td></tr>
-          <tr><td>Region</td>        <td>{{ job.get('region', '—') }}</td></tr>
+          <tr><td>Must Ship</td>      <td>{{ job.get('Must Ship Date', '—') }}</td></tr>
+          <tr><td>Region</td>         <td>{{ job.get('region', '—') }}</td></tr>
         </table>
+
+        {% if evidence_reqs %}
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0;">
+          <div style="font-size:.75rem; font-weight:600; color:#6b7280; margin-bottom:6px;">
+            REQUIRED EVIDENCE
+          </div>
+          {% for ev in evidence_reqs %}
+          <div style="display:flex; align-items:center; gap:8px; padding:4px 0;
+                      font-size:.78rem; color:#374151;">
+            <span>{{ ev.icon }}</span>
+            <span>{{ ev.label }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
 
       {% if past_inspections %}
       <div class="card">
         <div class="section-title">&#128196; Past Inspections ({{ past_inspections|length }})</div>
         {% for p in past_inspections|reverse %}
+        {% set pidx = (past_inspections|length - loop.index) %}
         <div class="past-item">
           <div class="past-item-header">
             {% if p.result == 'Pass' %}
@@ -377,8 +398,49 @@ input[name=result] { display: none; }
             <span>{{ p.inspector_name }}</span>
             <span style="color:#9ca3af; margin-left:auto">{{ p.inspection_date }}</span>
           </div>
-          <div>Inspected: {{ p.quantity_inspected }} /
-               {{ p.quantity_ordered }} ordered</div>
+          <div>Inspected: {{ p.quantity_inspected }} / {{ p.quantity_ordered }} ordered</div>
+
+          {# Evidence results #}
+          {% if p.get('evidence') %}
+          <div style="margin-top:6px; display:flex; flex-wrap:wrap;">
+            {% for etype, edata in p.evidence.items() %}
+            {% set res = edata.get('result','') %}
+            <span class="ev-tag {% if res=='Pass' %}ev-tag-pass{% elif res=='Fail' %}ev-tag-fail{% else %}ev-tag-pend{% endif %}">
+              {% if etype in ['brt','checklist','material','daq','xrf','vtrust','spark'] %}
+              {{ {'brt':'📋','checklist':'✅','material':'🔬','daq':'📊','xrf':'⚗️','vtrust':'🎥','spark':'⚡'}.get(etype,'📎') }}
+              {% endif %}
+              {{ etype|upper }}{% if res %}: {{ res }}{% endif %}
+              {% if edata.get('files') %}
+              <span style="opacity:.6; font-size:.68rem;">({{ edata.files|length }}f)</span>
+              {% endif %}
+            </span>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          {# Attachment links from DB #}
+          {% if past_attachments.get(pidx) %}
+          <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
+            {% for att in past_attachments[pidx] %}
+            {% if att.drive_link and att.drive_link.startswith('http') %}
+            <a href="{{ att.drive_link }}" target="_blank"
+               style="font-size:.73rem; padding:2px 7px; border:1px solid #d0d5dd;
+                      border-radius:4px; color:#1a6fc4; text-decoration:none;">
+              {{ {'brt':'📋','checklist':'✅','material':'🔬','daq':'📊','xrf':'⚗️','vtrust':'🎥','spark':'⚡'}.get(att.evidence_type,'📎') }}
+              {{ att.original_name[:28] }}{% if att.original_name|length > 28 %}…{% endif %}
+            </a>
+            {% else %}
+            <a href="{{ url_for('serve_attachment', aid=att.id) }}"
+               style="font-size:.73rem; padding:2px 7px; border:1px solid #d0d5dd;
+                      border-radius:4px; color:#1a6fc4; text-decoration:none;">
+              {{ {'brt':'📋','checklist':'✅','material':'🔬','daq':'📊','xrf':'⚗️','vtrust':'🎥','spark':'⚡'}.get(att.evidence_type,'📎') }}
+              {{ att.original_name[:28] }}{% if att.original_name|length > 28 %}…{% endif %}
+            </a>
+            {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
+
           {% if p.get('defect_codes') %}
           <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
             {% for code in p.defect_codes %}
@@ -393,36 +455,17 @@ input[name=result] { display: none; }
           {% if p.notes %}
           <div style="margin-top:4px; color:#374151">Notes: {{ p.notes }}</div>
           {% endif %}
-          {% if p.get('vtrust_result') %}
-          <div style="margin-top:6px;padding:4px 8px;background:#fff7ed;border-radius:4px;font-size:.78rem;">
-            &#127973; V-Trust: <strong>{{ p.vtrust_result }}</strong>
-            {% if p.get('vtrust_date') %} &mdash; {{ p.vtrust_date }}{% endif %}
-            {% if p.get('vtrust_cert') %} &mdash; Cert: {{ p.vtrust_cert }}{% endif %}
-          </div>
-          {% endif %}
-          {% if p.file_links %}
-          <div class="past-item-files" style="margin-top:6px">
-            {% for link in p.file_links %}
-              {% if link.startswith('http') %}
-                <a href="{{ link }}" target="_blank">&#128206; File {{ loop.index }}</a>
-              {% else %}
-                <span style="font-size:.75rem;color:#9ca3af">{{ link }}</span>
-              {% endif %}
-            {% endfor %}
-          </div>
-          {% endif %}
         </div>
         {% endfor %}
       </div>
       {% endif %}
 
       {% if not google_configured %}
-      <div class="card" style="border: 1px solid #fcd34d; background:#fffbeb;">
+      <div class="card" style="border:1px solid #fcd34d; background:#fffbeb;">
         <div style="font-size:.85rem; color:#92400e;">
           <strong>&#9888; Google not configured</strong><br>
           Inspections are saved locally only.
-          <a href="{{ url_for('settings') }}">Configure Google Sheets/Drive</a>
-          to sync records and file uploads.
+          <a href="{{ url_for('settings') }}">Configure Google Drive</a> to sync file uploads.
         </div>
       </div>
       {% endif %}
@@ -432,69 +475,82 @@ input[name=result] { display: none; }
 </div>
 
 <script>
-// Result selector
+// ── Overall result ──────────────────────────────────────────────────────────
 function setResult(val, btn) {
   document.getElementById('result-input').value = val;
-  document.querySelectorAll('.result-btn').forEach(b => {
-    b.className = 'result-btn';
-  });
-  const cls = val === 'Pass' ? 'selected-pass' : val === 'Fail' ? 'selected-fail' : 'selected-partial';
+  document.querySelectorAll('.result-btn').forEach(b => b.className = 'result-btn');
+  const cls = val==='Pass' ? 'selected-pass' : val==='Fail' ? 'selected-fail' : 'selected-partial';
   btn.className = 'result-btn ' + cls;
 }
-function clearResult() {
+function clearAll() {
   document.getElementById('result-input').value = '';
   document.querySelectorAll('.result-btn').forEach(b => b.className = 'result-btn');
+  document.querySelectorAll('[id^="ev-result-"]').forEach(el => el.value = '');
+  document.querySelectorAll('.ev-result-btn').forEach(b => b.className = 'ev-result-btn');
 }
 
-// File upload
-const dt = new DataTransfer();
-function handleFiles(files) {
+// ── Per-evidence Pass/Fail ──────────────────────────────────────────────────
+function evSetResult(etype, val, btn) {
+  document.getElementById('ev-result-' + etype).value = val;
+  btn.closest('.ev-result-row').querySelectorAll('.ev-result-btn').forEach(b => b.className = 'ev-result-btn');
+  const cls = val==='Pass' ? 'sel-pass' : val==='Fail' ? 'sel-fail' : 'sel-na';
+  btn.className = 'ev-result-btn ' + cls;
+}
+
+// ── Per-evidence file upload ────────────────────────────────────────────────
+const evDTs = {};
+
+function evGetDT(etype) {
+  if (!evDTs[etype]) evDTs[etype] = new DataTransfer();
+  return evDTs[etype];
+}
+
+function evHandleFiles(files, etype) {
+  const dt = evGetDT(etype);
   Array.from(files).forEach(f => dt.items.add(f));
-  renderFileList();
-  document.getElementById('file-input').files = dt.files;
+  evRenderList(etype);
+  document.getElementById('ev-file-' + etype).files = dt.files;
 }
-function handleDragOver(e) {
+
+function evDragOver(e, etype) {
   e.preventDefault();
-  document.getElementById('drop-zone').classList.add('drag-over');
+  document.getElementById('drop-' + etype).classList.add('drag-over');
 }
-function handleDragLeave(e) {
-  document.getElementById('drop-zone').classList.remove('drag-over');
+function evDragLeave(e, etype) {
+  document.getElementById('drop-' + etype).classList.remove('drag-over');
 }
-function handleDrop(e) {
+function evDrop(e, etype) {
   e.preventDefault();
-  document.getElementById('drop-zone').classList.remove('drag-over');
-  handleFiles(e.dataTransfer.files);
+  document.getElementById('drop-' + etype).classList.remove('drag-over');
+  evHandleFiles(e.dataTransfer.files, etype);
 }
-function removeFile(idx) {
+
+function evRemoveFile(etype, idx) {
+  const dt = evGetDT(etype);
   const newDt = new DataTransfer();
   Array.from(dt.files).forEach((f, i) => { if (i !== idx) newDt.items.add(f); });
-  dt.clearData ? (() => {
-    while (dt.items.length) dt.items.remove(0);
-    Array.from(newDt.files).forEach(f => dt.items.add(f));
-  })() : null;
-  renderFileList();
-  document.getElementById('file-input').files = dt.files;
+  while (dt.items.length) dt.items.remove(0);
+  Array.from(newDt.files).forEach(f => dt.items.add(f));
+  evRenderList(etype);
+  document.getElementById('ev-file-' + etype).files = dt.files;
 }
-function renderFileList() {
-  const list = document.getElementById('file-list');
+
+function evRenderList(etype) {
+  const list = document.getElementById('ev-list-' + etype);
   list.innerHTML = '';
-  Array.from(dt.files).forEach((f, i) => {
-    const icon = f.type.startsWith('image') ? '&#128247;'
-               : f.type.startsWith('video') ? '&#127909;'
-               : f.name.endsWith('.pdf')    ? '&#128441;' : '&#128196;';
-    const size = f.size > 1048576 ? (f.size/1048576).toFixed(1)+' MB'
-               : (f.size/1024).toFixed(0)+' KB';
-    list.innerHTML += `<div class="file-item">
-      <span class="file-icon">${icon}</span>
-      <span class="file-name">${f.name}</span>
-      <span class="file-size">${size}</span>
-      <button class="remove-file" type="button" onclick="removeFile(${i})">&#x2715;</button>
+  Array.from(evGetDT(etype).files).forEach((f, i) => {
+    const icon = f.type.startsWith('image') ? '🖼️'
+               : f.type.startsWith('video') ? '🎥'
+               : f.name.endsWith('.pdf')    ? '📄'
+               : f.name.match(/\.xlsx?$/i)  ? '📊' : '📎';
+    const sz = f.size > 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(0)+' KB';
+    list.innerHTML += `<div class="ev-file-item">
+      <span>${icon}</span>
+      <span class="ev-file-name">${f.name}</span>
+      <span class="ev-file-size">${sz}</span>
+      <button class="ev-remove" type="button" onclick="evRemoveFile('${etype}',${i})">✕</button>
     </div>`;
   });
 }
-
-// Set today's date default
-document.querySelector('input[name=inspection_date]').value =
-  new Date().toISOString().split('T')[0];
 </script>
 {% endblock %}

@@ -74,6 +74,181 @@ def is_valve(item_description, item_code, config=None):
     code = str(item_code).upper()
     return any(code.startswith(p.upper()) for p in prefixes if p)
 
+# ── Evidence requirement system ───────────────────────────────────────────────
+
+EVIDENCE_META = {
+    'brt':      {'label': 'BRT (Batch Release Test)',      'icon': '📋', 'color': '#1e40af', 'bg': '#dbeafe', 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png'},
+    'checklist':{'label': 'Inspection Checklist',           'icon': '✅', 'color': '#065f46', 'bg': '#d1fae5', 'accepts': '.pdf,.jpg,.jpeg,.png'},
+    'material': {'label': 'Material Report',                'icon': '🔬', 'color': '#92400e', 'bg': '#fef3c7', 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png'},
+    'daq':      {'label': 'DAQ Data (Pressure Test)',       'icon': '📊', 'color': '#5b21b6', 'bg': '#ede9fe', 'accepts': '.pdf,.xlsx,.xls,.csv'},
+    'vtrust':   {'label': 'V-Trust Pressure Test Video',    'icon': '🎥', 'color': '#9a3412', 'bg': '#fff7ed', 'accepts': '.mp4,.mov,.avi,.mkv'},
+    'spark':    {'label': 'Spark / Holiday Test Video',     'icon': '⚡', 'color': '#991b1b', 'bg': '#fee2e2', 'accepts': '.mp4,.mov,.avi,.mkv'},
+    'xrf':      {'label': 'XRF Report (Material Composition)', 'icon': '⚗️', 'color': '#065f46', 'bg': '#d1fae5', 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png'},
+}
+
+def extract_dn(item_code):
+    """Return DN size (int) from an RSV item code, or None if not parseable."""
+    import re
+    code = (item_code or '').upper().strip()
+    # RSV0 + 3 digits:  RSV0080… → DN80,  RSV0250… → DN250
+    m = re.match(r'^RSV0(\d{3})', code)
+    if m:
+        return int(m.group(1))
+    # RSVPE/SO/SP/CAP + digits:  RSVPE125 → DN125
+    m = re.match(r'^RSV(?:PE|SO|SP|CAP)(\d{1,3})', code)
+    if m:
+        return int(m.group(1))
+    return None
+
+def get_evidence_requirements(item_code, category_name=''):
+    """Return list of evidence dicts required for this product.
+    Each dict: {type, label, icon, color, bg, accepts, guidance}
+
+    Matching priority:
+      1. Item code prefix (reliable, code-driven)
+      2. Product category name (fallback when code prefix unknown)
+    """
+    import re
+    code = (item_code or '').upper().strip()
+    cat  = (category_name or '').lower()
+
+    def ev(etype, guidance):
+        m = EVIDENCE_META[etype]
+        return {**m, 'type': etype, 'guidance': guidance}
+
+    reqs = []
+
+    # ── 1. RSVCAP — Valve Caps (Checklist only, NOT gate valves) ───────
+    # Must be checked before the generic RSV block
+    if code.startswith('RSVCAP'):
+        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
+        return reqs
+
+    # ── 2. All RSV Gate Valves (FL / SO / SP / PE and any other suffix) ─
+    # Rules are size-driven for ALL sub-types (FL, SO, SP, PE, etc.)
+    # Spreadsheet rows 3 & 4 explicitly list FL, SO, SP, PE together
+    if code.startswith('RSV'):
+        dn = extract_dn(code)
+
+        # BRT guidance depends only on DN (not sub-type)
+        if dn == 375:
+            brt_guide = (
+                'Check Material sheet: chemical and mechanical properties within limits\n'
+                'Check Checking Report: C1–C7 & A1–A9 must be OK (refer to SPEC sheet)\n'
+                'Note: DN375 has no DAQ — verify pressure test via Cells Z–AG and V-Trust video only')
+        else:
+            brt_guide = (
+                'Check Material sheet: chemical and mechanical properties within limits (Spec 500-7)\n'
+                'Check Checking Report: C1–C7 & A1–A9 must be OK (refer to SPEC sheet)\n'
+                'Check DAQ section (Cells AB–BH):\n'
+                '  • T1 Average [AL] (Gate test 1) ≥ 1.76 MPa\n'
+                '  • T2 Average [AW] (Gate test 2) ≥ 1.76 MPa\n'
+                '  • T3 Average [BH] (Body test)   ≥ 2.40 MPa')
+        reqs.append(ev('brt', brt_guide))
+
+        # DAQ — all RSVs except DN375
+        if dn != 375:
+            reqs.append(ev('daq',
+                'Upload pressure test machine exported data (Excel or PDF).\n'
+                'Verify: T1 Average ≥ 1.76 MPa, T2 Average ≥ 1.76 MPa, T3 Average ≥ 2.40 MPa'))
+
+        # V-Trust — all RSVs
+        reqs.append(ev('vtrust',
+            'Upload V-Trust pressure test video(s) (MP4 / MOV).\n'
+            'Ensure all videos are received and show acceptable test results.'))
+
+        # Spark / Holiday test — DN200 and above only
+        if dn is not None and dn >= 200:
+            reqs.append(ev('spark',
+                '电火花 Holiday / Spark test video required for DN200 and above.\n'
+                'Ensure all spark test videos are received (MP4 / MOV).'))
+
+        return reqs
+
+    # ── 3. UMC Couplings (item code starts with UMC) ───────────────────
+    if code.startswith('UMC'):
+        is_gal = 'GAL' in code
+        guide = ('Check 316 SS.jpg — confirm material is 316 stainless steel\n'
+                 'Check Assembly Report — all criteria acceptable\n'
+                 'Check Bolt 316.jpg — confirm bolt material is 316 SS\n'
+                 'Check Dimension Report — compare to Daemco design drawings')
+        if is_gal:
+            guide += '\nFor GAL variant: ensure bolts are Steel (Q235B) material'
+        reqs.append(ev('brt', guide))
+        return reqs
+
+    # ── 4. Category-based matching (for products without a known code prefix) ─
+    # ── Repair Clamps ──────────────────────────────────────────────────
+    if 'repair' in cat or 'repair clamp' in cat:
+        is_gal = 'GAL' in code
+        guide = ('Check Assembly Folder — all checkboxes acceptable\n'
+                 'Check Dimension Report — compare to Daemco REPAIR CLAMP 2023.11.7 drawing\n'
+                 'Check Material Folder — verify 316 stainless steel')
+        if is_gal:
+            guide += '\nFor GAL variant: ensure bolts are Steel (Q235B) material'
+        reqs.append(ev('brt', guide))
+        reqs.append(ev('xrf',
+            'Upload XRF Excel / PDF report.\n'
+            'Verify material is 316 stainless steel. Confirm Pass or Fail.'))
+        return reqs
+
+    # ── Couplings (Gibault and other non-UMC couplings) ────────────────
+    if 'coupling' in cat:
+        reqs.append(ev('brt', 'Review BRT document for acceptability.'))
+        reqs.append(ev('material',
+            'Check material report: chemical and mechanical properties within limits.'))
+        return reqs
+
+    # ── DI Fittings ────────────────────────────────────────────────────
+    if 'di fitting' in cat or ('fitting' in cat and 'di' in cat):
+        reqs.append(ev('brt',
+            'Check DPL Fitting — Casting Inspection Report: all criteria acceptable\n'
+            'Check DPL Fitting — Final Inspection Report: all criteria acceptable'))
+        return reqs
+
+    # ── Blank Flanges / Tapped Flanges ─────────────────────────────────
+    if 'flange' in cat:
+        reqs.append(ev('brt', 'Review BRT document for acceptability.'))
+        reqs.append(ev('material',
+            'Check material report: chemical and mechanical properties within limits.'))
+        return reqs
+
+    # ── Extension Spindles ─────────────────────────────────────────────
+    if 'spindle' in cat:
+        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
+        reqs.append(ev('material',
+            'Check material report: chemical and mechanical properties within limits.'))
+        return reqs
+
+    # ── Stainless Steel Straps ─────────────────────────────────────────
+    if 'strap' in cat:
+        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
+        reqs.append(ev('material',
+            'Check material report: chemical and mechanical properties within limits.'))
+        return reqs
+
+    # ── Gaskets ────────────────────────────────────────────────────────
+    if 'gasket' in cat:
+        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
+        return reqs
+
+    # ── Handwheels ─────────────────────────────────────────────────────
+    if 'handwheel' in cat:
+        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
+        return reqs
+
+    # ── Covers & Lids (all CI/DI cover and lid variants) ───────────────
+    if 'cover' in cat or 'lid' in cat:
+        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
+        reqs.append(ev('material',
+            'Check material report: chemical and mechanical properties within limits.\n'
+            'For CI/DI products: compare to Dandong Foundry acceptable limits\n'
+            'for cast iron / ductile iron (chemical composition & mechanical properties).'))
+        return reqs
+
+    return reqs
+
+
 def get_vtrust_status(inspections_list):
     """Return the V-Trust result from the most recent inspection that has one."""
     for record in reversed(inspections_list):
@@ -870,68 +1045,107 @@ def inspect_form(job_key):
         if matched_tpl:
             break
 
+    evidence_reqs = get_evidence_requirements(
+        job_info.get('Item Code', ''),
+        matched_category or ''
+    )
+
+    # Load existing attachments for past inspections
+    with db_conn() as conn:
+        att_rows = conn.execute(
+            'SELECT * FROM inspection_attachments WHERE job_key=? ORDER BY insp_index, id',
+            (job_key,)
+        ).fetchall()
+    from collections import defaultdict
+    past_attachments = defaultdict(list)
+    for a in att_rows:
+        past_attachments[a['insp_index']].append(a)
+
     return render_template('inspect.html',
                            job=job_info,
                            past_inspections=past,
+                           past_attachments=dict(past_attachments),
                            is_valve=valve_flag,
                            defect_groups=defect_groups,
                            matched_tpl=matched_tpl,
                            auto_inspectors=auto_inspectors,
                            matched_category=matched_category,
+                           evidence_reqs=evidence_reqs,
                            now_date=datetime.now().strftime('%Y-%m-%d'),
                            google_configured=bool(config.get('sheet_id') and os.path.exists(CREDENTIALS_FILE)))
 
 @app.route('/inspect/<path:job_key>/submit', methods=['POST'])
 def submit_inspection(job_key):
     form = request.form
-    files = request.files.getlist('attachments')
+    now_ts = datetime.now().strftime('%Y%m%d%H%M%S')
 
     inspection_data = {
-        'job_key': job_key,
-        'region': form.get('region', ''),
-        'order_number': form.get('order_number', ''),
-        'item_code': form.get('item_code', ''),
-        'item_description': form.get('item_description', ''),
-        'supplier': form.get('supplier', ''),
-        'quantity_ordered': form.get('quantity_ordered', ''),
-        'inspector_name': form.get('inspector_name', ''),
-        'inspection_date': form.get('inspection_date', ''),
-        'quantity_inspected': form.get('quantity_inspected', ''),
-        'result': form.get('result', ''),
-        'defect_codes': request.form.getlist('defect_codes'),
-        'defects': form.get('defects', ''),
-        'notes': form.get('notes', ''),
-        'vtrust_result':   form.get('vtrust_result', ''),
-        'vtrust_date':     form.get('vtrust_date', ''),
-        'vtrust_cert':     form.get('vtrust_cert', ''),
-        'vtrust_inspector':form.get('vtrust_inspector', ''),
-        'vtrust_notes':    form.get('vtrust_notes', ''),
-        'submitted_at': datetime.now().isoformat(),
+        'job_key':           job_key,
+        'region':            form.get('region', ''),
+        'order_number':      form.get('order_number', ''),
+        'item_code':         form.get('item_code', ''),
+        'item_description':  form.get('item_description', ''),
+        'supplier':          form.get('supplier', ''),
+        'quantity_ordered':  form.get('quantity_ordered', ''),
+        'inspector_name':    form.get('inspector_name', ''),
+        'inspection_date':   form.get('inspection_date', ''),
+        'quantity_inspected':form.get('quantity_inspected', ''),
+        'result':            form.get('result', ''),
+        'defect_codes':      request.form.getlist('defect_codes'),
+        'defects':           form.get('defects', ''),
+        'notes':             form.get('notes', ''),
+        'submitted_at':      datetime.now().isoformat(),
     }
 
-    file_links = []
-    local_file_names = []
+    # ── Evidence uploads: one file-input per evidence type ───────────────
+    evidence_results = {}
+    all_file_links   = []
+    all_file_names   = []
 
-    for uploaded_file in files:
-        if not uploaded_file.filename:
-            continue
-        safe_name = uploaded_file.filename.replace(' ', '_')
-        tmp_path = os.path.join(UPLOAD_DIR, f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_name}")
-        uploaded_file.save(tmp_path)
-        local_file_names.append({'name': safe_name, 'path': tmp_path})
+    # Determine which insp_index this will be
+    cache = load_json(INSPECTIONS_CACHE, {})
+    insp_index = len(cache.get(job_key, []))
 
-        # Try Google Drive upload
-        link = upload_file_to_drive(tmp_path, safe_name, job_key)
-        if link:
-            file_links.append(link)
-        else:
-            file_links.append(f'[local] {safe_name}')
+    # Evidence type names from form (ev_result_brt, ev_result_daq, …)
+    ev_types = [k[10:] for k in form if k.startswith('ev_result_')]
 
-    inspection_data['file_links'] = file_links
-    inspection_data['file_names'] = [f['name'] for f in local_file_names]
+    job_dir = os.path.join(UPLOAD_DIR, job_key.replace('|', '_').replace('/', '_'))
+    os.makedirs(job_dir, exist_ok=True)
+
+    with db_conn() as conn:
+        for etype in ev_types:
+            ev_result = form.get(f'ev_result_{etype}', '')
+            ev_notes  = form.get(f'ev_notes_{etype}', '')
+            ev_files  = request.files.getlist(f'ev_file_{etype}')
+            evidence_results[etype] = {'result': ev_result, 'notes': ev_notes, 'files': []}
+
+            for uploaded_file in ev_files:
+                if not uploaded_file.filename:
+                    continue
+                orig_name  = uploaded_file.filename
+                safe_name  = orig_name.replace(' ', '_')
+                saved_name = f"{etype}_{now_ts}_{safe_name}"
+                file_path  = os.path.join(job_dir, saved_name)
+                uploaded_file.save(file_path)
+                all_file_names.append(orig_name)
+
+                drive_link = upload_file_to_drive(file_path, saved_name, job_key)
+                link = drive_link or f'[local] {saved_name}'
+                all_file_links.append(link)
+                evidence_results[etype]['files'].append(orig_name)
+
+                conn.execute(
+                    'INSERT INTO inspection_attachments '
+                    '(job_key, insp_index, evidence_type, original_name, saved_name, '
+                    ' file_path, drive_link, result, notes) VALUES (?,?,?,?,?,?,?,?,?)',
+                    (job_key, insp_index, etype, orig_name, saved_name,
+                     file_path, drive_link or '', ev_result, ev_notes))
+
+    inspection_data['evidence']    = evidence_results
+    inspection_data['file_links']  = all_file_links
+    inspection_data['file_names']  = all_file_names
 
     # Save to local cache
-    cache = load_json(INSPECTIONS_CACHE, {})
     if job_key not in cache:
         cache[job_key] = []
     cache[job_key].append(inspection_data)
@@ -1558,6 +1772,22 @@ def tasks():
 
     return render_template('tasks.html', tasks=rows, inspections=inspections,
                            today=today, status_filter=status_filter, stats=stats)
+
+@app.route('/attachments/<int:aid>')
+def serve_attachment(aid):
+    with db_conn() as conn:
+        row = conn.execute(
+            'SELECT * FROM inspection_attachments WHERE id=?', (aid,)
+        ).fetchone()
+    if not row or not os.path.exists(row['file_path']):
+        return 'File not found', 404
+    return send_from_directory(
+        os.path.dirname(row['file_path']),
+        os.path.basename(row['file_path']),
+        as_attachment=False,
+        download_name=row['original_name']
+    )
+
 
 @app.route('/tasks/<int:tid>/status', methods=['POST'])
 def task_status_update(tid):

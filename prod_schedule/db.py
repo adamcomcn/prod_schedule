@@ -114,6 +114,20 @@ CREATE TABLE IF NOT EXISTS inspection_tasks (
     created_at     TEXT    DEFAULT (datetime('now','localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS inspection_attachments (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_key       TEXT    NOT NULL,
+    insp_index    INTEGER DEFAULT 0,
+    evidence_type TEXT    NOT NULL,
+    original_name TEXT    DEFAULT '',
+    saved_name    TEXT    DEFAULT '',
+    file_path     TEXT    DEFAULT '',
+    drive_link    TEXT    DEFAULT '',
+    result        TEXT    DEFAULT '',
+    notes         TEXT    DEFAULT '',
+    uploaded_at   TEXT    DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS kb_categories (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
