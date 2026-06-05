@@ -100,6 +100,207 @@
     </div>
   </div>
 
+  <!-- ── Week-over-Week Movement ───────────────────────────────────── -->
+  {% if totals.total > 0 %}
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">
+      <span class="lt" data-en="Schedule Movement vs Last Week" data-zh="本周排期变动（对比上周）">Schedule Movement vs Last Week</span>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:start;">
+
+      <!-- Left: flow diagram -->
+      <div>
+        <div style="font-size:.72rem; font-weight:600; text-transform:uppercase;
+                    letter-spacing:.05em; color:#9ca3af; margin-bottom:14px;">
+          <span class="lt" data-en="Week-over-week flow" data-zh="周环比流转">Week-over-week flow</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px;">
+
+          <!-- Last week box -->
+          <div style="background:#f1f5f9; border-radius:10px; padding:14px 18px;
+                      text-align:center; min-width:72px; flex-shrink:0;">
+            <div style="font-size:1.7rem; font-weight:800; color:#374151; line-height:1;">
+              {{ prev_total }}
+            </div>
+            <div style="font-size:.68rem; color:#9ca3af; margin-top:3px;">
+              <span class="lt" data-en="Last week" data-zh="上周">Last week</span>
+            </div>
+          </div>
+
+          <!-- Arrows -->
+          <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
+            {% if totals.shipped > 0 %}
+            <div style="display:flex; align-items:center; gap:6px; font-size:.78rem;">
+              <span style="color:#6b7280; font-weight:700; width:32px; text-align:right; flex-shrink:0;">
+                −{{ totals.shipped }}
+              </span>
+              <div style="flex:1; height:2px; background:#d1d5db; border-radius:1px;"></div>
+              <span style="color:#6b7280; font-size:.7rem; white-space:nowrap;">
+                <span class="lt" data-en="shipped" data-zh="已发货">shipped</span>
+              </span>
+            </div>
+            {% endif %}
+            {% if totals.new > 0 %}
+            <div style="display:flex; align-items:center; gap:6px; font-size:.78rem;">
+              <span style="color:#059669; font-weight:700; width:32px; text-align:right; flex-shrink:0;">
+                +{{ totals.new }}
+              </span>
+              <div style="flex:1; height:2px; background:#6ee7b7; border-radius:1px;"></div>
+              <span style="color:#059669; font-size:.7rem; white-space:nowrap;">
+                <span class="lt" data-en="new orders" data-zh="新增订单">new orders</span>
+              </span>
+            </div>
+            {% endif %}
+            {% if totals.partially_shipped > 0 %}
+            <div style="display:flex; align-items:center; gap:6px; font-size:.78rem;">
+              <span style="color:#d97706; font-weight:700; width:32px; text-align:right; flex-shrink:0;">
+                ~{{ totals.partially_shipped }}
+              </span>
+              <div style="flex:1; height:2px; background:#fcd34d; border-radius:1px;"></div>
+              <span style="color:#d97706; font-size:.7rem; white-space:nowrap;">
+                <span class="lt" data-en="partial" data-zh="部分发货">partial</span>
+              </span>
+            </div>
+            {% endif %}
+          </div>
+
+          <!-- This week box -->
+          {% set net = curr_in_schedule - prev_total %}
+          <div style="background:#dbeafe; border-radius:10px; padding:14px 18px;
+                      text-align:center; min-width:72px; flex-shrink:0;">
+            <div style="font-size:1.7rem; font-weight:800; color:#1e40af; line-height:1;">
+              {{ curr_in_schedule }}
+            </div>
+            <div style="font-size:.68rem; color:#6b7280; margin-top:3px;">
+              <span class="lt" data-en="This week" data-zh="本周">This week</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Net change label -->
+        {% set net = curr_in_schedule - prev_total %}
+        <div style="margin-top:12px; text-align:center; font-size:.82rem; color:#6b7280;">
+          <span class="lt" data-en="Net change:" data-zh="净变化：">Net change:</span>
+          <strong style="margin-left:4px;
+            color:{% if net > 0 %}#dc2626{% elif net < 0 %}#059669{% else %}#6b7280{% endif %};">
+            {% if net > 0 %}+{% endif %}{{ net }}
+          </strong>
+          <span style="margin-left:6px; font-size:.75rem; color:#9ca3af;">
+            {% if net > 0 %}
+              <span class="lt" data-en="schedule grew" data-zh="排期增加">schedule grew</span>
+            {% elif net < 0 %}
+              <span class="lt" data-en="schedule reduced" data-zh="排期缩减">schedule reduced</span>
+            {% else %}
+              <span class="lt" data-en="no net change" data-zh="持平">no net change</span>
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      <!-- Right: stacked composition bar -->
+      <div>
+        <div style="font-size:.72rem; font-weight:600; text-transform:uppercase;
+                    letter-spacing:.05em; color:#9ca3af; margin-bottom:14px;">
+          <span class="lt" data-en="This week's status composition" data-zh="本周状态分布">This week's status composition</span>
+        </div>
+
+        <!-- Stacked bar -->
+        <div style="display:flex; height:28px; border-radius:8px; overflow:hidden;
+                    margin-bottom:14px; background:#f3f4f6;">
+          {% if totals.new > 0 %}
+          <div style="width:{{ (totals.new / totals.total * 100)|round(1) }}%;
+                      background:#10b981;"
+               title="New: {{ totals.new }}"></div>
+          {% endif %}
+          {% if totals.not_shipped > 0 %}
+          <div style="width:{{ (totals.not_shipped / totals.total * 100)|round(1) }}%;
+                      background:#ef4444;"
+               title="Not Shipped: {{ totals.not_shipped }}"></div>
+          {% endif %}
+          {% if totals.partially_shipped > 0 %}
+          <div style="width:{{ (totals.partially_shipped / totals.total * 100)|round(1) }}%;
+                      background:#f59e0b;"
+               title="Partial: {{ totals.partially_shipped }}"></div>
+          {% endif %}
+          {% if totals.shipped > 0 %}
+          <div style="width:{{ (totals.shipped / totals.total * 100)|round(1) }}%;
+                      background:#9ca3af;"
+               title="Shipped: {{ totals.shipped }}"></div>
+          {% endif %}
+        </div>
+
+        <!-- Legend grid -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:.8rem;">
+          <div style="display:flex; align-items:center; gap:7px;">
+            <span style="width:11px; height:11px; border-radius:3px; background:#10b981; flex-shrink:0;"></span>
+            <span>
+              <span class="lt" data-en="New" data-zh="新增">New</span>:
+              <strong>{{ totals.new }}</strong>
+              <span style="color:#9ca3af;">({{ (totals.new / totals.total * 100)|round(0)|int }}%)</span>
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:7px;">
+            <span style="width:11px; height:11px; border-radius:3px; background:#ef4444; flex-shrink:0;"></span>
+            <span>
+              <span class="lt" data-en="Not Shipped" data-zh="未发货">Not Shipped</span>:
+              <strong>{{ totals.not_shipped }}</strong>
+              <span style="color:#9ca3af;">({{ (totals.not_shipped / totals.total * 100)|round(0)|int }}%)</span>
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:7px;">
+            <span style="width:11px; height:11px; border-radius:3px; background:#f59e0b; flex-shrink:0;"></span>
+            <span>
+              <span class="lt" data-en="Partial" data-zh="部分发货">Partial</span>:
+              <strong>{{ totals.partially_shipped }}</strong>
+              <span style="color:#9ca3af;">({{ (totals.partially_shipped / totals.total * 100)|round(0)|int }}%)</span>
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:7px;">
+            <span style="width:11px; height:11px; border-radius:3px; background:#9ca3af; flex-shrink:0;"></span>
+            <span>
+              <span class="lt" data-en="Shipped" data-zh="已发货">Shipped</span>:
+              <strong>{{ totals.shipped }}</strong>
+              <span style="color:#9ca3af;">({{ (totals.shipped / totals.total * 100)|round(0)|int }}%)</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Mini composition bars per region -->
+        {% if region_stats|length > 1 %}
+        <div style="margin-top:16px; padding-top:14px; border-top:1px solid #f1f5f9;">
+          <div style="font-size:.72rem; color:#9ca3af; font-weight:600;
+                      text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px;">
+            <span class="lt" data-en="By region" data-zh="按区域">By region</span>
+          </div>
+          {% for region, s in region_stats.items() %}
+          {% if s.total > 0 %}
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
+            <div style="font-size:.75rem; color:#374151; width:90px; flex-shrink:0;
+                        overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                 title="{{ region }}">{{ region }}</div>
+            <div style="flex:1; display:flex; height:10px; border-radius:4px;
+                        overflow:hidden; background:#f3f4f6;">
+              {% if s.new > 0 %}<div style="width:{{ (s.new/s.total*100)|round(1) }}%; background:#10b981;"></div>{% endif %}
+              {% if s.not_shipped > 0 %}<div style="width:{{ (s.not_shipped/s.total*100)|round(1) }}%; background:#ef4444;"></div>{% endif %}
+              {% if s.partially_shipped > 0 %}<div style="width:{{ (s.partially_shipped/s.total*100)|round(1) }}%; background:#f59e0b;"></div>{% endif %}
+              {% if s.shipped > 0 %}<div style="width:{{ (s.shipped/s.total*100)|round(1) }}%; background:#9ca3af;"></div>{% endif %}
+            </div>
+            <div style="font-size:.72rem; color:#9ca3af; width:28px; text-align:right; flex-shrink:0;">
+              {{ s.total }}
+            </div>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Alert chips -->
   <div class="alert-row">
     {% if totals.qa_violations > 0 %}
@@ -302,6 +503,16 @@
     {% endif %}
   </div>
 
+  <!-- Weekly region trend chart -->
+  {% if chart_labels and chart_labels|length > 1 %}
+  <div class="card">
+    <div class="card-title"><span class="lt" data-en="Weekly Orders by Region" data-zh="各区域每周订单趋势">Weekly Orders by Region</span></div>
+    <div style="position:relative;height:260px;">
+      <canvas id="weeklyRegionChart"></canvas>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Per-region table -->
   <div class="card">
     <div class="card-title"><span class="lt" data-en="Per-Region Breakdown" data-zh="按区域统计">Per-Region Breakdown</span></div>
@@ -363,4 +574,62 @@
 
 </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if chart_labels and chart_labels|length > 1 %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  var labels   = {{ chart_labels | tojson }};
+  var datasets = {{ chart_datasets | tojson }};
+
+  var COLORS = [
+    '#1a3a5c','#2563eb','#059669','#d97706',
+    '#7c3aed','#dc2626','#0891b2','#65a30d'
+  ];
+
+  var chartDatasets = datasets.map(function(ds, i) {
+    return {
+      label: ds.region,
+      data: ds.data,
+      borderColor: COLORS[i % COLORS.length],
+      backgroundColor: COLORS[i % COLORS.length] + '22',
+      borderWidth: 2,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      tension: 0.3,
+      spanGaps: true
+    };
+  });
+
+  new Chart(document.getElementById('weeklyRegionChart'), {
+    type: 'line',
+    data: { labels: labels, datasets: chartDatasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return ctx.dataset.label + ': ' + (ctx.parsed.y ?? '–') + ' orders';
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 } } },
+        y: {
+          beginAtZero: true,
+          grid: { color: '#f1f5f9' },
+          ticks: { font: { size: 11 }, stepSize: 20 }
+        }
+      }
+    }
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

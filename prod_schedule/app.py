@@ -326,17 +326,25 @@ def _parse_qty(val):
 def compute_changes(previous, current):
     """Compare two week datasets.
 
+    Same order+item can appear as multiple rows (split production lots) or
+    as a single merged row across different weeks.  We aggregate quantities
+    per job_key so splits/merges don't create false new/shipped signals.
+
     Returns:
         statuses   – dict  keyed by job_key → 'new' | 'not_shipped' |
                                                'partially_shipped' | 'shipped' | 'typo'
         typo_flags – list of dicts describing suspected typo pairs
-        shipped_rows – dict  sheet_name → list of rows (from prev week)
-                       for jobs that fully shipped (no longer in current week)
+        shipped_rows – dict  sheet_name → list of rows (one per unique key,
+                       with qty updated to the aggregated total)
     """
     prev_keys = set()
     curr_keys = set()
-    prev_qty  = {}   # job_key → float qty
+    prev_qty  = {}   # job_key → aggregated float qty
     curr_qty  = {}
+
+    # job_key → (sheet, representative_row, headers, qi)
+    # Used to build shipped_rows with correct aggregated quantities.
+    _prev_rep = {}
 
     for sheet, rows in previous.items():
         if not rows:
@@ -348,8 +356,14 @@ def compute_changes(previous, current):
             if not k.split('|')[1]:
                 continue
             prev_keys.add(k)
+            # Sum quantities across split rows
             if qi is not None and qi < len(row):
-                prev_qty[k] = _parse_qty(row[qi])
+                q = _parse_qty(row[qi])
+                if q is not None:
+                    prev_qty[k] = (prev_qty.get(k) or 0) + q
+            # Keep first row as the representative for display
+            if k not in _prev_rep:
+                _prev_rep[k] = (sheet, list(row), headers, qi)
 
     for sheet, rows in current.items():
         if not rows:
@@ -361,8 +375,11 @@ def compute_changes(previous, current):
             if not k.split('|')[1]:
                 continue
             curr_keys.add(k)
+            # Sum quantities across split rows
             if qi is not None and qi < len(row):
-                curr_qty[k] = _parse_qty(row[qi])
+                q = _parse_qty(row[qi])
+                if q is not None:
+                    curr_qty[k] = (curr_qty.get(k) or 0) + q
 
     genuine_new     = curr_keys - prev_keys
     genuine_shipped = prev_keys - curr_keys
@@ -423,22 +440,24 @@ def compute_changes(previous, current):
                 statuses[k] = 'not_shipped'
 
     # ── collect shipped rows from previous week ───────────────────────────────
-    # These are jobs that were in last week but are gone from this week.
-    # We render them at the bottom of each sheet's table so they remain visible.
+    # One representative row per unique key (split rows are deduplicated).
+    # The quantity cell is updated to reflect the aggregated total so the
+    # display and outstanding_jobs records show the correct combined quantity.
     fully_shipped_keys = genuine_shipped - typo_shipped_keys
     shipped_rows = {}   # sheet → list of row lists
 
-    for sheet, rows in previous.items():
-        if not rows:
+    for k in sorted(fully_shipped_keys):   # sorted for determinism
+        if k not in _prev_rep:
             continue
-        headers = rows[0]
-        bucket = []
-        for row in rows[1:]:
-            k = make_job_key(sheet, row, headers)
-            if k in fully_shipped_keys:
-                bucket.append(row)
-        if bucket:
-            shipped_rows[sheet] = bucket
+        sheet, rep_row, headers, qi = _prev_rep[k]
+        # Replace qty cell with the aggregated total
+        if qi is not None and qi < len(rep_row) and prev_qty.get(k) is not None:
+            rep_row = list(rep_row)          # don't mutate the original
+            rep_row[qi] = str(int(prev_qty[k]) if prev_qty[k] == int(prev_qty[k])
+                               else prev_qty[k])
+        if sheet not in shipped_rows:
+            shipped_rows[sheet] = []
+        shipped_rows[sheet].append(rep_row)
 
     # Normalise shipped rows to match current week's column structure.
     # Previous week may have different/extra columns; align each row to the
@@ -671,10 +690,12 @@ def dashboard():
         if rows and len(rows) >= 2:
             headers = rows[0]
             qa_idx  = next((i for i, h in enumerate(headers) if 'qa brt' in h.lower()), -1)
+            seen_jk = set()   # deduplicate split rows – count each order+item once
             for row in rows[1:]:
                 jk = make_job_key(sheet, row, headers)
-                if not jk.split('|')[1]:
+                if not jk.split('|')[1] or jk in seen_jk:
                     continue
+                seen_jk.add(jk)
                 status = statuses.get(jk, 'new')
                 stats[status] += 1
                 stats['total'] += 1
@@ -778,13 +799,42 @@ def dashboard():
         sc['ontime_pct'] = round(sc['on_time'] / rated * 100) if rated else None
         inspector_stats.append((name, sc))
 
+    prev_total       = totals['not_shipped'] + totals['partially_shipped'] + totals['shipped']
+    curr_in_schedule = totals['new']         + totals['not_shipped']       + totals['partially_shipped']
+
+    # ── Weekly region trend data for chart ───────────────────────────────
+    with db_conn() as conn:
+        _snap_rows = conn.execute(
+            'SELECT week_label, week_date, region, total_orders '
+            'FROM weekly_snapshots ORDER BY week_date, region'
+        ).fetchall()
+
+    _all_regions = sorted({r['region'] for r in _snap_rows})
+    _week_order  = sorted({(r['week_date'], r['week_label']) for r in _snap_rows})
+    _chart_labels   = [lbl for _, lbl in _week_order]
+    _chart_date_map = {lbl: dt for dt, lbl in _week_order}
+
+    _region_series = {}
+    for region in _all_regions:
+        _region_series[region] = {r['week_label']: r['total_orders']
+                                   for r in _snap_rows if r['region'] == region}
+
+    _chart_datasets = [
+        {'region': r, 'data': [_region_series[r].get(lbl, None) for lbl in _chart_labels]}
+        for r in _all_regions
+    ]
+
     return render_template('dashboard.html',
                            region_stats=region_stats,
                            totals=totals,
                            typo_count=len(typo_flags),
                            upload_date=config.get('upload_date', ''),
                            inspector_stats=inspector_stats,
-                           recent_weeks=recent_weeks)
+                           recent_weeks=recent_weeks,
+                           prev_total=prev_total,
+                           curr_in_schedule=curr_in_schedule,
+                           chart_labels=_chart_labels,
+                           chart_datasets=_chart_datasets)
 
 
 @app.route('/upload', methods=['POST'])
@@ -832,6 +882,18 @@ def upload_excel():
         config = load_config()
         config['upload_date'] = datetime.now().strftime('%d %b %Y %H:%M')
         save_json(CONFIG_FILE, config)
+
+        # ── Save weekly snapshot for trend chart ─────────────────────────
+        _snap_label = config['upload_date']
+        _snap_date  = datetime.now().strftime('%Y-%m-%d')
+        with db_conn() as conn:
+            for _sheet, _rows in data.items():
+                _count = max(0, len(_rows) - 1)  # subtract header row
+                if _count > 0:
+                    conn.execute(
+                        'INSERT OR REPLACE INTO weekly_snapshots '
+                        '(week_label, week_date, region, total_orders) VALUES (?,?,?,?)',
+                        (_snap_label, _snap_date, _sheet, _count))
 
         # ── Auto-create inspection tasks + persist outstanding jobs ──────
         previous = load_json(PREVIOUS_FILE, {})

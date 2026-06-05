@@ -128,6 +128,15 @@ CREATE TABLE IF NOT EXISTS inspection_attachments (
     uploaded_at   TEXT    DEFAULT (datetime('now','localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS weekly_snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    week_label   TEXT    NOT NULL,
+    week_date    TEXT    NOT NULL,
+    region       TEXT    NOT NULL,
+    total_orders INTEGER DEFAULT 0,
+    UNIQUE(week_label, region)
+);
+
 CREATE TABLE IF NOT EXISTS kb_categories (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
