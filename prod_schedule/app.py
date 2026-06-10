@@ -1,10 +1,15 @@
-import os, io, json, hashlib, tempfile, math
+import os, io, json, hashlib, tempfile, math, logging, traceback
 from difflib import SequenceMatcher
 from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory
 import msoffcrypto
 import openpyxl
 from db import db_conn, init_db
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
+
+_last_error = {'tb': '', 'time': ''}
 
 # Google API imports (graceful fallback if not configured)
 try:
@@ -997,9 +1002,34 @@ def upload_excel():
         else:
             flash('Schedule updated successfully!', 'success')
     except Exception as e:
+        tb = traceback.format_exc()
+        logger.error('Upload failed:\n%s', tb)
+        _last_error['tb'] = tb
+        _last_error['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         flash(f'Error reading file: {e}', 'error')
 
     return redirect(url_for('index'))
+
+
+@app.route('/debug')
+def debug_info():
+    import sys, sqlite3
+    info = {
+        'python': sys.version,
+        'data_dir_exists': os.path.exists(DATA_DIR),
+        'current_week_exists': os.path.exists(CURRENT_FILE),
+        'previous_week_exists': os.path.exists(PREVIOUS_FILE),
+        'db_exists': os.path.exists(os.path.join(DATA_DIR, 'app.db')),
+        'last_error_time': _last_error['time'],
+        'last_error': _last_error['tb'] or 'none',
+    }
+    try:
+        with db_conn() as conn:
+            tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            info['db_tables'] = tables
+    except Exception as e:
+        info['db_error'] = str(e)
+    return f'<pre style="white-space:pre-wrap;font-size:13px">{json.dumps(info, indent=2, ensure_ascii=False)}</pre>'
 
 @app.route('/inspect/<path:job_key>')
 def inspect_form(job_key):
