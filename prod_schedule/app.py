@@ -16,7 +16,7 @@ except ImportError:
     GOOGLE_AVAILABLE = False
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-fallback-change-in-prod')
 app.jinja_env.globals['enumerate'] = enumerate
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2567,8 +2567,9 @@ def employee_work_info_save(eid):
     return redirect(url_for('employee_edit', eid=eid))
 
 
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+init_db()
+
 if __name__ == '__main__':
-    os.makedirs(DATA_DIR, exist_ok=True)
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    init_db()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)

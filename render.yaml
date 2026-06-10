@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: prod-schedule
+    env: python
+    rootDir: prod_schedule
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+    autoDeploy: true
