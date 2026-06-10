@@ -281,12 +281,17 @@ def make_job_key(sheet_name, row, headers):
 
 def decrypt_excel(file_bytes, password):
     enc = io.BytesIO(file_bytes)
-    office_file = msoffcrypto.OfficeFile(enc)
-    office_file.load_key(password=password)
-    dec = io.BytesIO()
-    office_file.decrypt(dec)
-    dec.seek(0)
-    return dec
+    try:
+        office_file = msoffcrypto.OfficeFile(enc)
+        if office_file.is_encrypted():
+            office_file.load_key(password=password)
+            dec = io.BytesIO()
+            office_file.decrypt(dec)
+            dec.seek(0)
+            return dec
+    except Exception:
+        pass
+    return io.BytesIO(file_bytes)
 
 def parse_excel(file_bytes, password):
     dec = decrypt_excel(file_bytes, password)
