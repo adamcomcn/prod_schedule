@@ -300,7 +300,7 @@ def decrypt_excel(file_bytes, password):
 
 def parse_excel(file_bytes, password):
     dec = decrypt_excel(file_bytes, password)
-    wb = openpyxl.load_workbook(dec, data_only=True)
+    wb = openpyxl.load_workbook(dec, data_only=True, read_only=True)
     result = {}
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
@@ -310,6 +310,7 @@ def parse_excel(file_bytes, password):
             if any(v.strip() for v in r):
                 rows.append(r)
         result[sheet_name] = rows
+    wb.close()
     return result
 
 def _sim(a, b):
