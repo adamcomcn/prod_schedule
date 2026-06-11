@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS kb_articles (
     title       TEXT    NOT NULL,
     content     TEXT    DEFAULT '',
     tags        TEXT    DEFAULT '',
+    images      TEXT    DEFAULT '[]',
     created_at  TEXT    DEFAULT (datetime('now','localtime')),
     updated_at  TEXT    DEFAULT (datetime('now','localtime'))
 );
@@ -738,6 +739,11 @@ def init_db():
                 conn.execute(f'ALTER TABLE products ADD COLUMN {col} {defn}')
             except Exception:
                 pass
+
+        try:
+            conn.execute("ALTER TABLE kb_articles ADD COLUMN images TEXT DEFAULT '[]'")
+        except Exception:
+            pass
 
         # Defect codes
         existing_dc = {r[0] for r in conn.execute('SELECT code FROM defect_codes').fetchall()}
