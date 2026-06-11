@@ -145,6 +145,13 @@ def load_config():
         'office_locations': [],
     })
 
+def parse_json_list(value):
+    try:
+        parsed = json.loads(value or '[]')
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+
 def haversine(lat1, lon1, lat2, lon2):
     """Distance in metres between two GPS coordinates."""
     R = 6371000
@@ -669,6 +676,23 @@ def index():
     config = load_config()
     inspections = load_json(INSPECTIONS_CACHE, {})
 
+    sheet_names = list(current.keys())
+    selected_sheet = request.args.get('sheet', '')
+    if selected_sheet not in current:
+        selected_sheet = sheet_names[0] if sheet_names else ''
+    search = request.args.get('q', '').strip()
+    view = request.args.get('view', 'active')
+    if view not in {'active', 'shipped', 'all'}:
+        view = 'active'
+    try:
+        page = max(1, int(request.args.get('page', '1')))
+    except ValueError:
+        page = 1
+    try:
+        per_page = min(200, max(1, int(request.args.get('per_page', '100'))))
+    except ValueError:
+        per_page = 100
+
     # Build set of job_keys that are valves (require V-Trust)
     valve_keys = set()
     all_rows_to_check = list(current.items()) + [
@@ -698,7 +722,7 @@ def index():
             'SELECT * FROM outstanding_jobs WHERE completed=0 ORDER BY est_completion ASC, shipped_at ASC'
         ).fetchall()
         completed_jobs = conn.execute(
-            'SELECT * FROM outstanding_jobs WHERE completed=1 ORDER BY completed_at DESC'
+            'SELECT * FROM outstanding_jobs WHERE completed=1 ORDER BY completed_at DESC LIMIT 100'
         ).fetchall()
         kpi_total     = conn.execute('SELECT COUNT(*) FROM outstanding_jobs').fetchone()[0]
         kpi_done      = conn.execute('SELECT COUNT(*) FROM outstanding_jobs WHERE completed=1').fetchone()[0]
@@ -712,11 +736,41 @@ def index():
     for job in outstanding_jobs:
         outstanding_by_sheet[job['sheet']].append(job)
 
+    display_data = {}
+    display_shipped = {}
+    total_results = 0
+    total_pages = 1
+    if selected_sheet and current.get(selected_sheet):
+        headers = current[selected_sheet][0]
+        active_rows = current[selected_sheet][1:]
+        selected_shipped = shipped_rows.get(selected_sheet, [])
+        entries = []
+        if view in {'active', 'all'}:
+            entries.extend(('active', row) for row in active_rows)
+        if view in {'shipped', 'all'}:
+            entries.extend(('shipped', row) for row in selected_shipped)
+        if search:
+            needle = search.casefold()
+            entries = [
+                entry for entry in entries
+                if any(needle in str(cell).casefold() for cell in entry[1])
+            ]
+        total_results = len(entries)
+        total_pages = max(1, math.ceil(total_results / per_page))
+        page = min(page, total_pages)
+        page_entries = entries[(page - 1) * per_page:page * per_page]
+        display_data[selected_sheet] = [headers] + [
+            row for kind, row in page_entries if kind == 'active'
+        ]
+        display_shipped[selected_sheet] = [
+            row for kind, row in page_entries if kind == 'shipped'
+        ]
+
     return render_template('index.html',
-                           data=current,
+                           data=display_data,
                            statuses=statuses,
                            typo_flags=typo_flags,
-                           shipped_rows=shipped_rows,
+                           shipped_rows=display_shipped,
                            inspections=inspections,
                            valve_keys=valve_keys,
                            upload_date=config.get('upload_date', ''),
@@ -727,7 +781,15 @@ def index():
                            kpi_total=kpi_total,
                            kpi_done=kpi_done,
                            kpi_overdue=kpi_overdue,
-                           today_str=today_str)
+                           today_str=today_str,
+                           sheet_names=sheet_names,
+                           selected_sheet=selected_sheet,
+                           search=search,
+                           view=view,
+                           page=page,
+                           per_page=per_page,
+                           total_results=total_results,
+                           total_pages=total_pages)
 
 @app.route('/dashboard')
 def dashboard():
@@ -2125,7 +2187,7 @@ def knowledge():
     # Parse images JSON for each article so templates can use them directly
     articles_data = []
     for a in articles:
-        imgs = json.loads(a['images'] or '[]') if a['images'] else []
+        imgs = parse_json_list(a['images'])
         articles_data.append({'row': a, 'first_img': imgs[0] if imgs else '', 'img_count': len(imgs)})
     return render_template('knowledge.html', cats=cats, articles=articles_data,
                            cat_filter=cat_filter, search=search)
@@ -2142,7 +2204,7 @@ def kb_article(aid):
         ).fetchall()
     if not article:
         flash('找不到该文章', 'error'); return redirect(url_for('knowledge'))
-    images = json.loads(article['images'] or '[]') if article['images'] else []
+    images = parse_json_list(article['images'])
     return render_template('kb_article.html', article=article, related_qs=related_qs, images=images)
 
 @app.route('/knowledge/article/new', methods=['GET', 'POST'])

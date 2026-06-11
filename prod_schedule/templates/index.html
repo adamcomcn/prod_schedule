@@ -104,6 +104,19 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
         &#9888; Configure Google Sheets/Drive
       </a>
     {% endif %}
+    <form method="GET" action="{{ url_for('index') }}" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
+      <input type="hidden" name="sheet" value="{{ selected_sheet }}">
+      <input type="text" name="q" value="{{ search }}" placeholder="Search selected region..." class="search-box">
+      <select name="view" style="width:auto;">
+        <option value="active" {% if view == 'active' %}selected{% endif %}>Active</option>
+        <option value="shipped" {% if view == 'shipped' %}selected{% endif %}>Shipped</option>
+        <option value="all" {% if view == 'all' %}selected{% endif %}>All</option>
+      </select>
+      <select name="per_page" style="width:auto;">
+        {% for size in [50, 100, 200] %}<option value="{{ size }}" {% if per_page == size %}selected{% endif %}>{{ size }} per page</option>{% endfor %}
+      </select>
+      <button class="btn btn-outline btn-sm" type="submit">Apply</button>
+    </form>
   </div>
 </div>
 
@@ -144,11 +157,11 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 </div>
 {% endif %}
 
-{% if data %}
+{% if sheet_names %}
 <div class="tab-bar" id="tabBar">
-  {% for sheet in data.keys() %}
-  <button class="tab-btn {% if loop.first %}active{% endif %}"
-          onclick="switchTab({{ loop.index0 }})">{{ sheet }}</button>
+  {% for sheet in sheet_names %}
+  <a class="tab-btn {% if sheet == selected_sheet %}active{% endif %}"
+     href="{{ url_for('index', sheet=sheet, q=search, view=view, per_page=per_page) }}">{{ sheet }}</a>
   {% endfor %}
 </div>
 
@@ -156,9 +169,6 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 {% set si = loop.index0 %}
 <div class="tab-panel {% if loop.first %}active{% endif %}" id="panel-{{ si }}">
   <div class="table-toolbar">
-    <input type="text" class="search-box"
-           placeholder="Search {{ sheet_name }}..."
-           oninput="filterTable({{ si }}, this.value)">
     <div class="legend">
       <span class="legend-item"><span class="badge badge-new">NEW</span> New this week</span>
       <span class="legend-item"><span class="badge badge-not_shipped">NOT SHIPPED</span> Still waiting</span>
@@ -166,14 +176,12 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
       <span class="legend-item"><span class="badge badge-shipped">SHIPPED</span> Gone from schedule</span>
       <span class="legend-item"><span class="badge" style="background:#ffedd5;color:#9a3412;border:1px solid #f97316">V-Trust</span> Valve — no V-Trust</span>
     </div>
-    {% set shipped_count = shipped_rows.get(sheet_name, [])|length %}
     <span class="row-count" id="count-{{ si }}">
-      {{ [rows|length - 1, 0]|max }} active
-      {% if shipped_count %} + {{ shipped_count }} shipped{% endif %}
+      {{ total_results }} result{{ '' if total_results == 1 else 's' }}
     </span>
   </div>
 
-  {% if rows|length > 1 %}
+  {% if rows|length > 1 or shipped_rows.get(sheet_name) %}
   <div class="table-wrap">
     <table id="table-{{ si }}">
       <thead>
@@ -355,6 +363,13 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
       </tbody>
     </table>
   </div>
+  {% if total_pages > 1 %}
+  <div style="display:flex;justify-content:center;align-items:center;gap:12px;padding:16px;background:#fff;">
+    {% if page > 1 %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, per_page=per_page, page=page-1) }}">Previous</a>{% endif %}
+    <span style="font-size:.82rem;color:#6b7280;">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, per_page=per_page, page=page+1) }}">Next</a>{% endif %}
+  </div>
+  {% endif %}
   {% else %}
   <div class="no-data">No data in this sheet</div>
   {% endif %}
