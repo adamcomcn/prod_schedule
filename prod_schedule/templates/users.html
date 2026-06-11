@@ -23,8 +23,13 @@
       {% for user in users %}
         <tr>
           <td style="padding:8px;">{{ user.username }}</td>
-          <td>{{ user.role }}</td>
-          <td>{{ user.employee_name or '—' }}</td>
+          <td colspan="2">
+            <form method="POST" action="{{ url_for('user_update', uid=user.id) }}" style="display:flex;gap:6px;">
+              <select name="role" style="width:auto;"><option value="inspector" {% if user.role == 'inspector' %}selected{% endif %}>Inspector</option><option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Admin</option></select>
+              <select name="employee_id" style="width:auto;"><option value="">None</option>{% for e in employees %}<option value="{{ e.id }}" {% if user.employee_id == e.id %}selected{% endif %}>{{ e.name }}</option>{% endfor %}</select>
+              <button class="btn btn-outline btn-sm" type="submit">Update</button>
+            </form>
+          </td>
           <td>{{ 'Active' if user.active else 'Disabled' }}</td>
           <td style="display:flex;gap:8px;padding:8px;">
             <form method="POST" action="{{ url_for('user_toggle', uid=user.id) }}">

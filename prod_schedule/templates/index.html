@@ -88,7 +88,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     <form method="POST" action="{{ url_for('upload_excel') }}" enctype="multipart/form-data"
           class="upload-form">
       <label class="file-upload-area" title="Upload new Excel schedule">
-        <input type="file" name="file" accept=".xlsx,.xls" style="display:none"
+        <input type="file" name="file" accept=".xlsx" style="display:none"
                onchange="this.closest('form').querySelector('.file-name').textContent = this.files[0]?.name || 'No file'; this.closest('form').querySelector('.auto-submit-btn').click()">
         &#128196; Choose Excel file
       </label>

@@ -82,6 +82,7 @@ ADMIN_ENDPOINTS = {
     'region_edit', 'region_delete', 'leave_approve', 'leave_reject',
     'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
+    'user_update',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -769,7 +770,7 @@ def index():
     return render_template('index.html',
                            data=display_data,
                            statuses=statuses,
-                           typo_flags=typo_flags,
+                           typo_flags=[t for t in typo_flags if t.get('sheet') == selected_sheet][:100],
                            shipped_rows=display_shipped,
                            inspections=inspections,
                            valve_keys=valve_keys,
@@ -2849,6 +2850,28 @@ def user_reset_password(uid):
                 'UPDATE users SET password_hash=? WHERE id=?',
                 (generate_password_hash(password), uid))
         flash('密码已重置', 'success')
+    return redirect(url_for('users_admin'))
+
+@app.route('/admin/users/<int:uid>/update', methods=['POST'])
+def user_update(uid):
+    role = request.form.get('role', 'inspector')
+    employee_id = request.form.get('employee_id') or None
+    if role not in {'admin', 'inspector'}:
+        flash('无效角色', 'error')
+        return redirect(url_for('users_admin'))
+    with db_conn() as conn:
+        user = conn.execute('SELECT role,active FROM users WHERE id=?', (uid,)).fetchone()
+        if user and user['active'] and user['role'] == 'admin' and role != 'admin':
+            active_admins = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
+            ).fetchone()[0]
+            if active_admins <= 1:
+                flash('至少需要保留一个启用的管理员', 'error')
+                return redirect(url_for('users_admin'))
+        conn.execute(
+            'UPDATE users SET role=?,employee_id=? WHERE id=?',
+            (role, employee_id, uid))
+    flash('账号资料已更新', 'success')
     return redirect(url_for('users_admin'))
 
 @app.before_request
