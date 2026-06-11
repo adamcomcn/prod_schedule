@@ -137,6 +137,15 @@ CREATE TABLE IF NOT EXISTS weekly_snapshots (
     UNIQUE(week_label, region)
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,
+    role          TEXT    DEFAULT 'inspector',
+    active        INTEGER DEFAULT 1,
+    created_at    TEXT    DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS kb_categories (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,

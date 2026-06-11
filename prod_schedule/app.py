@@ -1,7 +1,9 @@
 import os, io, json, hashlib, tempfile, math, logging, traceback
 from difflib import SequenceMatcher
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, g
+from werkzeug.security import generate_password_hash, check_password_hash
 import msoffcrypto
 import openpyxl
 from db import db_conn, init_db
@@ -2606,6 +2608,54 @@ def employee_work_info_save(eid):
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 init_db()
+
+def _seed_users():
+    _defaults = [
+        ('admin', 'admin', 'admin'),
+        ('qc1',   'qc1',   'inspector'),
+        ('qc2',   'qc2',   'inspector'),
+    ]
+    with db_conn() as conn:
+        existing = {r[0] for r in conn.execute('SELECT username FROM users').fetchall()}
+        for username, password, role in _defaults:
+            if username not in existing:
+                conn.execute(
+                    'INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
+                    (username, generate_password_hash(password), role))
+
+_seed_users()
+
+@app.before_request
+def _auth_check():
+    public = {'login', 'logout', 'debug_info', 'static'}
+    if request.endpoint and request.endpoint not in public and 'user_id' not in session:
+        return redirect(url_for('login'))
+    g.username = session.get('username', '')
+    g.role = session.get('role', '')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
+        with db_conn() as conn:
+            user = conn.execute(
+                'SELECT * FROM users WHERE username=? AND active=1', (username,)
+            ).fetchone()
+        if user and check_password_hash(user['password_hash'], password):
+            session['user_id'] = user['id']
+            session['username'] = user['username']
+            session['role'] = user['role']
+            return redirect(url_for('index'))
+        flash('用户名或密码错误', 'error')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)

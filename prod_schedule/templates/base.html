@@ -133,6 +133,8 @@ textarea { resize: vertical; min-height: 80px; }
      class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}">
     <span class="lt" data-en="Settings" data-zh="设置">Settings</span></a>
   <button id="lang-btn" class="lang-btn" onclick="toggleLang()">中文</button>
+  <span style="color:rgba(255,255,255,.5);font-size:.8rem;margin-left:12px;white-space:nowrap;">{{ g.username }}</span>
+  <a href="{{ url_for('logout') }}" style="color:rgba(255,255,255,.6);font-size:.8rem;margin-left:10px;white-space:nowrap;">退出</a>
 </nav>
 
 <div class="alerts">
