@@ -134,7 +134,10 @@ textarea { resize: vertical; min-height: 80px; }
     <span class="lt" data-en="Settings" data-zh="设置">Settings</span></a>
   <button id="lang-btn" class="lang-btn" onclick="toggleLang()">中文</button>
   <span style="color:rgba(255,255,255,.5);font-size:.8rem;margin-left:12px;white-space:nowrap;">{{ g.username }}</span>
-  <a href="{{ url_for('logout') }}" style="color:rgba(255,255,255,.6);font-size:.8rem;margin-left:10px;white-space:nowrap;">退出</a>
+  <form method="POST" action="{{ url_for('logout') }}" style="margin-left:10px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" style="border:0;background:none;color:rgba(255,255,255,.6);font-size:.8rem;cursor:pointer;white-space:nowrap;">退出</button>
+  </form>
 </nav>
 
 <div class="alerts">
@@ -148,6 +151,17 @@ textarea { resize: vertical; min-height: 80px; }
 {% block content %}{% endblock %}
 
 <script>
+// Attach CSRF protection to every server-rendered POST form.
+document.querySelectorAll('form[method="POST"], form[method="post"]').forEach(function (form) {
+  if (!form.querySelector('input[name="_csrf_token"]')) {
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = '_csrf_token';
+    input.value = {{ csrf_token()|tojson }};
+    form.appendChild(input);
+  }
+});
+
 // ── i18n language switcher ────────────────────────────────────────────────────
 (function () {
   var LANG = localStorage.getItem('lang') || 'en';

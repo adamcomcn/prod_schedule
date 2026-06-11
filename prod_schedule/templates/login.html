@@ -39,6 +39,7 @@ button:hover { background: #155fa0; }
   {% endwith %}
 
   <form method="POST">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <label for="username">用户名 / Username</label>
     <input type="text" id="username" name="username" autocomplete="username" required>
     <label for="password">密码 / Password</label>

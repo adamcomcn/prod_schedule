@@ -1,6 +1,7 @@
-import os, io, json, hashlib, tempfile, math, logging, traceback
+import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time
+from collections import defaultdict, deque
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, g
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -32,6 +33,13 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 if IS_PRODUCTION and not SECRET_KEY:
     raise RuntimeError('SECRET_KEY is required in production')
 app.secret_key = SECRET_KEY or 'local-development-only'
+app.config.update(
+    MAX_CONTENT_LENGTH=int(os.environ.get('MAX_UPLOAD_BYTES', 50 * 1024 * 1024)),
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get('SESSION_HOURS', '8'))),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+)
 app.jinja_env.globals['enumerate'] = enumerate
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +60,10 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive',
 ]
 
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_MAX_FAILURES = 5
+_login_failures = defaultdict(deque)
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def load_json(path, default=None):
@@ -63,6 +75,28 @@ def load_json(path, default=None):
 def save_json(path, data):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+def csrf_token():
+    token = session.get('_csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_csrf_token'] = token
+    return token
+
+app.jinja_env.globals['csrf_token'] = csrf_token
+
+def _login_rate_limited(client_id):
+    attempts = _login_failures[client_id]
+    cutoff = time.monotonic() - LOGIN_WINDOW_SECONDS
+    while attempts and attempts[0] < cutoff:
+        attempts.popleft()
+    return len(attempts) >= LOGIN_MAX_FAILURES
+
+def _record_login_failure(client_id):
+    _login_failures[client_id].append(time.monotonic())
+
+def _safe_next_url(value):
+    return value if value and value.startswith('/') and not value.startswith('//') else None
 
 def load_config():
     return load_json(CONFIG_FILE, {
@@ -2629,50 +2663,79 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 init_db()
 
-def _seed_users():
-    _defaults = [
-        ('admin', 'admin', 'admin'),
-        ('qc1',   'qc1',   'inspector'),
-        ('qc2',   'qc2',   'inspector'),
-    ]
+def _bootstrap_admin():
+    username = os.environ.get('BOOTSTRAP_ADMIN_USERNAME', '').strip()
+    password = os.environ.get('BOOTSTRAP_ADMIN_PASSWORD', '')
     with db_conn() as conn:
-        existing = {r[0] for r in conn.execute('SELECT username FROM users').fetchall()}
-        for username, password, role in _defaults:
-            if username not in existing:
-                conn.execute(
-                    'INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
-                    (username, generate_password_hash(password), role))
+        if conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]:
+            return
+        if not username or len(password) < 12:
+            logger.warning(
+                'No users exist. Set BOOTSTRAP_ADMIN_USERNAME and a '
+                'BOOTSTRAP_ADMIN_PASSWORD of at least 12 characters.'
+            )
+            return
+        conn.execute(
+            'INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
+            (username, generate_password_hash(password), 'admin'))
+        logger.info('Bootstrap administrator created; remove BOOTSTRAP_ADMIN_PASSWORD')
 
-_seed_users()
+_bootstrap_admin()
 
 @app.before_request
 def _auth_check():
-    public = {'healthz', 'login', 'logout', 'debug_info', 'static'}
-    if request.endpoint and request.endpoint not in public and 'user_id' not in session:
+    if request.method == 'POST':
+        submitted = request.form.get('_csrf_token') or request.headers.get('X-CSRF-Token')
+        expected = session.get('_csrf_token', '')
+        if not submitted or not expected or not hmac.compare_digest(submitted, expected):
+            return 'Invalid CSRF token', 400
+
+    public = {'healthz', 'login', 'static'}
+    if request.endpoint in public or request.endpoint is None:
+        return None
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login', next=request.full_path.rstrip('?')))
+    with db_conn() as conn:
+        user = conn.execute(
+            'SELECT id, username, role FROM users WHERE id=? AND active=1',
+            (user_id,)
+        ).fetchone()
+    if not user:
+        session.clear()
         return redirect(url_for('login'))
-    g.username = session.get('username', '')
-    g.role = session.get('role', '')
+    g.user_id = user['id']
+    g.username = user['username']
+    g.role = user['role']
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if 'user_id' in session:
         return redirect(url_for('index'))
     if request.method == 'POST':
+        client_id = request.remote_addr or 'unknown'
+        if _login_rate_limited(client_id):
+            flash('登录尝试次数过多，请稍后再试', 'error')
+            return render_template('login.html'), 429
         username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
+        password = request.form.get('password', '')
         with db_conn() as conn:
             user = conn.execute(
                 'SELECT * FROM users WHERE username=? AND active=1', (username,)
             ).fetchone()
         if user and check_password_hash(user['password_hash'], password):
+            _login_failures.pop(client_id, None)
+            session.clear()
+            session.permanent = True
             session['user_id'] = user['id']
-            session['username'] = user['username']
-            session['role'] = user['role']
-            return redirect(url_for('index'))
+            csrf_token()
+            return redirect(_safe_next_url(request.args.get('next')) or url_for('index'))
+        _record_login_failure(client_id)
         flash('用户名或密码错误', 'error')
     return render_template('login.html')
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
 def logout():
     session.clear()
     return redirect(url_for('login'))
