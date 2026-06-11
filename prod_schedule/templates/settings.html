@@ -30,7 +30,7 @@
 
         <div style="margin-bottom: 14px; font-size: .85rem;">
           <span class="status-dot {{ 'dot-green' if credentials_exist else 'dot-red' }}"></span>
-          Credentials file: <strong>{{ 'Uploaded' if credentials_exist else 'Not uploaded' }}</strong>
+          Service account environment variable: <strong>{{ 'Configured' if credentials_exist else 'Not configured' }}</strong>
           &nbsp;&nbsp;
           <span class="status-dot {{ 'dot-green' if config.sheet_id else 'dot-red' }}"></span>
           Google Sheet: <strong>{{ 'Configured' if config.sheet_id else 'Not set' }}</strong>
@@ -39,17 +39,7 @@
           Drive Folder: <strong>{{ 'Configured' if config.drive_folder_id else 'Not set' }}</strong>
         </div>
 
-        <form method="POST" enctype="multipart/form-data">
-          <div class="form-group">
-            <label>Service Account Credentials (JSON file)</label>
-            <input type="file" name="credentials" accept=".json">
-            {% if credentials_exist %}
-            <div style="font-size:.78rem; color:#059669; margin-top:4px;">
-              &#9989; credentials.json is uploaded
-            </div>
-            {% endif %}
-          </div>
-
+        <form method="POST">
           <div class="form-group">
             <label>Google Sheets ID</label>
             <input type="text" name="sheet_id" value="{{ config.sheet_id }}"
@@ -103,8 +93,8 @@
           <li>
             <div>
               Go to <strong>IAM &amp; Admin &rarr; Service Accounts</strong>,
-              create a service account, and download the JSON key.
-              Upload that JSON file above.
+              create a service account, and download the JSON key. Store it in Railway
+              as <span class="code">GOOGLE_SERVICE_ACCOUNT_JSON_B64</span>.
             </div>
           </li>
           <li>
@@ -143,45 +133,12 @@
         <a href="{{ url_for('employees') }}">员工档案</a>
         中在职员工发送新任务通知邮件。
       </p>
-      <form method="POST" enctype="multipart/form-data">
-        <input type="hidden" name="sheet_id"        value="{{ config.sheet_id }}">
-        <input type="hidden" name="drive_folder_id" value="{{ config.drive_folder_id }}">
-        <input type="hidden" name="valve_prefixes"
-               value="{{ config.get('valve_prefixes', ['RSV'])|join(', ') }}">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 20px;">
-          <div class="form-group">
-            <label>SMTP 服务器</label>
-            <input type="text" name="smtp_host"
-                   value="{{ config.get('smtp_host','') }}" placeholder="smtp.gmail.com">
-          </div>
-          <div class="form-group">
-            <label>端口</label>
-            <input type="text" name="smtp_port"
-                   value="{{ config.get('smtp_port','587') }}" placeholder="587">
-          </div>
-          <div class="form-group">
-            <label>发件邮箱</label>
-            <input type="email" name="smtp_user"
-                   value="{{ config.get('smtp_user','') }}" placeholder="yourname@gmail.com">
-          </div>
-          <div class="form-group">
-            <label>邮箱密码 / App Password</label>
-            <input type="password" name="smtp_pass"
-                   placeholder="{{ '已保存（留空不修改）' if config.get('smtp_pass') else '输入密码' }}">
-            <div style="font-size:.75rem; color:#6b7280; margin-top:4px;">
-              Gmail：开启两步验证后生成
-              <a href="https://myaccount.google.com/apppasswords" target="_blank">App Password</a>
-            </div>
-          </div>
-        </div>
-        {% set smtp_ok = config.get('smtp_host') and config.get('smtp_user') and config.get('smtp_pass') %}
         <div style="font-size:.82rem; margin-bottom:14px;">
           <span style="display:inline-block; width:8px; height:8px; border-radius:50; margin-right:6px;
-                       background:{{ '#10b981' if smtp_ok else '#ef4444' }};border-radius:50%;"></span>
-          邮件通知：<strong>{{ '已配置' if smtp_ok else '未配置' }}</strong>
+                       background:{{ '#10b981' if smtp_configured else '#ef4444' }};border-radius:50%;"></span>
+          邮件通知：<strong>{{ '已配置' if smtp_configured else '未配置' }}</strong>
         </div>
-        <button type="submit" class="btn btn-primary">保存邮件设置</button>
-      </form>
+        <p style="font-size:.82rem;color:#6b7280;">在 Railway 中配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_PASSWORD 和 SMTP_FROM。密码不会保存到应用配置文件。</p>
     </div>
 
     <!-- 打卡地点管理 -->
@@ -262,13 +219,12 @@
       <div class="card-title">&#128196; Excel Settings</div>
       <div style="font-size: .875rem;">
         <p style="margin-bottom:8px;">
-          The Excel password is currently hardcoded as
-          <span class="code">castings1</span>.
-          When you upload the schedule, the app decrypts it automatically.
+          Excel password environment variable:
+          <strong>{{ 'Configured' if excel_password_configured else 'Not configured' }}</strong>.
         </p>
         <p style="color:#6b7280;">
-          If the password changes, update the <span class="code">EXCEL_PASSWORD</span>
-          constant in <span class="code">app.py</span>.
+          If encrypted schedules are used, set or rotate <span class="code">EXCEL_PASSWORD</span>
+          in Railway. Never place it in code or HTML.
         </p>
       </div>
     </div>

@@ -3,12 +3,12 @@ Restore previous_week.json = May 21 schedule.
 current_week.json (May 28, just uploaded by user) is left unchanged.
 Uses msoffcrypto + openpyxl, same as the app's own parse_excel().
 """
-import io, json, pathlib
+import io, json, pathlib, os
 import msoffcrypto, openpyxl
 
 XLSX_PATH = pathlib.Path(r"C:\Users\JWan\Documents") / "Production\xa0Schedule\xa005.21.xlsx"
 OUT_PATH  = pathlib.Path(r"C:\Users\JWan\Documents\prod_schedule\data\previous_week.json")
-PASSWORD  = 'castings1'
+PASSWORD  = os.environ.get('EXCEL_PASSWORD', '')
 
 def fmt_date(val):
     s = str(val) if val is not None else ''

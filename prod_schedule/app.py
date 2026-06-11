@@ -1,10 +1,11 @@
-import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time
+import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time, base64, uuid
 from collections import defaultdict, deque
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, g
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, g, abort
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 import msoffcrypto
 import openpyxl
 from db import db_conn, init_db
@@ -46,14 +47,17 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_DATA_DIR = os.path.abspath(os.environ.get('APP_DATA_DIR', BASE_DIR))
 DATA_DIR = os.path.join(APP_DATA_DIR, 'data')
 UPLOAD_DIR = os.path.join(APP_DATA_DIR, 'uploads')
-CREDENTIALS_FILE = os.path.join(APP_DATA_DIR, 'credentials.json')
 CONFIG_FILE = os.path.join(DATA_DIR, 'config.json')
 CURRENT_FILE = os.path.join(DATA_DIR, 'current_week.json')
 PREVIOUS_FILE = os.path.join(DATA_DIR, 'previous_week.json')
 INSPECTIONS_CACHE = os.path.join(DATA_DIR, 'inspections_cache.json')
 
-EXCEL_PASSWORD   = 'castings1'
-PRODUCT_IMG_DIR  = os.path.join(BASE_DIR, 'static', 'product_images')
+EXCEL_PASSWORD   = os.environ.get('EXCEL_PASSWORD', '')
+PRODUCT_IMG_DIR  = os.path.join(APP_DATA_DIR, 'product_images')
+
+EVIDENCE_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.csv', '.jpg', '.jpeg', '.png', '.mp4', '.mov', '.avi', '.mkv'}
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
+INVOICE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png'}
 
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
@@ -118,6 +122,19 @@ def _requested_employee_id(form):
     if g.role == 'admin':
         return form.get('employee_id')
     return str(g.employee_id) if g.employee_id else None
+
+def google_credentials_configured():
+    return bool(os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON_B64'))
+
+def _save_uploaded_file(file_obj, directory, allowed_extensions):
+    original = secure_filename(file_obj.filename or '')
+    extension = os.path.splitext(original)[1].lower()
+    if not original or extension not in allowed_extensions:
+        raise ValueError('Unsupported file type')
+    os.makedirs(directory, exist_ok=True)
+    saved_name = f'{uuid.uuid4().hex}{extension}'
+    file_obj.save(os.path.join(directory, saved_name))
+    return original, saved_name
 
 def load_config():
     return load_json(CONFIG_FILE, {
@@ -561,10 +578,11 @@ def compute_changes(previous, current):
 # ── Google API ────────────────────────────────────────────────────────────────
 
 def get_google_services():
-    if not GOOGLE_AVAILABLE or not os.path.exists(CREDENTIALS_FILE):
+    encoded = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON_B64', '')
+    if not GOOGLE_AVAILABLE or not encoded:
         return None, None
-    creds = service_account.Credentials.from_service_account_file(
-        CREDENTIALS_FILE, scopes=SCOPES)
+    info = json.loads(base64.b64decode(encoded).decode('utf-8'))
+    creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
     sheets = build('sheets', 'v4', credentials=creds)
     drive = build('drive', 'v3', credentials=creds)
     return sheets, drive
@@ -625,11 +643,6 @@ def upload_file_to_drive(local_path, filename, job_key):
     file_meta = {'name': filename, 'parents': [job_folder_id]}
     media = MediaFileUpload(local_path, resumable=True)
     uploaded = drive.files().create(body=file_meta, media_body=media, fields='id,webViewLink').execute()
-    # Make it viewable by anyone with link
-    drive.permissions().create(
-        fileId=uploaded['id'],
-        body={'type': 'anyone', 'role': 'reader'},
-    ).execute()
     return uploaded.get('webViewLink', '')
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -707,7 +720,7 @@ def index():
                            inspections=inspections,
                            valve_keys=valve_keys,
                            upload_date=config.get('upload_date', ''),
-                           google_configured=bool(config.get('sheet_id') and os.path.exists(CREDENTIALS_FILE)),
+                           google_configured=bool(config.get('sheet_id') and google_credentials_configured()),
                            outstanding_jobs=outstanding_jobs,
                            outstanding_by_sheet=outstanding_by_sheet,
                            completed_jobs=completed_jobs,
@@ -932,11 +945,13 @@ def upload_excel():
         return redirect(url_for('index'))
 
     f = request.files['file']
-    password = request.form.get('password', EXCEL_PASSWORD)
+    if os.path.splitext(secure_filename(f.filename or ''))[1].lower() != '.xlsx':
+        flash('Only .xlsx schedule files are supported', 'error')
+        return redirect(url_for('index'))
 
     try:
         file_bytes = f.read()
-        data = parse_excel(file_bytes, password)
+        data = parse_excel(file_bytes, EXCEL_PASSWORD)
 
         # Rotate: current → previous
         if os.path.exists(CURRENT_FILE):
@@ -1084,13 +1099,15 @@ def upload_excel():
         logger.error('Upload failed:\n%s', tb)
         _last_error['tb'] = tb
         _last_error['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        flash(f'Error reading file: {e}', 'error')
+        flash('Unable to read the uploaded schedule. Check the file format and encryption password.', 'error')
 
     return redirect(url_for('index'))
 
 
 @app.route('/debug')
 def debug_info():
+    if IS_PRODUCTION:
+        abort(404)
     import sys, sqlite3
     info = {
         'python': sys.version,
@@ -1106,7 +1123,7 @@ def debug_info():
             tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
             info['db_tables'] = tables
     except Exception as e:
-        info['db_error'] = str(e)
+        info['db_error'] = 'database check failed'
     return f'<pre style="white-space:pre-wrap;font-size:13px">{json.dumps(info, indent=2, ensure_ascii=False)}</pre>'
 
 @app.route('/inspect/<path:job_key>')
@@ -1247,7 +1264,7 @@ def inspect_form(job_key):
                            matched_category=matched_category,
                            evidence_reqs=evidence_reqs,
                            now_date=datetime.now().strftime('%Y-%m-%d'),
-                           google_configured=bool(config.get('sheet_id') and os.path.exists(CREDENTIALS_FILE)))
+                           google_configured=bool(config.get('sheet_id') and google_credentials_configured()))
 
 @app.route('/inspect/<path:job_key>/submit', methods=['POST'])
 def submit_inspection(job_key):
@@ -1284,7 +1301,7 @@ def submit_inspection(job_key):
     # Evidence type names from form (ev_result_brt, ev_result_daq, …)
     ev_types = [k[10:] for k in form if k.startswith('ev_result_')]
 
-    job_dir = os.path.join(UPLOAD_DIR, job_key.replace('|', '_').replace('/', '_'))
+    job_dir = os.path.join(UPLOAD_DIR, hashlib.sha256(job_key.encode('utf-8')).hexdigest())
     os.makedirs(job_dir, exist_ok=True)
 
     with db_conn() as conn:
@@ -1297,11 +1314,9 @@ def submit_inspection(job_key):
             for uploaded_file in ev_files:
                 if not uploaded_file.filename:
                     continue
-                orig_name  = uploaded_file.filename
-                safe_name  = orig_name.replace(' ', '_')
-                saved_name = f"{etype}_{now_ts}_{safe_name}"
-                file_path  = os.path.join(job_dir, saved_name)
-                uploaded_file.save(file_path)
+                orig_name, saved_name = _save_uploaded_file(
+                    uploaded_file, job_dir, EVIDENCE_EXTENSIONS)
+                file_path = os.path.join(job_dir, saved_name)
                 all_file_names.append(orig_name)
 
                 drive_link = upload_file_to_drive(file_path, saved_name, job_key)
@@ -1371,23 +1386,18 @@ def settings():
         config['drive_folder_id'] = request.form.get('drive_folder_id', '').strip()
         raw_prefixes = request.form.get('valve_prefixes', 'RSV')
         config['valve_prefixes'] = [p.strip().upper() for p in raw_prefixes.split(',') if p.strip()]
-        config['smtp_host'] = request.form.get('smtp_host', '').strip()
-        config['smtp_port'] = request.form.get('smtp_port', '587').strip()
-        config['smtp_user'] = request.form.get('smtp_user', '').strip()
-        if request.form.get('smtp_pass', '').strip():
-            config['smtp_pass'] = request.form.get('smtp_pass', '').strip()
+        for legacy_secret in ('smtp_pass', 'smtp_user', 'smtp_host', 'smtp_port'):
+            config.pop(legacy_secret, None)
         save_json(CONFIG_FILE, config)
-
-        cred_file = request.files.get('credentials')
-        if cred_file and cred_file.filename:
-            cred_file.save(CREDENTIALS_FILE)
 
         flash('Settings saved!', 'success')
         return redirect(url_for('settings'))
 
     return render_template('settings.html',
                            config=config,
-                           credentials_exist=os.path.exists(CREDENTIALS_FILE))
+                           credentials_exist=google_credentials_configured(),
+                           smtp_configured=bool(os.environ.get('SMTP_HOST') and os.environ.get('SMTP_USERNAME') and os.environ.get('SMTP_PASSWORD')),
+                           excel_password_configured=bool(EXCEL_PASSWORD))
 
 @app.route('/settings/office-locations/add', methods=['POST'])
 def office_location_add():
@@ -1742,11 +1752,11 @@ def product_image(filename):
 
 def _send_task_email(new_tasks):
     """Send inspection task notification email to all active employees."""
-    config = load_config()
-    host = config.get('smtp_host', '').strip()
-    port = int(config.get('smtp_port', 587) or 587)
-    user = config.get('smtp_user', '').strip()
-    pwd  = config.get('smtp_pass', '').strip()
+    host = os.environ.get('SMTP_HOST', '').strip()
+    port = int(os.environ.get('SMTP_PORT', '587'))
+    user = os.environ.get('SMTP_USERNAME', '').strip()
+    pwd  = os.environ.get('SMTP_PASSWORD', '')
+    sender = os.environ.get('SMTP_FROM', user).strip()
     if not all([host, user, pwd]):
         return False, 'SMTP not configured'
 
@@ -1776,16 +1786,17 @@ def _send_task_email(new_tasks):
     from email.mime.multipart import MIMEMultipart
     msg = MIMEMultipart()
     msg['Subject'] = f"【新检验任务 {len(new_tasks)} 项】{datetime.now().strftime('%Y-%m-%d')}"
-    msg['From']    = user
+    msg['From']    = sender
     msg['To']      = ', '.join(recipients)
     msg.attach(MIMEText('\n'.join(lines), 'plain', 'utf-8'))
     try:
         with smtplib.SMTP(host, port, timeout=10) as srv:
             srv.ehlo(); srv.starttls(); srv.login(user, pwd)
-            srv.sendmail(user, recipients, msg.as_string())
+            srv.sendmail(sender, recipients, msg.as_string())
         return True, f'邮件已发送给 {len(recipients)} 名员工'
-    except Exception as e:
-        return False, str(e)
+    except Exception:
+        logger.exception('Task notification email failed')
+        return False, 'Email delivery failed'
 
 
 # ── Employee routes ───────────────────────────────────────────────────────────
@@ -1975,10 +1986,8 @@ def task_status_update(tid):
 def _save_product_image(file_obj):
     if not file_obj or not file_obj.filename:
         return ''
-    os.makedirs(PRODUCT_IMG_DIR, exist_ok=True)
-    safe = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file_obj.filename.replace(' ', '_')}"
-    file_obj.save(os.path.join(PRODUCT_IMG_DIR, safe))
-    return safe
+    _, saved_name = _save_uploaded_file(file_obj, PRODUCT_IMG_DIR, IMAGE_EXTENSIONS)
+    return saved_name
 
 
 # ── Form template management ─────────────────────────────────────────────────
@@ -2625,9 +2634,7 @@ def expense_new():
     invoice_path = ''
     inv = request.files.get('invoice')
     if inv and inv.filename:
-        safe = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{inv.filename.replace(' ', '_')}"
-        invoice_path = safe
-        inv.save(os.path.join(UPLOAD_DIR, safe))
+        _, invoice_path = _save_uploaded_file(inv, UPLOAD_DIR, INVOICE_EXTENSIONS)
     with db_conn() as conn:
         conn.execute(
             'INSERT INTO expense_claims (employee_id,claim_date,claim_type,amount,description,invoice_path) VALUES (?,?,?,?,?,?)',
@@ -2843,6 +2850,30 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for('login'))
+
+@app.after_request
+def security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'same-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(self)'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; img-src 'self' data: https:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    if IS_PRODUCTION:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+@app.errorhandler(413)
+def upload_too_large(_error):
+    return 'Uploaded file is too large', 413
+
+@app.errorhandler(500)
+def internal_error(_error):
+    logger.exception('Unhandled application error')
+    return 'Internal server error', 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)

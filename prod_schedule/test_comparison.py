@@ -15,11 +15,11 @@ assert prev_path and curr_path, "Could not find one or both Excel files"
 
 print("Reading previous week (05.14)...")
 with open(prev_path, 'rb') as f:
-    prev_data = a.parse_excel(f.read(), 'castings1')
+    prev_data = a.parse_excel(f.read(), os.environ.get('EXCEL_PASSWORD', ''))
 
 print("Reading current week (05.21)...")
 with open(curr_path, 'rb') as f:
-    curr_data = a.parse_excel(f.read(), 'castings1')
+    curr_data = a.parse_excel(f.read(), os.environ.get('EXCEL_PASSWORD', ''))
 
 # Save previous week to disk so the app uses it
 a.save_json(a.PREVIOUS_FILE, prev_data)
