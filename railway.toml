@@ -3,5 +3,5 @@ builder = "NIXPACKS"
 
 [deploy]
 startCommand = "gunicorn --chdir prod_schedule app:app --bind 0.0.0.0:$PORT --timeout 120 --workers 1"
-healthcheckPath = "/"
+healthcheckPath = "/healthz"
 healthcheckTimeout = 300

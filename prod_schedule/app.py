@@ -23,13 +23,22 @@ except ImportError:
     GOOGLE_AVAILABLE = False
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-fallback-change-in-prod')
+IS_PRODUCTION = bool(
+    os.environ.get('RAILWAY_ENVIRONMENT_ID')
+    or os.environ.get('RAILWAY_ENVIRONMENT_NAME')
+    or os.environ.get('RENDER')
+)
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if IS_PRODUCTION and not SECRET_KEY:
+    raise RuntimeError('SECRET_KEY is required in production')
+app.secret_key = SECRET_KEY or 'local-development-only'
 app.jinja_env.globals['enumerate'] = enumerate
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
-CREDENTIALS_FILE = os.path.join(BASE_DIR, 'credentials.json')
+APP_DATA_DIR = os.path.abspath(os.environ.get('APP_DATA_DIR', BASE_DIR))
+DATA_DIR = os.path.join(APP_DATA_DIR, 'data')
+UPLOAD_DIR = os.path.join(APP_DATA_DIR, 'uploads')
+CREDENTIALS_FILE = os.path.join(APP_DATA_DIR, 'credentials.json')
 CONFIG_FILE = os.path.join(DATA_DIR, 'config.json')
 CURRENT_FILE = os.path.join(DATA_DIR, 'current_week.json')
 PREVIOUS_FILE = os.path.join(DATA_DIR, 'previous_week.json')
@@ -569,6 +578,17 @@ def upload_file_to_drive(local_path, filename, job_key):
     return uploaded.get('webViewLink', '')
 
 # ── routes ────────────────────────────────────────────────────────────────────
+
+@app.route('/healthz')
+def healthz():
+    try:
+        with db_conn() as conn:
+            conn.execute('SELECT 1').fetchone()
+        return jsonify(status='ok'), 200
+    except Exception:
+        logger.exception('Health check failed')
+        return jsonify(status='unhealthy'), 503
+
 
 @app.route('/')
 def index():
@@ -2627,7 +2647,7 @@ _seed_users()
 
 @app.before_request
 def _auth_check():
-    public = {'login', 'logout', 'debug_info', 'static'}
+    public = {'healthz', 'login', 'logout', 'debug_info', 'static'}
     if request.endpoint and request.endpoint not in public and 'user_id' not in session:
         return redirect(url_for('login'))
     g.username = session.get('username', '')

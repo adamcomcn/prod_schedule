@@ -3,7 +3,8 @@ import sqlite3
 from contextlib import contextmanager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH  = os.path.join(BASE_DIR, 'data', 'app.db')
+APP_DATA_DIR = os.path.abspath(os.environ.get('APP_DATA_DIR', BASE_DIR))
+DB_PATH  = os.path.join(APP_DATA_DIR, 'data', 'app.db')
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS suppliers (
