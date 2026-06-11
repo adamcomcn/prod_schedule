@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}User Accounts{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="card">
+    <div class="card-title">Create user account</div>
+    <form method="POST" action="{{ url_for('user_create') }}">
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:12px;align-items:end;">
+        <div><label>Username</label><input type="text" name="username" required></div>
+        <div><label>Temporary password</label><input type="password" name="password" minlength="12" required></div>
+        <div><label>Role</label><select name="role"><option value="inspector">Inspector</option><option value="admin">Admin</option></select></div>
+        <div><label>Employee link</label><select name="employee_id"><option value="">None</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+      </div>
+      <button class="btn btn-primary" type="submit" style="margin-top:14px;">Create account</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-title">User accounts</div>
+    <table style="width:100%;border-collapse:collapse;">
+      <thead><tr><th>Username</th><th>Role</th><th>Employee</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for user in users %}
+        <tr>
+          <td style="padding:8px;">{{ user.username }}</td>
+          <td>{{ user.role }}</td>
+          <td>{{ user.employee_name or '—' }}</td>
+          <td>{{ 'Active' if user.active else 'Disabled' }}</td>
+          <td style="display:flex;gap:8px;padding:8px;">
+            <form method="POST" action="{{ url_for('user_toggle', uid=user.id) }}">
+              <button class="btn btn-outline btn-sm" type="submit">{{ 'Disable' if user.active else 'Enable' }}</button>
+            </form>
+            <form method="POST" action="{{ url_for('user_reset_password', uid=user.id) }}" style="display:flex;gap:6px;">
+              <input type="password" name="password" minlength="12" placeholder="New password" required>
+              <button class="btn btn-outline btn-sm" type="submit">Reset</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

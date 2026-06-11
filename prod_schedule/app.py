@@ -64,6 +64,22 @@ LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_MAX_FAILURES = 5
 _login_failures = defaultdict(deque)
 
+ADMIN_ENDPOINTS = {
+    'debug_info', 'upload_excel', 'settings', 'office_location_add',
+    'office_location_delete', 'supplier_new', 'supplier_edit', 'suppliers_import',
+    'supplier_delete', 'category_new', 'category_delete', 'inspector_add',
+    'inspector_delete', 'product_new', 'product_edit', 'product_delete',
+    'order_new', 'order_edit', 'order_delete', 'employees', 'employee_new',
+    'employee_edit', 'employee_delete', 'employee_work_info_save',
+    'form_keywords_update', 'form_template_delete', 'kb_article_new',
+    'kb_article_edit', 'kb_article_delete', 'kb_category_new',
+    'kb_category_delete', 'question_new', 'question_delete', 'exam_new',
+    'exam_delete', 'plan_new', 'plan_assign', 'plan_delete', 'region_new',
+    'region_edit', 'region_delete', 'leave_approve', 'leave_reject',
+    'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
+    'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
+}
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def load_json(path, default=None):
@@ -97,6 +113,11 @@ def _record_login_failure(client_id):
 
 def _safe_next_url(value):
     return value if value and value.startswith('/') and not value.startswith('//') else None
+
+def _requested_employee_id(form):
+    if g.role == 'admin':
+        return form.get('employee_id')
+    return str(g.employee_id) if g.employee_id else None
 
 def load_config():
     return load_json(CONFIG_FILE, {
@@ -2434,6 +2455,14 @@ def hr_portal():
                 WHERE ec.status=? ORDER BY ec.created_at DESC
             ''', (expense_filter,)).fetchall()
 
+    if not g.is_admin:
+        employee_id = g.employee_id
+        emp_list = [r for r in emp_list if r['id'] == employee_id]
+        today_records = [r for r in today_records if r['employee_id'] == employee_id]
+        stats_rows = [r for r in stats_rows if r['id'] == employee_id]
+        leaves = [r for r in leaves if r['employee_id'] == employee_id]
+        expenses = [r for r in expenses if r['employee_id'] == employee_id]
+
     return render_template('hr.html',
                            tab=tab, today=today, now_time=datetime.now().strftime('%H:%M'),
                            emp_list=emp_list, today_records=today_records,
@@ -2475,7 +2504,7 @@ def _verify_gps(lat_str, lng_str):
 @app.route('/hr/attendance/checkin', methods=['POST'])
 def hr_checkin():
     f = request.form
-    emp_id = f.get('employee_id')
+    emp_id = _requested_employee_id(f)
     if not emp_id:
         flash('请选择员工', 'error')
         return redirect(url_for('hr_portal', tab='attendance'))
@@ -2515,7 +2544,7 @@ def hr_checkin():
 @app.route('/hr/attendance/checkout', methods=['POST'])
 def hr_checkout():
     f = request.form
-    emp_id = f.get('employee_id')
+    emp_id = _requested_employee_id(f)
     if not emp_id:
         flash('请选择员工', 'error')
         return redirect(url_for('hr_portal', tab='attendance'))
@@ -2547,7 +2576,7 @@ def hr_checkout():
 @app.route('/hr/leaves/new', methods=['POST'])
 def leave_new():
     f = request.form
-    emp_id = f.get('employee_id')
+    emp_id = _requested_employee_id(f)
     if not emp_id:
         flash('请选择员工', 'error')
         return redirect(url_for('hr_portal', tab='leave'))
@@ -2589,7 +2618,7 @@ def leave_delete(lid):
 @app.route('/hr/expenses/new', methods=['POST'])
 def expense_new():
     f = request.form
-    emp_id = f.get('employee_id')
+    emp_id = _requested_employee_id(f)
     if not emp_id:
         flash('请选择员工', 'error')
         return redirect(url_for('hr_portal', tab='expense'))
@@ -2633,7 +2662,11 @@ def expense_delete(eid):
 @app.route('/hr/expenses/<int:eid>/invoice')
 def expense_invoice(eid):
     with db_conn() as conn:
-        row = conn.execute('SELECT invoice_path FROM expense_claims WHERE id=?', (eid,)).fetchone()
+        row = conn.execute(
+            'SELECT invoice_path, employee_id FROM expense_claims WHERE id=?', (eid,)
+        ).fetchone()
+    if row and not g.is_admin and row['employee_id'] != g.employee_id:
+        return 'Forbidden', 403
     if not row or not row['invoice_path']:
         flash('无附件', 'error')
         return redirect(url_for('hr_portal', tab='expense'))
@@ -2682,6 +2715,73 @@ def _bootstrap_admin():
 
 _bootstrap_admin()
 
+@app.route('/admin/users')
+def users_admin():
+    with db_conn() as conn:
+        users = conn.execute(
+            'SELECT u.*, e.name AS employee_name FROM users u '
+            'LEFT JOIN employees e ON u.employee_id=e.id ORDER BY u.username'
+        ).fetchall()
+        employees = conn.execute(
+            'SELECT id, name FROM employees WHERE active=1 ORDER BY name'
+        ).fetchall()
+    return render_template('users.html', users=users, employees=employees)
+
+@app.route('/admin/users/create', methods=['POST'])
+def user_create():
+    username = request.form.get('username', '').strip()
+    password = request.form.get('password', '')
+    role = request.form.get('role', 'inspector')
+    employee_id = request.form.get('employee_id') or None
+    if not username or not username.replace('_', '').replace('-', '').isalnum():
+        flash('用户名只能包含字母、数字、下划线和连字符', 'error')
+    elif len(password) < 12:
+        flash('密码至少需要 12 个字符', 'error')
+    elif role not in {'admin', 'inspector'}:
+        flash('无效角色', 'error')
+    else:
+        try:
+            with db_conn() as conn:
+                conn.execute(
+                    'INSERT INTO users (username,password_hash,role,employee_id) VALUES (?,?,?,?)',
+                    (username, generate_password_hash(password), role, employee_id))
+            flash('账号已创建', 'success')
+        except Exception:
+            flash('用户名已存在或员工关联无效', 'error')
+    return redirect(url_for('users_admin'))
+
+@app.route('/admin/users/<int:uid>/toggle', methods=['POST'])
+def user_toggle(uid):
+    if uid == g.user_id:
+        flash('不能停用当前登录账号', 'error')
+        return redirect(url_for('users_admin'))
+    with db_conn() as conn:
+        user = conn.execute('SELECT active,role FROM users WHERE id=?', (uid,)).fetchone()
+        if user:
+            if user['active'] and user['role'] == 'admin':
+                active_admins = conn.execute(
+                    "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
+                ).fetchone()[0]
+                if active_admins <= 1:
+                    flash('至少需要保留一个启用的管理员', 'error')
+                    return redirect(url_for('users_admin'))
+            conn.execute('UPDATE users SET active=? WHERE id=?', (0 if user['active'] else 1, uid))
+            flash('账号状态已更新', 'success')
+    return redirect(url_for('users_admin'))
+
+@app.route('/admin/users/<int:uid>/reset-password', methods=['POST'])
+def user_reset_password(uid):
+    password = request.form.get('password', '')
+    if len(password) < 12:
+        flash('密码至少需要 12 个字符', 'error')
+    else:
+        with db_conn() as conn:
+            conn.execute(
+                'UPDATE users SET password_hash=? WHERE id=?',
+                (generate_password_hash(password), uid))
+        flash('密码已重置', 'success')
+    return redirect(url_for('users_admin'))
+
 @app.before_request
 def _auth_check():
     if request.method == 'POST':
@@ -2699,7 +2799,7 @@ def _auth_check():
         return redirect(url_for('login', next=request.full_path.rstrip('?')))
     with db_conn() as conn:
         user = conn.execute(
-            'SELECT id, username, role FROM users WHERE id=? AND active=1',
+            'SELECT id, username, role, employee_id FROM users WHERE id=? AND active=1',
             (user_id,)
         ).fetchone()
     if not user:
@@ -2708,6 +2808,10 @@ def _auth_check():
     g.user_id = user['id']
     g.username = user['username']
     g.role = user['role']
+    g.employee_id = user['employee_id']
+    g.is_admin = user['role'] == 'admin'
+    if request.endpoint in ADMIN_ENDPOINTS and not g.is_admin:
+        return 'Forbidden', 403
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():

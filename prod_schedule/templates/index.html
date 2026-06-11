@@ -84,6 +84,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 {% block content %}
 <div class="page" style="padding-bottom:0; padding-top: 16px;">
   <div class="toolbar">
+    {% if g.is_admin %}
     <form method="POST" action="{{ url_for('upload_excel') }}" enctype="multipart/form-data"
           class="upload-form">
       <label class="file-upload-area" title="Upload new Excel schedule">
@@ -95,10 +96,11 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
       <span class="file-name upload-info">No file chosen</span>
       <button class="auto-submit-btn btn btn-primary" type="submit" style="display:none">Upload</button>
     </form>
+    {% endif %}
     {% if upload_date %}
       <span class="upload-info">Last uploaded: <strong>{{ upload_date }}</strong></span>
     {% endif %}
-    {% if not google_configured %}
+    {% if g.is_admin and not google_configured %}
       <a href="{{ url_for('settings') }}" class="btn btn-outline btn-sm">
         &#9888; Configure Google Sheets/Drive
       </a>

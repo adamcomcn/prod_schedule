@@ -105,9 +105,9 @@ textarea { resize: vertical; min-height: 80px; }
   <a href="{{ url_for('orders') }}"
      class="nav-link {% if request.endpoint in ['orders','order_new','order_edit'] %}active{% endif %}">
     <span class="lt" data-en="Orders" data-zh="订单">Orders</span></a>
-  <a href="{{ url_for('employees') }}"
+  {% if g.is_admin %}<a href="{{ url_for('employees') }}"
      class="nav-link {% if request.endpoint in ['employees','employee_new','employee_edit'] %}active{% endif %}">
-    <span class="lt" data-en="Employees" data-zh="员工">Employees</span></a>
+    <span class="lt" data-en="Employees" data-zh="员工">Employees</span></a>{% endif %}
   <a href="{{ url_for('regions') }}"
      class="nav-link {% if request.endpoint == 'regions' %}active{% endif %}">
     <span class="lt" data-en="Regions" data-zh="区域">Regions</span></a>
@@ -129,9 +129,12 @@ textarea { resize: vertical; min-height: 80px; }
   <a href="{{ url_for('form_templates_page') }}"
      class="nav-link {% if request.endpoint in ['form_templates_page','inspect_checklist'] %}active{% endif %}">
     <span class="lt" data-en="Forms" data-zh="检验模板">Forms</span></a>
-  <a href="{{ url_for('settings') }}"
+  {% if g.is_admin %}<a href="{{ url_for('settings') }}"
      class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}">
     <span class="lt" data-en="Settings" data-zh="设置">Settings</span></a>
+  <a href="{{ url_for('users_admin') }}"
+     class="nav-link {% if request.endpoint and request.endpoint.startswith('user') %}active{% endif %}">
+    <span class="lt" data-en="Users" data-zh="账号">Users</span></a>{% endif %}
   <button id="lang-btn" class="lang-btn" onclick="toggleLang()">中文</button>
   <span style="color:rgba(255,255,255,.5);font-size:.8rem;margin-left:12px;white-space:nowrap;">{{ g.username }}</span>
   <form method="POST" action="{{ url_for('logout') }}" style="margin-left:10px;">

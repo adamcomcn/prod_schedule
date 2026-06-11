@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,
     role          TEXT    DEFAULT 'inspector',
+    employee_id   INTEGER REFERENCES employees(id) ON DELETE SET NULL,
     active        INTEGER DEFAULT 1,
     created_at    TEXT    DEFAULT (datetime('now','localtime'))
 );
@@ -752,6 +753,11 @@ def init_db():
 
         try:
             conn.execute("ALTER TABLE kb_articles ADD COLUMN images TEXT DEFAULT '[]'")
+        except Exception:
+            pass
+
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL")
         except Exception:
             pass
 
