@@ -11,7 +11,7 @@ print(f"Reading: {path}")
 with open(path, 'rb') as f:
     file_bytes = f.read()
 
-data = a.parse_excel(file_bytes, 'castings1')
+data = a.parse_excel(file_bytes, os.environ.get('EXCEL_PASSWORD', ''))
 a.save_json(a.CURRENT_FILE, data)
 
 config = a.load_config()

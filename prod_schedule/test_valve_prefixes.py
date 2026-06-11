@@ -5,7 +5,7 @@ import app as a
 docs = r'C:\Users\JWan\Documents'
 curr_path = next(p for p in glob.glob(os.path.join(docs, '*.xlsx')) if '05.21' in p or '5.21' in p)
 with open(curr_path, 'rb') as f:
-    curr = a.parse_excel(f.read(), 'castings1')
+    curr = a.parse_excel(f.read(), os.environ.get('EXCEL_PASSWORD', ''))
 
 print("Item codes where description contains 'valve' (unique prefixes):\n")
 prefixes = {}

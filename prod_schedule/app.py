@@ -1,9 +1,11 @@
-import os, io, json, hashlib, tempfile, math, logging, traceback
+import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time, base64, uuid
+from collections import defaultdict, deque
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, g
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, g, abort
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 import msoffcrypto
 import openpyxl
 from db import db_conn, init_db
@@ -23,25 +25,65 @@ except ImportError:
     GOOGLE_AVAILABLE = False
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-fallback-change-in-prod')
+IS_PRODUCTION = bool(
+    os.environ.get('RAILWAY_ENVIRONMENT_ID')
+    or os.environ.get('RAILWAY_ENVIRONMENT_NAME')
+    or os.environ.get('RENDER')
+)
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if IS_PRODUCTION and not SECRET_KEY:
+    raise RuntimeError('SECRET_KEY is required in production')
+app.secret_key = SECRET_KEY or 'local-development-only'
+app.config.update(
+    MAX_CONTENT_LENGTH=int(os.environ.get('MAX_UPLOAD_BYTES', 50 * 1024 * 1024)),
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get('SESSION_HOURS', '8'))),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+)
 app.jinja_env.globals['enumerate'] = enumerate
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
-CREDENTIALS_FILE = os.path.join(BASE_DIR, 'credentials.json')
+APP_DATA_DIR = os.path.abspath(os.environ.get('APP_DATA_DIR', BASE_DIR))
+DATA_DIR = os.path.join(APP_DATA_DIR, 'data')
+UPLOAD_DIR = os.path.join(APP_DATA_DIR, 'uploads')
 CONFIG_FILE = os.path.join(DATA_DIR, 'config.json')
 CURRENT_FILE = os.path.join(DATA_DIR, 'current_week.json')
 PREVIOUS_FILE = os.path.join(DATA_DIR, 'previous_week.json')
 INSPECTIONS_CACHE = os.path.join(DATA_DIR, 'inspections_cache.json')
 
-EXCEL_PASSWORD   = 'castings1'
-PRODUCT_IMG_DIR  = os.path.join(BASE_DIR, 'static', 'product_images')
+EXCEL_PASSWORD   = os.environ.get('EXCEL_PASSWORD', '')
+PRODUCT_IMG_DIR  = os.path.join(APP_DATA_DIR, 'product_images')
+
+EVIDENCE_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.csv', '.jpg', '.jpeg', '.png', '.mp4', '.mov', '.avi', '.mkv'}
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
+INVOICE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png'}
 
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive',
 ]
+
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_MAX_FAILURES = 5
+_login_failures = defaultdict(deque)
+
+ADMIN_ENDPOINTS = {
+    'debug_info', 'upload_excel', 'settings', 'office_location_add',
+    'office_location_delete', 'supplier_new', 'supplier_edit', 'suppliers_import',
+    'supplier_delete', 'category_new', 'category_delete', 'inspector_add',
+    'inspector_delete', 'product_new', 'product_edit', 'product_delete',
+    'order_new', 'order_edit', 'order_delete', 'employees', 'employee_new',
+    'employee_edit', 'employee_delete', 'employee_work_info_save',
+    'form_keywords_update', 'form_template_delete', 'kb_article_new',
+    'kb_article_edit', 'kb_article_delete', 'kb_category_new',
+    'kb_category_delete', 'question_new', 'question_delete', 'exam_new',
+    'exam_delete', 'plan_new', 'plan_assign', 'plan_delete', 'region_new',
+    'region_edit', 'region_delete', 'leave_approve', 'leave_reject',
+    'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
+    'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
+    'user_update',
+}
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +97,46 @@ def save_json(path, data):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+def csrf_token():
+    token = session.get('_csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_csrf_token'] = token
+    return token
+
+app.jinja_env.globals['csrf_token'] = csrf_token
+
+def _login_rate_limited(client_id):
+    attempts = _login_failures[client_id]
+    cutoff = time.monotonic() - LOGIN_WINDOW_SECONDS
+    while attempts and attempts[0] < cutoff:
+        attempts.popleft()
+    return len(attempts) >= LOGIN_MAX_FAILURES
+
+def _record_login_failure(client_id):
+    _login_failures[client_id].append(time.monotonic())
+
+def _safe_next_url(value):
+    return value if value and value.startswith('/') and not value.startswith('//') else None
+
+def _requested_employee_id(form):
+    if g.role == 'admin':
+        return form.get('employee_id')
+    return str(g.employee_id) if g.employee_id else None
+
+def google_credentials_configured():
+    return bool(os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON_B64'))
+
+def _save_uploaded_file(file_obj, directory, allowed_extensions):
+    original = secure_filename(file_obj.filename or '')
+    extension = os.path.splitext(original)[1].lower()
+    if not original or extension not in allowed_extensions:
+        raise ValueError('Unsupported file type')
+    os.makedirs(directory, exist_ok=True)
+    saved_name = f'{uuid.uuid4().hex}{extension}'
+    file_obj.save(os.path.join(directory, saved_name))
+    return original, saved_name
+
 def load_config():
     return load_json(CONFIG_FILE, {
         'sheet_id': '',
@@ -63,6 +145,13 @@ def load_config():
         'valve_prefixes': ['RSV'],
         'office_locations': [],
     })
+
+def parse_json_list(value):
+    try:
+        parsed = json.loads(value or '[]')
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
 
 def haversine(lat1, lon1, lat2, lon2):
     """Distance in metres between two GPS coordinates."""
@@ -497,10 +586,11 @@ def compute_changes(previous, current):
 # ── Google API ────────────────────────────────────────────────────────────────
 
 def get_google_services():
-    if not GOOGLE_AVAILABLE or not os.path.exists(CREDENTIALS_FILE):
+    encoded = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON_B64', '')
+    if not GOOGLE_AVAILABLE or not encoded:
         return None, None
-    creds = service_account.Credentials.from_service_account_file(
-        CREDENTIALS_FILE, scopes=SCOPES)
+    info = json.loads(base64.b64decode(encoded).decode('utf-8'))
+    creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
     sheets = build('sheets', 'v4', credentials=creds)
     drive = build('drive', 'v3', credentials=creds)
     return sheets, drive
@@ -561,14 +651,20 @@ def upload_file_to_drive(local_path, filename, job_key):
     file_meta = {'name': filename, 'parents': [job_folder_id]}
     media = MediaFileUpload(local_path, resumable=True)
     uploaded = drive.files().create(body=file_meta, media_body=media, fields='id,webViewLink').execute()
-    # Make it viewable by anyone with link
-    drive.permissions().create(
-        fileId=uploaded['id'],
-        body={'type': 'anyone', 'role': 'reader'},
-    ).execute()
     return uploaded.get('webViewLink', '')
 
 # ── routes ────────────────────────────────────────────────────────────────────
+
+@app.route('/healthz')
+def healthz():
+    try:
+        with db_conn() as conn:
+            conn.execute('SELECT 1').fetchone()
+        return jsonify(status='ok'), 200
+    except Exception:
+        logger.exception('Health check failed')
+        return jsonify(status='unhealthy'), 503
+
 
 @app.route('/')
 def index():
@@ -580,6 +676,23 @@ def index():
         statuses, typo_flags, shipped_rows = {}, [], {}
     config = load_config()
     inspections = load_json(INSPECTIONS_CACHE, {})
+
+    sheet_names = list(current.keys())
+    selected_sheet = request.args.get('sheet', '')
+    if selected_sheet not in current:
+        selected_sheet = sheet_names[0] if sheet_names else ''
+    search = request.args.get('q', '').strip()
+    view = request.args.get('view', 'active')
+    if view not in {'active', 'shipped', 'all'}:
+        view = 'active'
+    try:
+        page = max(1, int(request.args.get('page', '1')))
+    except ValueError:
+        page = 1
+    try:
+        per_page = min(200, max(1, int(request.args.get('per_page', '100'))))
+    except ValueError:
+        per_page = 100
 
     # Build set of job_keys that are valves (require V-Trust)
     valve_keys = set()
@@ -610,7 +723,7 @@ def index():
             'SELECT * FROM outstanding_jobs WHERE completed=0 ORDER BY est_completion ASC, shipped_at ASC'
         ).fetchall()
         completed_jobs = conn.execute(
-            'SELECT * FROM outstanding_jobs WHERE completed=1 ORDER BY completed_at DESC'
+            'SELECT * FROM outstanding_jobs WHERE completed=1 ORDER BY completed_at DESC LIMIT 100'
         ).fetchall()
         kpi_total     = conn.execute('SELECT COUNT(*) FROM outstanding_jobs').fetchone()[0]
         kpi_done      = conn.execute('SELECT COUNT(*) FROM outstanding_jobs WHERE completed=1').fetchone()[0]
@@ -624,22 +737,60 @@ def index():
     for job in outstanding_jobs:
         outstanding_by_sheet[job['sheet']].append(job)
 
+    display_data = {}
+    display_shipped = {}
+    total_results = 0
+    total_pages = 1
+    if selected_sheet and current.get(selected_sheet):
+        headers = current[selected_sheet][0]
+        active_rows = current[selected_sheet][1:]
+        selected_shipped = shipped_rows.get(selected_sheet, [])
+        entries = []
+        if view in {'active', 'all'}:
+            entries.extend(('active', row) for row in active_rows)
+        if view in {'shipped', 'all'}:
+            entries.extend(('shipped', row) for row in selected_shipped)
+        if search:
+            needle = search.casefold()
+            entries = [
+                entry for entry in entries
+                if any(needle in str(cell).casefold() for cell in entry[1])
+            ]
+        total_results = len(entries)
+        total_pages = max(1, math.ceil(total_results / per_page))
+        page = min(page, total_pages)
+        page_entries = entries[(page - 1) * per_page:page * per_page]
+        display_data[selected_sheet] = [headers] + [
+            row for kind, row in page_entries if kind == 'active'
+        ]
+        display_shipped[selected_sheet] = [
+            row for kind, row in page_entries if kind == 'shipped'
+        ]
+
     return render_template('index.html',
-                           data=current,
+                           data=display_data,
                            statuses=statuses,
-                           typo_flags=typo_flags,
-                           shipped_rows=shipped_rows,
+                           typo_flags=[t for t in typo_flags if t.get('sheet') == selected_sheet][:100],
+                           shipped_rows=display_shipped,
                            inspections=inspections,
                            valve_keys=valve_keys,
                            upload_date=config.get('upload_date', ''),
-                           google_configured=bool(config.get('sheet_id') and os.path.exists(CREDENTIALS_FILE)),
+                           google_configured=bool(config.get('sheet_id') and google_credentials_configured()),
                            outstanding_jobs=outstanding_jobs,
                            outstanding_by_sheet=outstanding_by_sheet,
                            completed_jobs=completed_jobs,
                            kpi_total=kpi_total,
                            kpi_done=kpi_done,
                            kpi_overdue=kpi_overdue,
-                           today_str=today_str)
+                           today_str=today_str,
+                           sheet_names=sheet_names,
+                           selected_sheet=selected_sheet,
+                           search=search,
+                           view=view,
+                           page=page,
+                           per_page=per_page,
+                           total_results=total_results,
+                           total_pages=total_pages)
 
 @app.route('/dashboard')
 def dashboard():
@@ -857,11 +1008,13 @@ def upload_excel():
         return redirect(url_for('index'))
 
     f = request.files['file']
-    password = request.form.get('password', EXCEL_PASSWORD)
+    if os.path.splitext(secure_filename(f.filename or ''))[1].lower() != '.xlsx':
+        flash('Only .xlsx schedule files are supported', 'error')
+        return redirect(url_for('index'))
 
     try:
         file_bytes = f.read()
-        data = parse_excel(file_bytes, password)
+        data = parse_excel(file_bytes, EXCEL_PASSWORD)
 
         # Rotate: current → previous
         if os.path.exists(CURRENT_FILE):
@@ -1009,13 +1162,15 @@ def upload_excel():
         logger.error('Upload failed:\n%s', tb)
         _last_error['tb'] = tb
         _last_error['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        flash(f'Error reading file: {e}', 'error')
+        flash('Unable to read the uploaded schedule. Check the file format and encryption password.', 'error')
 
     return redirect(url_for('index'))
 
 
 @app.route('/debug')
 def debug_info():
+    if IS_PRODUCTION:
+        abort(404)
     import sys, sqlite3
     info = {
         'python': sys.version,
@@ -1031,7 +1186,7 @@ def debug_info():
             tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
             info['db_tables'] = tables
     except Exception as e:
-        info['db_error'] = str(e)
+        info['db_error'] = 'database check failed'
     return f'<pre style="white-space:pre-wrap;font-size:13px">{json.dumps(info, indent=2, ensure_ascii=False)}</pre>'
 
 @app.route('/inspect/<path:job_key>')
@@ -1172,7 +1327,7 @@ def inspect_form(job_key):
                            matched_category=matched_category,
                            evidence_reqs=evidence_reqs,
                            now_date=datetime.now().strftime('%Y-%m-%d'),
-                           google_configured=bool(config.get('sheet_id') and os.path.exists(CREDENTIALS_FILE)))
+                           google_configured=bool(config.get('sheet_id') and google_credentials_configured()))
 
 @app.route('/inspect/<path:job_key>/submit', methods=['POST'])
 def submit_inspection(job_key):
@@ -1209,7 +1364,7 @@ def submit_inspection(job_key):
     # Evidence type names from form (ev_result_brt, ev_result_daq, …)
     ev_types = [k[10:] for k in form if k.startswith('ev_result_')]
 
-    job_dir = os.path.join(UPLOAD_DIR, job_key.replace('|', '_').replace('/', '_'))
+    job_dir = os.path.join(UPLOAD_DIR, hashlib.sha256(job_key.encode('utf-8')).hexdigest())
     os.makedirs(job_dir, exist_ok=True)
 
     with db_conn() as conn:
@@ -1222,11 +1377,9 @@ def submit_inspection(job_key):
             for uploaded_file in ev_files:
                 if not uploaded_file.filename:
                     continue
-                orig_name  = uploaded_file.filename
-                safe_name  = orig_name.replace(' ', '_')
-                saved_name = f"{etype}_{now_ts}_{safe_name}"
-                file_path  = os.path.join(job_dir, saved_name)
-                uploaded_file.save(file_path)
+                orig_name, saved_name = _save_uploaded_file(
+                    uploaded_file, job_dir, EVIDENCE_EXTENSIONS)
+                file_path = os.path.join(job_dir, saved_name)
                 all_file_names.append(orig_name)
 
                 drive_link = upload_file_to_drive(file_path, saved_name, job_key)
@@ -1296,23 +1449,18 @@ def settings():
         config['drive_folder_id'] = request.form.get('drive_folder_id', '').strip()
         raw_prefixes = request.form.get('valve_prefixes', 'RSV')
         config['valve_prefixes'] = [p.strip().upper() for p in raw_prefixes.split(',') if p.strip()]
-        config['smtp_host'] = request.form.get('smtp_host', '').strip()
-        config['smtp_port'] = request.form.get('smtp_port', '587').strip()
-        config['smtp_user'] = request.form.get('smtp_user', '').strip()
-        if request.form.get('smtp_pass', '').strip():
-            config['smtp_pass'] = request.form.get('smtp_pass', '').strip()
+        for legacy_secret in ('smtp_pass', 'smtp_user', 'smtp_host', 'smtp_port'):
+            config.pop(legacy_secret, None)
         save_json(CONFIG_FILE, config)
-
-        cred_file = request.files.get('credentials')
-        if cred_file and cred_file.filename:
-            cred_file.save(CREDENTIALS_FILE)
 
         flash('Settings saved!', 'success')
         return redirect(url_for('settings'))
 
     return render_template('settings.html',
                            config=config,
-                           credentials_exist=os.path.exists(CREDENTIALS_FILE))
+                           credentials_exist=google_credentials_configured(),
+                           smtp_configured=bool(os.environ.get('SMTP_HOST') and os.environ.get('SMTP_USERNAME') and os.environ.get('SMTP_PASSWORD')),
+                           excel_password_configured=bool(EXCEL_PASSWORD))
 
 @app.route('/settings/office-locations/add', methods=['POST'])
 def office_location_add():
@@ -1667,11 +1815,11 @@ def product_image(filename):
 
 def _send_task_email(new_tasks):
     """Send inspection task notification email to all active employees."""
-    config = load_config()
-    host = config.get('smtp_host', '').strip()
-    port = int(config.get('smtp_port', 587) or 587)
-    user = config.get('smtp_user', '').strip()
-    pwd  = config.get('smtp_pass', '').strip()
+    host = os.environ.get('SMTP_HOST', '').strip()
+    port = int(os.environ.get('SMTP_PORT', '587'))
+    user = os.environ.get('SMTP_USERNAME', '').strip()
+    pwd  = os.environ.get('SMTP_PASSWORD', '')
+    sender = os.environ.get('SMTP_FROM', user).strip()
     if not all([host, user, pwd]):
         return False, 'SMTP not configured'
 
@@ -1701,16 +1849,17 @@ def _send_task_email(new_tasks):
     from email.mime.multipart import MIMEMultipart
     msg = MIMEMultipart()
     msg['Subject'] = f"【新检验任务 {len(new_tasks)} 项】{datetime.now().strftime('%Y-%m-%d')}"
-    msg['From']    = user
+    msg['From']    = sender
     msg['To']      = ', '.join(recipients)
     msg.attach(MIMEText('\n'.join(lines), 'plain', 'utf-8'))
     try:
         with smtplib.SMTP(host, port, timeout=10) as srv:
             srv.ehlo(); srv.starttls(); srv.login(user, pwd)
-            srv.sendmail(user, recipients, msg.as_string())
+            srv.sendmail(sender, recipients, msg.as_string())
         return True, f'邮件已发送给 {len(recipients)} 名员工'
-    except Exception as e:
-        return False, str(e)
+    except Exception:
+        logger.exception('Task notification email failed')
+        return False, 'Email delivery failed'
 
 
 # ── Employee routes ───────────────────────────────────────────────────────────
@@ -1900,10 +2049,8 @@ def task_status_update(tid):
 def _save_product_image(file_obj):
     if not file_obj or not file_obj.filename:
         return ''
-    os.makedirs(PRODUCT_IMG_DIR, exist_ok=True)
-    safe = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file_obj.filename.replace(' ', '_')}"
-    file_obj.save(os.path.join(PRODUCT_IMG_DIR, safe))
-    return safe
+    _, saved_name = _save_uploaded_file(file_obj, PRODUCT_IMG_DIR, IMAGE_EXTENSIONS)
+    return saved_name
 
 
 # ── Form template management ─────────────────────────────────────────────────
@@ -2041,7 +2188,7 @@ def knowledge():
     # Parse images JSON for each article so templates can use them directly
     articles_data = []
     for a in articles:
-        imgs = json.loads(a['images'] or '[]') if a['images'] else []
+        imgs = parse_json_list(a['images'])
         articles_data.append({'row': a, 'first_img': imgs[0] if imgs else '', 'img_count': len(imgs)})
     return render_template('knowledge.html', cats=cats, articles=articles_data,
                            cat_filter=cat_filter, search=search)
@@ -2058,7 +2205,7 @@ def kb_article(aid):
         ).fetchall()
     if not article:
         flash('找不到该文章', 'error'); return redirect(url_for('knowledge'))
-    images = json.loads(article['images'] or '[]') if article['images'] else []
+    images = parse_json_list(article['images'])
     return render_template('kb_article.html', article=article, related_qs=related_qs, images=images)
 
 @app.route('/knowledge/article/new', methods=['GET', 'POST'])
@@ -2380,6 +2527,14 @@ def hr_portal():
                 WHERE ec.status=? ORDER BY ec.created_at DESC
             ''', (expense_filter,)).fetchall()
 
+    if not g.is_admin:
+        employee_id = g.employee_id
+        emp_list = [r for r in emp_list if r['id'] == employee_id]
+        today_records = [r for r in today_records if r['employee_id'] == employee_id]
+        stats_rows = [r for r in stats_rows if r['id'] == employee_id]
+        leaves = [r for r in leaves if r['employee_id'] == employee_id]
+        expenses = [r for r in expenses if r['employee_id'] == employee_id]
+
     return render_template('hr.html',
                            tab=tab, today=today, now_time=datetime.now().strftime('%H:%M'),
                            emp_list=emp_list, today_records=today_records,
@@ -2421,7 +2576,7 @@ def _verify_gps(lat_str, lng_str):
 @app.route('/hr/attendance/checkin', methods=['POST'])
 def hr_checkin():
     f = request.form
-    emp_id = f.get('employee_id')
+    emp_id = _requested_employee_id(f)
     if not emp_id:
         flash('请选择员工', 'error')
         return redirect(url_for('hr_portal', tab='attendance'))
@@ -2461,7 +2616,7 @@ def hr_checkin():
 @app.route('/hr/attendance/checkout', methods=['POST'])
 def hr_checkout():
     f = request.form
-    emp_id = f.get('employee_id')
+    emp_id = _requested_employee_id(f)
     if not emp_id:
         flash('请选择员工', 'error')
         return redirect(url_for('hr_portal', tab='attendance'))
@@ -2493,7 +2648,7 @@ def hr_checkout():
 @app.route('/hr/leaves/new', methods=['POST'])
 def leave_new():
     f = request.form
-    emp_id = f.get('employee_id')
+    emp_id = _requested_employee_id(f)
     if not emp_id:
         flash('请选择员工', 'error')
         return redirect(url_for('hr_portal', tab='leave'))
@@ -2535,16 +2690,14 @@ def leave_delete(lid):
 @app.route('/hr/expenses/new', methods=['POST'])
 def expense_new():
     f = request.form
-    emp_id = f.get('employee_id')
+    emp_id = _requested_employee_id(f)
     if not emp_id:
         flash('请选择员工', 'error')
         return redirect(url_for('hr_portal', tab='expense'))
     invoice_path = ''
     inv = request.files.get('invoice')
     if inv and inv.filename:
-        safe = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{inv.filename.replace(' ', '_')}"
-        invoice_path = safe
-        inv.save(os.path.join(UPLOAD_DIR, safe))
+        _, invoice_path = _save_uploaded_file(inv, UPLOAD_DIR, INVOICE_EXTENSIONS)
     with db_conn() as conn:
         conn.execute(
             'INSERT INTO expense_claims (employee_id,claim_date,claim_type,amount,description,invoice_path) VALUES (?,?,?,?,?,?)',
@@ -2579,7 +2732,11 @@ def expense_delete(eid):
 @app.route('/hr/expenses/<int:eid>/invoice')
 def expense_invoice(eid):
     with db_conn() as conn:
-        row = conn.execute('SELECT invoice_path FROM expense_claims WHERE id=?', (eid,)).fetchone()
+        row = conn.execute(
+            'SELECT invoice_path, employee_id FROM expense_claims WHERE id=?', (eid,)
+        ).fetchone()
+    if row and not g.is_admin and row['employee_id'] != g.employee_id:
+        return 'Forbidden', 403
     if not row or not row['invoice_path']:
         flash('无附件', 'error')
         return redirect(url_for('hr_portal', tab='expense'))
@@ -2609,53 +2766,199 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 init_db()
 
-def _seed_users():
-    _defaults = [
-        ('admin', 'admin', 'admin'),
-        ('qc1',   'qc1',   'inspector'),
-        ('qc2',   'qc2',   'inspector'),
-    ]
+def _bootstrap_admin():
+    username = os.environ.get('BOOTSTRAP_ADMIN_USERNAME', '').strip()
+    password = os.environ.get('BOOTSTRAP_ADMIN_PASSWORD', '')
     with db_conn() as conn:
-        existing = {r[0] for r in conn.execute('SELECT username FROM users').fetchall()}
-        for username, password, role in _defaults:
-            if username not in existing:
-                conn.execute(
-                    'INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
-                    (username, generate_password_hash(password), role))
+        if conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]:
+            return
+        if not username or len(password) < 12:
+            logger.warning(
+                'No users exist. Set BOOTSTRAP_ADMIN_USERNAME and a '
+                'BOOTSTRAP_ADMIN_PASSWORD of at least 12 characters.'
+            )
+            return
+        conn.execute(
+            'INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
+            (username, generate_password_hash(password), 'admin'))
+        logger.info('Bootstrap administrator created; remove BOOTSTRAP_ADMIN_PASSWORD')
 
-_seed_users()
+_bootstrap_admin()
+
+@app.route('/admin/users')
+def users_admin():
+    with db_conn() as conn:
+        users = conn.execute(
+            'SELECT u.*, e.name AS employee_name FROM users u '
+            'LEFT JOIN employees e ON u.employee_id=e.id ORDER BY u.username'
+        ).fetchall()
+        employees = conn.execute(
+            'SELECT id, name FROM employees WHERE active=1 ORDER BY name'
+        ).fetchall()
+    return render_template('users.html', users=users, employees=employees)
+
+@app.route('/admin/users/create', methods=['POST'])
+def user_create():
+    username = request.form.get('username', '').strip()
+    password = request.form.get('password', '')
+    role = request.form.get('role', 'inspector')
+    employee_id = request.form.get('employee_id') or None
+    if not username or not username.replace('_', '').replace('-', '').isalnum():
+        flash('用户名只能包含字母、数字、下划线和连字符', 'error')
+    elif len(password) < 12:
+        flash('密码至少需要 12 个字符', 'error')
+    elif role not in {'admin', 'inspector'}:
+        flash('无效角色', 'error')
+    else:
+        try:
+            with db_conn() as conn:
+                conn.execute(
+                    'INSERT INTO users (username,password_hash,role,employee_id) VALUES (?,?,?,?)',
+                    (username, generate_password_hash(password), role, employee_id))
+            flash('账号已创建', 'success')
+        except Exception:
+            flash('用户名已存在或员工关联无效', 'error')
+    return redirect(url_for('users_admin'))
+
+@app.route('/admin/users/<int:uid>/toggle', methods=['POST'])
+def user_toggle(uid):
+    if uid == g.user_id:
+        flash('不能停用当前登录账号', 'error')
+        return redirect(url_for('users_admin'))
+    with db_conn() as conn:
+        user = conn.execute('SELECT active,role FROM users WHERE id=?', (uid,)).fetchone()
+        if user:
+            if user['active'] and user['role'] == 'admin':
+                active_admins = conn.execute(
+                    "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
+                ).fetchone()[0]
+                if active_admins <= 1:
+                    flash('至少需要保留一个启用的管理员', 'error')
+                    return redirect(url_for('users_admin'))
+            conn.execute('UPDATE users SET active=? WHERE id=?', (0 if user['active'] else 1, uid))
+            flash('账号状态已更新', 'success')
+    return redirect(url_for('users_admin'))
+
+@app.route('/admin/users/<int:uid>/reset-password', methods=['POST'])
+def user_reset_password(uid):
+    password = request.form.get('password', '')
+    if len(password) < 12:
+        flash('密码至少需要 12 个字符', 'error')
+    else:
+        with db_conn() as conn:
+            conn.execute(
+                'UPDATE users SET password_hash=? WHERE id=?',
+                (generate_password_hash(password), uid))
+        flash('密码已重置', 'success')
+    return redirect(url_for('users_admin'))
+
+@app.route('/admin/users/<int:uid>/update', methods=['POST'])
+def user_update(uid):
+    role = request.form.get('role', 'inspector')
+    employee_id = request.form.get('employee_id') or None
+    if role not in {'admin', 'inspector'}:
+        flash('无效角色', 'error')
+        return redirect(url_for('users_admin'))
+    with db_conn() as conn:
+        user = conn.execute('SELECT role,active FROM users WHERE id=?', (uid,)).fetchone()
+        if user and user['active'] and user['role'] == 'admin' and role != 'admin':
+            active_admins = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
+            ).fetchone()[0]
+            if active_admins <= 1:
+                flash('至少需要保留一个启用的管理员', 'error')
+                return redirect(url_for('users_admin'))
+        conn.execute(
+            'UPDATE users SET role=?,employee_id=? WHERE id=?',
+            (role, employee_id, uid))
+    flash('账号资料已更新', 'success')
+    return redirect(url_for('users_admin'))
 
 @app.before_request
 def _auth_check():
-    public = {'login', 'logout', 'debug_info', 'static'}
-    if request.endpoint and request.endpoint not in public and 'user_id' not in session:
+    if request.method == 'POST':
+        submitted = request.form.get('_csrf_token') or request.headers.get('X-CSRF-Token')
+        expected = session.get('_csrf_token', '')
+        if not submitted or not expected or not hmac.compare_digest(submitted, expected):
+            return 'Invalid CSRF token', 400
+
+    public = {'healthz', 'login', 'static'}
+    if request.endpoint in public or request.endpoint is None:
+        return None
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login', next=request.full_path.rstrip('?')))
+    with db_conn() as conn:
+        user = conn.execute(
+            'SELECT id, username, role, employee_id FROM users WHERE id=? AND active=1',
+            (user_id,)
+        ).fetchone()
+    if not user:
+        session.clear()
         return redirect(url_for('login'))
-    g.username = session.get('username', '')
-    g.role = session.get('role', '')
+    g.user_id = user['id']
+    g.username = user['username']
+    g.role = user['role']
+    g.employee_id = user['employee_id']
+    g.is_admin = user['role'] == 'admin'
+    if request.endpoint in ADMIN_ENDPOINTS and not g.is_admin:
+        return 'Forbidden', 403
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if 'user_id' in session:
         return redirect(url_for('index'))
     if request.method == 'POST':
+        client_id = request.remote_addr or 'unknown'
+        if _login_rate_limited(client_id):
+            flash('登录尝试次数过多，请稍后再试', 'error')
+            return render_template('login.html'), 429
         username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
+        password = request.form.get('password', '')
         with db_conn() as conn:
             user = conn.execute(
                 'SELECT * FROM users WHERE username=? AND active=1', (username,)
             ).fetchone()
         if user and check_password_hash(user['password_hash'], password):
+            _login_failures.pop(client_id, None)
+            session.clear()
+            session.permanent = True
             session['user_id'] = user['id']
-            session['username'] = user['username']
-            session['role'] = user['role']
-            return redirect(url_for('index'))
+            csrf_token()
+            return redirect(_safe_next_url(request.args.get('next')) or url_for('index'))
+        _record_login_failure(client_id)
         flash('用户名或密码错误', 'error')
     return render_template('login.html')
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
 def logout():
     session.clear()
     return redirect(url_for('login'))
+
+@app.after_request
+def security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'same-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(self)'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; img-src 'self' data: https:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    if IS_PRODUCTION:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+@app.errorhandler(413)
+def upload_too_large(_error):
+    return 'Uploaded file is too large', 413
+
+@app.errorhandler(500)
+def internal_error(_error):
+    logger.exception('Unhandled application error')
+    return 'Internal server error', 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)

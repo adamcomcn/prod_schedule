@@ -3,7 +3,8 @@ import sqlite3
 from contextlib import contextmanager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH  = os.path.join(BASE_DIR, 'data', 'app.db')
+APP_DATA_DIR = os.path.abspath(os.environ.get('APP_DATA_DIR', BASE_DIR))
+DB_PATH  = os.path.join(APP_DATA_DIR, 'data', 'app.db')
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS suppliers (
@@ -142,6 +143,7 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,
     role          TEXT    DEFAULT 'inspector',
+    employee_id   INTEGER REFERENCES employees(id) ON DELETE SET NULL,
     active        INTEGER DEFAULT 1,
     created_at    TEXT    DEFAULT (datetime('now','localtime'))
 );
@@ -751,6 +753,11 @@ def init_db():
 
         try:
             conn.execute("ALTER TABLE kb_articles ADD COLUMN images TEXT DEFAULT '[]'")
+        except Exception:
+            pass
+
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL")
         except Exception:
             pass
 
