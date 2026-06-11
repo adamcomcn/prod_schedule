@@ -7,6 +7,9 @@
 3. Configure the variables below. Never place their real values in Git.
 4. Deploy the branch and verify `/healthz`, login, role permissions, and data persistence.
 
+The Railway service Root Directory must remain `prod_schedule`. The root
+`railway.toml` start command assumes Railway starts inside that directory.
+
 ## Environment variables
 
 Required:
