@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, g, abort
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, send_file, g, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import msoffcrypto
@@ -365,6 +365,17 @@ def get_vtrust_status(inspections_list):
         if r:
             return r
     return ''
+
+def qa_brt_missing(row, headers, status):
+    if status not in {'shipped', 'partially_shipped'}:
+        return False
+    qa_idx = next(
+        (i for i, header in enumerate(headers) if 'qa brt' in str(header).lower()),
+        None)
+    qa_value = (
+        str(row[qa_idx]).strip().lower()
+        if qa_idx is not None and qa_idx < len(row) else '')
+    return qa_value not in {'yes', 'y'}
 
 def fmt_date(val):
     if val and '00:00:00' in str(val):
@@ -805,7 +816,9 @@ def index():
     if view not in {'active', 'shipped', 'all'}:
         view = 'active'
     status_filter = request.args.get('status', '')
-    if status_filter not in {'new', 'not_shipped', 'partially_shipped', 'shipped', 'vtrust'}:
+    if status_filter not in {
+            'new', 'not_shipped', 'partially_shipped', 'shipped', 'vtrust',
+            'no_qa_brt'}:
         status_filter = ''
     try:
         page = max(1, int(request.args.get('page', '1')))
@@ -883,10 +896,12 @@ def index():
                 kind, row = entry
                 job_key = make_job_key(selected_sheet, row, headers)
                 status = 'shipped' if kind == 'shipped' else statuses.get(job_key, '')
+                if status_filter == 'no_qa_brt':
+                    return qa_brt_missing(row, headers, status)
                 if status_filter != 'vtrust':
                     return status == status_filter
                 records = inspections.get(job_key, [])
-                vtrust_result = latest_vtrust_result(records).lower()
+                vtrust_result = get_vtrust_status(records).lower()
                 return (
                     job_key in valve_keys
                     and status in {'shipped', 'partially_shipped'}
@@ -929,6 +944,109 @@ def index():
                            per_page=per_page,
                            total_results=total_results,
                            total_pages=total_pages)
+
+@app.route('/export/comparison.xlsx')
+def export_comparison_excel():
+    current = load_json(CURRENT_FILE, {})
+    previous = load_json(PREVIOUS_FILE, {})
+    inspections = load_json(INSPECTIONS_CACHE, {})
+    statuses, _, shipped_rows = (
+        compute_changes(previous, current)
+        if current and previous else ({}, [], {}))
+
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+    header_fill = openpyxl.styles.PatternFill('solid', fgColor='1A3A5C')
+    header_font = openpyxl.styles.Font(color='FFFFFF', bold=True)
+    status_fills = {
+        'NEW': 'D1FAE5', 'NOT SHIPPED': 'FEE2E2',
+        'PARTIAL': 'FEF3C7', 'SHIPPED': 'E5E7EB',
+    }
+
+    for sheet_name, rows in current.items():
+        if not rows:
+            continue
+        headers = list(rows[0])
+        worksheet = workbook.create_sheet(title=str(sheet_name)[:31])
+        worksheet.append([
+            'Comparison Status', 'QA BRT Alert', 'Inspection Status',
+            'V-Trust Result', *headers])
+        for cell in worksheet[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+
+        entries = [('active', row) for row in rows[1:]]
+        entries.extend(('shipped', row) for row in shipped_rows.get(sheet_name, []))
+        for kind, row in entries:
+            job_key = make_job_key(sheet_name, row, headers)
+            status = 'shipped' if kind == 'shipped' else statuses.get(job_key, '')
+            status_label = {
+                'new': 'NEW', 'not_shipped': 'NOT SHIPPED',
+                'partially_shipped': 'PARTIAL', 'shipped': 'SHIPPED',
+                'typo': 'TYPO?',
+            }.get(status, status.upper())
+            reports = inspections.get(job_key, [])
+            worksheet.append([
+                status_label,
+                'No QA BRT' if qa_brt_missing(row, headers, status) else '',
+                reports[-1].get('result', '') if reports else 'Pending',
+                get_vtrust_status(reports),
+                *list(row),
+            ])
+            row_number = worksheet.max_row
+            if status_label in status_fills:
+                worksheet.cell(row_number, 1).fill = openpyxl.styles.PatternFill(
+                    'solid', fgColor=status_fills[status_label])
+            if worksheet.cell(row_number, 2).value:
+                worksheet.cell(row_number, 2).fill = openpyxl.styles.PatternFill(
+                    'solid', fgColor='FEE2E2')
+                worksheet.cell(row_number, 2).font = openpyxl.styles.Font(
+                    color='DC2626', bold=True)
+
+        _format_export_sheet(worksheet)
+
+    history = workbook.create_sheet(title='Fully Shipped History')
+    history.append([
+        'Status', 'QA BRT Alert', 'Region', 'Order Number', 'Item Code',
+        'Description', 'Supplier', 'Quantity', 'Shipped Week', 'Completed',
+        'Completed At'])
+    for cell in history[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+    with db_conn() as conn:
+        history_rows = conn.execute(
+            'SELECT * FROM outstanding_jobs ORDER BY shipped_at DESC').fetchall()
+    for job in history_rows:
+        missing = not bool(job['completed'])
+        history.append([
+            'SHIPPED', 'No QA BRT' if missing else '', job['sheet'],
+            job['order_number'], job['item_code'], job['item_desc'],
+            job['supplier'], job['quantity'], job['week_label'],
+            'YES' if job['completed'] else 'NO', job['completed_at'] or '',
+        ])
+        if missing:
+            history.cell(history.max_row, 2).fill = openpyxl.styles.PatternFill(
+                'solid', fgColor='FEE2E2')
+            history.cell(history.max_row, 2).font = openpyxl.styles.Font(
+                color='DC2626', bold=True)
+    _format_export_sheet(history)
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f'production-schedule-comparison-{datetime.now():%Y-%m-%d}.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+def _format_export_sheet(worksheet):
+    worksheet.freeze_panes = 'A2'
+    worksheet.auto_filter.ref = worksheet.dimensions
+    for column in worksheet.columns:
+        width = min(
+            45, max(12, max(len(str(cell.value or '')) for cell in column) + 2))
+        worksheet.column_dimensions[column[0].column_letter].width = width
 
 @app.route('/dashboard')
 def dashboard():

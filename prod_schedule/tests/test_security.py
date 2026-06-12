@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+import openpyxl
 
 TEST_DATA_DIR = tempfile.mkdtemp(prefix='prod-schedule-tests-')
 os.environ['APP_DATA_DIR'] = TEST_DATA_DIR
@@ -201,18 +202,18 @@ class SecurityAndProductionTests(unittest.TestCase):
         self.assertEqual(app.load_json(app.CURRENT_FILE, {}), current)
 
     def test_status_legend_filters_schedule_rows(self):
-        headers = ['Order Number', 'Item Code', 'Item Description']
+        headers = ['Order Number', 'Item Code', 'Item Description', 'QA BRTs Sent?']
         previous = {
             'MELBOURNE': [
                 headers,
-                ['WAIT-PO', 'WAIT-ITEM', 'Waiting row'],
-                ['SHIP-PO', 'SHIP-ITEM', 'Shipped row'],
+                ['WAIT-PO', 'WAIT-ITEM', 'Waiting row', 'NO'],
+                ['SHIP-PO', 'SHIP-ITEM', 'Shipped row', 'NO'],
             ]}
         current = {
             'MELBOURNE': [
                 headers,
-                ['WAIT-PO', 'WAIT-ITEM', 'Waiting row'],
-                ['NEW-PO', 'NEW-ITEM', 'New row'],
+                ['WAIT-PO', 'WAIT-ITEM', 'Waiting row', 'NO'],
+                ['NEW-PO', 'NEW-ITEM', 'New row', 'NO'],
             ]}
         app.save_json(app.PREVIOUS_FILE, previous)
         app.save_json(app.CURRENT_FILE, current)
@@ -226,6 +227,45 @@ class SecurityAndProductionTests(unittest.TestCase):
         shipped_response = self.client.get('/?sheet=MELBOURNE&view=all&status=shipped')
         self.assertIn(b'Shipped row', shipped_response.data)
         self.assertNotIn(b'New row', shipped_response.data)
+
+        no_qa_response = self.client.get(
+            '/?sheet=MELBOURNE&view=all&status=no_qa_brt')
+        self.assertIn(b'Shipped row', no_qa_response.data)
+        self.assertNotIn(b'Waiting row', no_qa_response.data)
+
+        self.assertEqual(
+            self.client.get('/?sheet=MELBOURNE&view=all&status=vtrust').status_code,
+            200)
+
+    def test_comparison_export_contains_status_and_fully_shipped_history(self):
+        headers = ['Order Number', 'Item Code', 'Item Description', 'QA BRTs Sent?']
+        previous = {
+            'MELBOURNE': [
+                headers,
+                ['SHIP-PO', 'SHIP-ITEM', 'Shipped row', 'NO'],
+            ]}
+        current = {'MELBOURNE': [headers]}
+        app.save_json(app.PREVIOUS_FILE, previous)
+        app.save_json(app.CURRENT_FILE, current)
+        _, _, shipped_rows = app.compute_changes(previous, current)
+        app.persist_fully_shipped_jobs(previous, current, shipped_rows, '12 Jun 2026')
+        self.login_as('admin-test')
+
+        response = self.client.get('/export/comparison.xlsx')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            response.content_type)
+
+        workbook = openpyxl.load_workbook(io.BytesIO(response.data), read_only=True)
+        self.assertIn('MELBOURNE', workbook.sheetnames)
+        self.assertIn('Fully Shipped History', workbook.sheetnames)
+        region_rows = list(workbook['MELBOURNE'].iter_rows(values_only=True))
+        self.assertEqual(region_rows[0][:2], ('Comparison Status', 'QA BRT Alert'))
+        self.assertIn(('SHIPPED', 'No QA BRT'), [row[:2] for row in region_rows[1:]])
+        history_rows = list(
+            workbook['Fully Shipped History'].iter_rows(values_only=True))
+        self.assertIn(('SHIPPED', 'No QA BRT'), [row[:2] for row in history_rows[1:]])
 
     def test_schedule_is_paginated_and_knowledge_tolerates_bad_image_json(self):
         headers = ['Order Number', 'Item Code', 'Description']
