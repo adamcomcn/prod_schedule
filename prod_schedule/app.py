@@ -1,4 +1,4 @@
-import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time, base64, uuid
+import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time, base64, uuid, zipfile
 from collections import defaultdict, deque
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
@@ -375,23 +375,62 @@ def make_job_key(sheet_name, row, headers):
     item = col('item code')
     return f"{sheet_name}|{po}|{item}"
 
+class ExcelUploadError(ValueError):
+    pass
+
+class ExcelPasswordRequired(ExcelUploadError):
+    pass
+
+class ExcelPasswordIncorrect(ExcelUploadError):
+    pass
+
+class InvalidExcelFile(ExcelUploadError):
+    pass
+
 def decrypt_excel(file_bytes, password):
+    if zipfile.is_zipfile(io.BytesIO(file_bytes)):
+        return io.BytesIO(file_bytes)
+    if file_bytes.startswith(bytes.fromhex('D0CF11E0A1B11AE1')) and not password:
+        raise ExcelPasswordRequired(
+            'This workbook is encrypted. Configure EXCEL_PASSWORD in Railway '
+            'or upload an unencrypted .xlsx file.')
+
     enc = io.BytesIO(file_bytes)
     try:
         office_file = msoffcrypto.OfficeFile(enc)
-        if office_file.is_encrypted():
-            office_file.load_key(password=password)
-            dec = io.BytesIO()
-            office_file.decrypt(dec)
-            dec.seek(0)
-            return dec
-    except Exception:
-        pass
-    return io.BytesIO(file_bytes)
+    except Exception as exc:
+        raise InvalidExcelFile('The uploaded file is not a valid .xlsx workbook.') from exc
+
+    if not office_file.is_encrypted():
+        raise InvalidExcelFile('The uploaded file is not a valid .xlsx workbook.')
+    if not password:
+        raise ExcelPasswordRequired(
+            'This workbook is encrypted. Configure EXCEL_PASSWORD in Railway '
+            'or upload an unencrypted .xlsx file.')
+
+    try:
+        office_file.load_key(password=password, verify_password=True)
+        dec = io.BytesIO()
+        office_file.decrypt(dec)
+        dec.seek(0)
+    except Exception as exc:
+        raise ExcelPasswordIncorrect(
+            'The configured EXCEL_PASSWORD could not decrypt this workbook. '
+            'Update it in Railway and try again.') from exc
+
+    if not zipfile.is_zipfile(dec):
+        raise ExcelPasswordIncorrect(
+            'The configured EXCEL_PASSWORD could not decrypt this workbook. '
+            'Update it in Railway and try again.')
+    dec.seek(0)
+    return dec
 
 def parse_excel(file_bytes, password):
     dec = decrypt_excel(file_bytes, password)
-    wb = openpyxl.load_workbook(dec, data_only=True, read_only=True)
+    try:
+        wb = openpyxl.load_workbook(dec, data_only=True, read_only=True)
+    except (zipfile.BadZipFile, openpyxl.utils.exceptions.InvalidFileException) as exc:
+        raise InvalidExcelFile('The uploaded file is not a valid .xlsx workbook.') from exc
     result = {}
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
@@ -1157,7 +1196,10 @@ def upload_excel():
                 flash('Schedule updated successfully!', 'success')
         else:
             flash('Schedule updated successfully!', 'success')
-    except Exception as e:
+    except ExcelUploadError as exc:
+        logger.warning('Schedule upload rejected: %s', exc)
+        flash(str(exc), 'error')
+    except Exception:
         tb = traceback.format_exc()
         logger.error('Upload failed:\n%s', tb)
         _last_error['tb'] = tb

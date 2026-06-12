@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app
 from db import db_conn
+from openpyxl import Workbook
 from werkzeug.security import generate_password_hash
 
 
@@ -81,6 +82,24 @@ class SecurityAndProductionTests(unittest.TestCase):
         page = self.client.get('/')
         self.assertEqual(page.headers['X-Frame-Options'], 'DENY')
         self.assertEqual(page.headers['X-Content-Type-Options'], 'nosniff')
+
+    def test_excel_parser_accepts_plain_xlsx_and_rejects_invalid_content(self):
+        workbook = Workbook()
+        workbook.active.append(['Order Number', 'Item Code'])
+        workbook.active.append(['PO-1', 'ITEM-1'])
+        content = io.BytesIO()
+        workbook.save(content)
+
+        parsed = app.parse_excel(content.getvalue(), '')
+        self.assertEqual(parsed['Sheet'][1], ['PO-1', 'ITEM-1'])
+
+        with self.assertRaises(app.InvalidExcelFile):
+            app.parse_excel(b'not an excel file', '')
+
+    def test_encrypted_excel_without_password_has_clear_error(self):
+        encrypted_office_header = bytes.fromhex('D0CF11E0A1B11AE1') + (b'\0' * 512)
+        with self.assertRaises(app.ExcelPasswordRequired):
+            app.decrypt_excel(encrypted_office_header, '')
 
     def test_schedule_is_paginated_and_knowledge_tolerates_bad_image_json(self):
         headers = ['Order Number', 'Item Code', 'Description']
