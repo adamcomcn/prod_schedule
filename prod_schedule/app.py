@@ -622,6 +622,73 @@ def compute_changes(previous, current):
 
     return statuses, typo_flags, shipped_rows
 
+def persist_fully_shipped_jobs(previous, current, shipped_rows, week_label):
+    """Persist every fully shipped job; only jobs with QA BRT evidence complete."""
+    inspections = load_json(INSPECTIONS_CACHE, {})
+    persisted = 0
+    pending = 0
+    completed_at = datetime.now().isoformat()
+
+    with db_conn() as conn:
+        for sheet, rows in shipped_rows.items():
+            source = current.get(sheet) or previous.get(sheet) or []
+            if not source:
+                continue
+            headers = list(source[0])
+            headers_lower = [str(header).lower() for header in headers]
+            qa_idx = next(
+                (i for i, header in enumerate(headers_lower) if 'qa brt' in header),
+                None)
+
+            def get_col(name, row):
+                try:
+                    idx = headers_lower.index(name.lower())
+                    return str(row[idx]) if idx < len(row) else ''
+                except ValueError:
+                    return ''
+
+            for row in rows:
+                job_key = make_job_key(sheet, row, headers)
+                if not job_key.split('|')[1]:
+                    continue
+                qa_value = (
+                    str(row[qa_idx]).strip().lower()
+                    if qa_idx is not None and qa_idx < len(row) else '')
+                has_report = qa_value in {'yes', 'y'} or bool(inspections.get(job_key))
+                complete_value = 1 if has_report else 0
+                complete_time = completed_at if has_report else None
+
+                conn.execute(
+                    'INSERT INTO outstanding_jobs '
+                    '(job_key,sheet,headers_json,row_json,week_label,order_number,'
+                    ' item_code,item_desc,supplier,quantity,est_completion,must_ship,'
+                    ' completed,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) '
+                    'ON CONFLICT(job_key) DO UPDATE SET '
+                    'sheet=excluded.sheet, headers_json=excluded.headers_json, '
+                    'row_json=excluded.row_json, order_number=excluded.order_number, '
+                    'item_code=excluded.item_code, item_desc=excluded.item_desc, '
+                    'supplier=excluded.supplier, quantity=excluded.quantity, '
+                    'est_completion=excluded.est_completion, must_ship=excluded.must_ship, '
+                    'completed=MAX(outstanding_jobs.completed, excluded.completed), '
+                    'completed_at=CASE WHEN outstanding_jobs.completed=1 '
+                    'THEN outstanding_jobs.completed_at ELSE excluded.completed_at END',
+                    (job_key, sheet, json.dumps(headers), json.dumps(list(row)),
+                     week_label,
+                     get_col('order number', row)
+                     or get_col('daemco purchase order', row),
+                     get_col('item code', row),
+                     get_col('item description', row),
+                     get_col('supplier', row),
+                     get_col('quantity', row),
+                     get_col('estimated completion date', row),
+                     get_col('must ship date', row),
+                     complete_value, complete_time))
+                persisted += 1
+                if not has_report:
+                    pending += 1
+
+    return persisted, pending
+
 # ── Google API ────────────────────────────────────────────────────────────────
 
 def get_google_services():
@@ -1106,42 +1173,14 @@ def upload_excel():
         if previous and current_data:
             statuses, _, newly_shipped = compute_changes(previous, current_data)
 
-            # Persist shipped-but-incomplete rows into outstanding_jobs
-            with db_conn() as conn:
-                for sheet, srows in newly_shipped.items():
-                    if sheet not in current_data or not current_data[sheet]:
-                        continue
-                    curr_hdrs = list(current_data[sheet][0])
-                    hlow2 = [str(h).lower() for h in curr_hdrs]
-                    qa_idx2 = next((i for i, h in enumerate(curr_hdrs)
-                                    if 'qa brt' in str(h).lower()), None)
-                    def _gcol2(name, row):
-                        try: return str(row[hlow2.index(name.lower())])
-                        except (ValueError, IndexError): return ''
-                    for row in srows:
-                        qa_val = str(row[qa_idx2]).strip().lower() \
-                            if qa_idx2 is not None and qa_idx2 < len(row) else ''
-                        if qa_val in ('yes', 'y'):
-                            continue  # already done, skip
-                        jk = make_job_key(sheet, row, curr_hdrs)
-                        try:
-                            conn.execute(
-                                'INSERT OR IGNORE INTO outstanding_jobs '
-                                '(job_key,sheet,headers_json,row_json,week_label,'
-                                'order_number,item_code,item_desc,supplier,quantity,'
-                                'est_completion,must_ship) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                                (jk, sheet,
-                                 json.dumps(curr_hdrs), json.dumps(list(row)),
-                                 config.get('upload_date', ''),
-                                 _gcol2('order number', row) or _gcol2('daemco purchase order', row),
-                                 _gcol2('item code', row),
-                                 _gcol2('item description', row),
-                                 _gcol2('supplier', row),
-                                 _gcol2('quantity', row),
-                                 _gcol2('estimated completion date', row),
-                                 _gcol2('must ship date', row)))
-                        except Exception:
-                            pass
+            # Keep all fully shipped jobs in history. Missing QA BRT reports
+            # remain outstanding until an inspection is submitted.
+            _, pending_shipped = persist_fully_shipped_jobs(
+                previous, current_data, newly_shipped, config.get('upload_date', ''))
+            if pending_shipped:
+                flash(
+                    f'{pending_shipped} fully shipped job(s) require a QA BRT '
+                    'inspection report.', 'warning')
             new_tasks_created = []
             with db_conn() as conn:
                 existing_keys = {r[0] for r in conn.execute(
@@ -1279,6 +1318,23 @@ def inspect_form(job_key):
                     'region':         o['region'],
                     'job_key':        job_key,
                 }
+
+            # Fully shipped jobs remain inspectable after they leave both
+            # current and previous schedule files.
+            if not job_info:
+                shipped_job = conn.execute(
+                    'SELECT sheet, headers_json, row_json FROM outstanding_jobs '
+                    'WHERE job_key=?', (job_key,)
+                ).fetchone()
+                if shipped_job:
+                    try:
+                        headers = json.loads(shipped_job['headers_json'] or '[]')
+                        row = json.loads(shipped_job['row_json'] or '[]')
+                    except (TypeError, json.JSONDecodeError):
+                        headers, row = [], []
+                    job_info = dict(zip(headers, row))
+                    job_info['region'] = shipped_job['sheet']
+                    job_info['job_key'] = job_key
 
     if not job_info:
         flash('Job not found', 'error')
@@ -2807,6 +2863,24 @@ def employee_work_info_save(eid):
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 init_db()
+
+def _backfill_fully_shipped_history():
+    previous = load_json(PREVIOUS_FILE, {})
+    current = load_json(CURRENT_FILE, {})
+    if not previous or not current:
+        return
+    _, _, shipped_rows = compute_changes(previous, current)
+    persisted, pending = persist_fully_shipped_jobs(
+        previous, current, shipped_rows, load_config().get('upload_date', ''))
+    if persisted:
+        logger.info(
+            'Backfilled %s fully shipped job(s); %s require QA BRT reports',
+            persisted, pending)
+
+try:
+    _backfill_fully_shipped_history()
+except Exception:
+    logger.exception('Unable to backfill fully shipped history')
 
 def _bootstrap_admin():
     username = os.environ.get('BOOTSTRAP_ADMIN_USERNAME', '').strip()
