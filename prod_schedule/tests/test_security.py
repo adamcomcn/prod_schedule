@@ -23,6 +23,7 @@ class SecurityAndProductionTests(unittest.TestCase):
         with db_conn() as conn:
             conn.execute('DELETE FROM users')
             conn.execute('DELETE FROM outstanding_jobs')
+            conn.execute('DELETE FROM schedule_uploads')
             conn.execute(
                 'INSERT INTO users (username,password_hash,role) VALUES (?,?,?)',
                 ('admin-test', generate_password_hash('admin-test-password'), 'admin'))
@@ -138,6 +139,93 @@ class SecurityAndProductionTests(unittest.TestCase):
         response = self.client.get('/inspect/MELBOURNE|PO-PENDING|ITEM-2')
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'Pending item', response.data)
+
+    def test_upload_blocks_saved_previous_week_rollback(self):
+        headers = ['Order Number', 'Item Code', 'Item Description']
+        previous = {'MELBOURNE': [headers, ['OLD-PO', 'OLD-ITEM', 'Old week']]}
+        current = {'MELBOURNE': [headers, ['NEW-PO', 'NEW-ITEM', 'New week']]}
+        app.save_json(app.PREVIOUS_FILE, previous)
+        app.save_json(app.CURRENT_FILE, current)
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = 'MELBOURNE'
+        for row in previous['MELBOURNE']:
+            worksheet.append(row)
+        content = io.BytesIO()
+        workbook.save(content)
+        content.seek(0)
+
+        self.login_as('admin-test')
+        response = self.client.post(
+            '/upload',
+            data={
+                '_csrf_token': 'test-csrf-token',
+                'file': (content, 'old-week.xlsx'),
+            },
+            content_type='multipart/form-data',
+            follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Upload blocked', response.data)
+        self.assertEqual(app.load_json(app.CURRENT_FILE, {}), current)
+
+    def test_upload_blocks_any_previously_uploaded_schedule(self):
+        headers = ['Order Number', 'Item Code', 'Item Description']
+        historical = {'MELBOURNE': [headers, ['HIST-PO', 'HIST-ITEM', 'Historical']]}
+        app.remember_schedule_upload(historical, '01 Jun 2026 09:00')
+        app.save_json(
+            app.PREVIOUS_FILE,
+            {'MELBOURNE': [headers, ['PREV-PO', 'PREV-ITEM', 'Previous']]})
+        current = {'MELBOURNE': [headers, ['CURR-PO', 'CURR-ITEM', 'Current']]}
+        app.save_json(app.CURRENT_FILE, current)
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = 'MELBOURNE'
+        for row in historical['MELBOURNE']:
+            worksheet.append(row)
+        content = io.BytesIO()
+        workbook.save(content)
+        content.seek(0)
+
+        self.login_as('admin-test')
+        response = self.client.post(
+            '/upload',
+            data={
+                '_csrf_token': 'test-csrf-token',
+                'file': (content, 'historical-week.xlsx'),
+            },
+            content_type='multipart/form-data',
+            follow_redirects=True)
+        self.assertIn(b'already uploaded', response.data)
+        self.assertEqual(app.load_json(app.CURRENT_FILE, {}), current)
+
+    def test_status_legend_filters_schedule_rows(self):
+        headers = ['Order Number', 'Item Code', 'Item Description']
+        previous = {
+            'MELBOURNE': [
+                headers,
+                ['WAIT-PO', 'WAIT-ITEM', 'Waiting row'],
+                ['SHIP-PO', 'SHIP-ITEM', 'Shipped row'],
+            ]}
+        current = {
+            'MELBOURNE': [
+                headers,
+                ['WAIT-PO', 'WAIT-ITEM', 'Waiting row'],
+                ['NEW-PO', 'NEW-ITEM', 'New row'],
+            ]}
+        app.save_json(app.PREVIOUS_FILE, previous)
+        app.save_json(app.CURRENT_FILE, current)
+        self.login_as('admin-test')
+
+        new_response = self.client.get('/?sheet=MELBOURNE&status=new')
+        self.assertIn(b'New row', new_response.data)
+        self.assertNotIn(b'Waiting row', new_response.data)
+        self.assertIn(b'Clear filter', new_response.data)
+
+        shipped_response = self.client.get('/?sheet=MELBOURNE&view=all&status=shipped')
+        self.assertIn(b'Shipped row', shipped_response.data)
+        self.assertNotIn(b'New row', shipped_response.data)
 
     def test_schedule_is_paginated_and_knowledge_tolerates_bad_image_json(self):
         headers = ['Order Number', 'Item Code', 'Description']
