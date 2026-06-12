@@ -22,6 +22,7 @@ class SecurityAndProductionTests(unittest.TestCase):
         app._login_failures.clear()
         with db_conn() as conn:
             conn.execute('DELETE FROM users')
+            conn.execute('DELETE FROM outstanding_jobs')
             conn.execute(
                 'INSERT INTO users (username,password_hash,role) VALUES (?,?,?)',
                 ('admin-test', generate_password_hash('admin-test-password'), 'admin'))
@@ -100,6 +101,43 @@ class SecurityAndProductionTests(unittest.TestCase):
         encrypted_office_header = bytes.fromhex('D0CF11E0A1B11AE1') + (b'\0' * 512)
         with self.assertRaises(app.ExcelPasswordRequired):
             app.decrypt_excel(encrypted_office_header, '')
+
+    def test_all_fully_shipped_jobs_are_retained_and_require_qa_brt(self):
+        headers = [
+            'Daemco Purchase Order', 'Item Code', 'Item Description',
+            'Supplier', 'Quantity', 'QA BRTs Sent?']
+        previous = {
+            'MELBOURNE': [
+                headers,
+                ['PO-DONE', 'ITEM-1', 'Done item', 'Supplier A', '2', 'YES'],
+                ['PO-PENDING', 'ITEM-2', 'Pending item', 'Supplier B', '3', 'NO'],
+            ]}
+        current = {'MELBOURNE': [headers]}
+        _, _, shipped_rows = app.compute_changes(previous, current)
+
+        persisted, pending = app.persist_fully_shipped_jobs(
+            previous, current, shipped_rows, '12 Jun 2026 12:00')
+
+        self.assertEqual(persisted, 2)
+        self.assertEqual(pending, 1)
+        with db_conn() as conn:
+            rows = conn.execute(
+                'SELECT job_key, completed FROM outstanding_jobs ORDER BY job_key'
+            ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            {row['job_key']: row['completed'] for row in rows},
+            {
+                'MELBOURNE|PO-DONE|ITEM-1': 1,
+                'MELBOURNE|PO-PENDING|ITEM-2': 0,
+            })
+
+        app.save_json(app.CURRENT_FILE, current)
+        app.save_json(app.PREVIOUS_FILE, current)
+        self.login_as('admin-test')
+        response = self.client.get('/inspect/MELBOURNE|PO-PENDING|ITEM-2')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Pending item', response.data)
 
     def test_schedule_is_paginated_and_knowledge_tolerates_bad_image_json(self):
         headers = ['Order Number', 'Item Code', 'Description']
