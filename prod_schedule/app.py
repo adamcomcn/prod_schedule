@@ -97,6 +97,19 @@ def save_json(path, data):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+def schedule_fingerprint(data):
+    canonical = json.dumps(
+        data, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+def remember_schedule_upload(data, upload_date=''):
+    if not data:
+        return
+    with db_conn() as conn:
+        conn.execute(
+            'INSERT OR IGNORE INTO schedule_uploads (fingerprint, upload_date) '
+            'VALUES (?,?)', (schedule_fingerprint(data), upload_date))
+
 def csrf_token():
     token = session.get('_csrf_token')
     if not token:
@@ -791,6 +804,9 @@ def index():
     view = request.args.get('view', 'active')
     if view not in {'active', 'shipped', 'all'}:
         view = 'active'
+    status_filter = request.args.get('status', '')
+    if status_filter not in {'new', 'not_shipped', 'partially_shipped', 'shipped', 'vtrust'}:
+        status_filter = ''
     try:
         page = max(1, int(request.args.get('page', '1')))
     except ValueError:
@@ -862,6 +878,21 @@ def index():
                 entry for entry in entries
                 if any(needle in str(cell).casefold() for cell in entry[1])
             ]
+        if status_filter:
+            def matches_status(entry):
+                kind, row = entry
+                job_key = make_job_key(selected_sheet, row, headers)
+                status = 'shipped' if kind == 'shipped' else statuses.get(job_key, '')
+                if status_filter != 'vtrust':
+                    return status == status_filter
+                records = inspections.get(job_key, [])
+                vtrust_result = latest_vtrust_result(records).lower()
+                return (
+                    job_key in valve_keys
+                    and status in {'shipped', 'partially_shipped'}
+                    and vtrust_result != 'pass'
+                )
+            entries = [entry for entry in entries if matches_status(entry)]
         total_results = len(entries)
         total_pages = max(1, math.ceil(total_results / per_page))
         page = min(page, total_pages)
@@ -893,6 +924,7 @@ def index():
                            selected_sheet=selected_sheet,
                            search=search,
                            view=view,
+                           status_filter=status_filter,
                            page=page,
                            per_page=per_page,
                            total_results=total_results,
@@ -1122,12 +1154,32 @@ def upload_excel():
         file_bytes = f.read()
         data = parse_excel(file_bytes, EXCEL_PASSWORD)
 
+        previous_data = load_json(PREVIOUS_FILE, {})
+        if previous_data and data == previous_data:
+            flash(
+                'Upload blocked: this file matches the saved previous-week '
+                'schedule. Uploading it would reverse NEW/SHIPPED statuses and '
+                'corrupt the current comparison.', 'error')
+            return redirect(url_for('index'))
+        with db_conn() as conn:
+            prior_upload = conn.execute(
+                'SELECT upload_date FROM schedule_uploads WHERE fingerprint=?',
+                (schedule_fingerprint(data),)
+            ).fetchone()
+        if prior_upload:
+            label = prior_upload['upload_date'] or 'an earlier upload'
+            flash(
+                f'Upload blocked: this schedule was already uploaded ({label}). '
+                'Only upload the latest weekly schedule.', 'error')
+            return redirect(url_for('index'))
+
         # Rotate: current → previous
         if os.path.exists(CURRENT_FILE):
             import shutil
             shutil.copy(CURRENT_FILE, PREVIOUS_FILE)
 
         save_json(CURRENT_FILE, data)
+        remember_schedule_upload(data, datetime.now().strftime('%d %b %Y %H:%M'))
 
         # ── Detect header changes vs previous week (poka-yoke) ───────────
         prev_for_check = load_json(PREVIOUS_FILE, {})
@@ -2863,6 +2915,9 @@ def employee_work_info_save(eid):
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 init_db()
+
+for _known_schedule in (load_json(PREVIOUS_FILE, {}), load_json(CURRENT_FILE, {})):
+    remember_schedule_upload(_known_schedule)
 
 def _backfill_fully_shipped_history():
     previous = load_json(PREVIOUS_FILE, {})

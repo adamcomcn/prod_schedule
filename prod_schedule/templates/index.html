@@ -24,7 +24,10 @@
 .row-count { font-size: .8rem; color: #888; margin-left: auto; }
 
 .legend { display: flex; gap: 12px; font-size: .78rem; }
-.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-item { display: flex; align-items: center; gap: 5px; color:inherit; text-decoration:none;
+               border:1px solid transparent; border-radius:8px; padding:5px 8px; }
+.legend-item:hover { background:#f8fafc; border-color:#d0d5dd; }
+.legend-item.active { background:#eff6ff; border-color:#93c5fd; box-shadow:0 0 0 1px #bfdbfe; }
 
 .table-wrap { overflow: auto; background: #fff; }
 table { border-collapse: collapse; min-width: 100%; font-size: .8rem; }
@@ -106,6 +109,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     {% endif %}
     <form method="GET" action="{{ url_for('index') }}" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
       <input type="hidden" name="sheet" value="{{ selected_sheet }}">
+      <input type="hidden" name="status" value="{{ status_filter }}">
       <input type="text" name="q" value="{{ search }}" placeholder="Search selected region..." class="search-box">
       <select name="view" style="width:auto;">
         <option value="active" {% if view == 'active' %}selected{% endif %}>Active</option>
@@ -161,7 +165,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 <div class="tab-bar" id="tabBar">
   {% for sheet in sheet_names %}
   <a class="tab-btn {% if sheet == selected_sheet %}active{% endif %}"
-     href="{{ url_for('index', sheet=sheet, q=search, view=view, per_page=per_page) }}">{{ sheet }}</a>
+     href="{{ url_for('index', sheet=sheet, q=search, view=view, status=status_filter, per_page=per_page) }}">{{ sheet }}</a>
   {% endfor %}
 </div>
 
@@ -170,11 +174,20 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 <div class="tab-panel {% if loop.first %}active{% endif %}" id="panel-{{ si }}">
   <div class="table-toolbar">
     <div class="legend">
-      <span class="legend-item"><span class="badge badge-new">NEW</span> New this week</span>
-      <span class="legend-item"><span class="badge badge-not_shipped">NOT SHIPPED</span> Still waiting</span>
-      <span class="legend-item"><span class="badge badge-partially_shipped">PARTIAL</span> Qty reduced</span>
-      <span class="legend-item"><span class="badge badge-shipped">SHIPPED</span> Gone from schedule</span>
-      <span class="legend-item"><span class="badge" style="background:#ffedd5;color:#9a3412;border:1px solid #f97316">V-Trust</span> Valve — no V-Trust</span>
+      <a class="legend-item {% if status_filter == 'new' %}active{% endif %}"
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='new', per_page=per_page) }}"><span class="badge badge-new">NEW</span> New this week</a>
+      <a class="legend-item {% if status_filter == 'not_shipped' %}active{% endif %}"
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='not_shipped', per_page=per_page) }}"><span class="badge badge-not_shipped">NOT SHIPPED</span> Still waiting</a>
+      <a class="legend-item {% if status_filter == 'partially_shipped' %}active{% endif %}"
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='partially_shipped', per_page=per_page) }}"><span class="badge badge-partially_shipped">PARTIAL</span> Qty reduced</a>
+      <a class="legend-item {% if status_filter == 'shipped' %}active{% endif %}"
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='shipped', per_page=per_page) }}"><span class="badge badge-shipped">SHIPPED</span> Gone from schedule</a>
+      <a class="legend-item {% if status_filter == 'vtrust' %}active{% endif %}"
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='vtrust', per_page=per_page) }}"><span class="badge" style="background:#ffedd5;color:#9a3412;border:1px solid #f97316">V-Trust</span> Valve — no V-Trust</a>
+      {% if status_filter %}
+      <a class="legend-item"
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', per_page=per_page) }}">Clear filter</a>
+      {% endif %}
     </div>
     <span class="row-count" id="count-{{ si }}">
       {{ total_results }} result{{ '' if total_results == 1 else 's' }}

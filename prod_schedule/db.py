@@ -138,6 +138,13 @@ CREATE TABLE IF NOT EXISTS weekly_snapshots (
     UNIQUE(week_label, region)
 );
 
+CREATE TABLE IF NOT EXISTS schedule_uploads (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    fingerprint TEXT    NOT NULL UNIQUE,
+    upload_date TEXT    DEFAULT '',
+    created_at  TEXT    DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT    NOT NULL UNIQUE,
