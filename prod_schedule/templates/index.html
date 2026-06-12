@@ -102,6 +102,9 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     {% if upload_date %}
       <span class="upload-info">Last uploaded: <strong>{{ upload_date }}</strong></span>
     {% endif %}
+    <a href="{{ url_for('export_comparison_excel') }}" class="btn btn-outline btn-sm">
+      Export comparison Excel
+    </a>
     {% if g.is_admin and not google_configured %}
       <a href="{{ url_for('settings') }}" class="btn btn-outline btn-sm">
         &#9888; Configure Google Sheets/Drive
@@ -184,6 +187,8 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
          href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='shipped', per_page=per_page) }}"><span class="badge badge-shipped">SHIPPED</span> Gone from schedule</a>
       <a class="legend-item {% if status_filter == 'vtrust' %}active{% endif %}"
          href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='vtrust', per_page=per_page) }}"><span class="badge" style="background:#ffedd5;color:#9a3412;border:1px solid #f97316">V-Trust</span> Valve — no V-Trust</a>
+      <a class="legend-item {% if status_filter == 'no_qa_brt' %}active{% endif %}"
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='no_qa_brt', per_page=per_page) }}"><span class="badge" style="background:#dc2626;color:#fff">&#9888; No QA BRT</span> Missing report</a>
       {% if status_filter %}
       <a class="legend-item"
          href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', per_page=per_page) }}">Clear filter</a>
@@ -378,9 +383,9 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
   </div>
   {% if total_pages > 1 %}
   <div style="display:flex;justify-content:center;align-items:center;gap:12px;padding:16px;background:#fff;">
-    {% if page > 1 %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, per_page=per_page, page=page-1) }}">Previous</a>{% endif %}
+    {% if page > 1 %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, status=status_filter, per_page=per_page, page=page-1) }}">Previous</a>{% endif %}
     <span style="font-size:.82rem;color:#6b7280;">Page {{ page }} of {{ total_pages }}</span>
-    {% if page < total_pages %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, per_page=per_page, page=page+1) }}">Next</a>{% endif %}
+    {% if page < total_pages %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, status=status_filter, per_page=per_page, page=page+1) }}">Next</a>{% endif %}
   </div>
   {% endif %}
   {% else %}
@@ -438,6 +443,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
       <table style="border-collapse:collapse; width:100%; font-size:.78rem;">
         <thead>
           <tr style="background:#fff7ed;">
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Status</th>
             <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">逾期</th>
             <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Order #</th>
             <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Item Code</th>
@@ -456,6 +462,10 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% set insp = inspections.get(job.job_key, []) %}
           <tr style="border-bottom:1px solid #f1f5f9;
                      {{ 'background:#fff7ed;' if overdue else '' }}">
+            <td style="padding:7px 12px; white-space:nowrap;">
+              <span class="badge badge-shipped">SHIPPED</span>
+              <span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; No QA BRT</span>
+            </td>
             <td style="padding:7px 12px; text-align:center;">
               {% if overdue %}
               <span style="color:#dc2626; font-weight:700; font-size:.8rem;">&#9888; 逾期</span>
