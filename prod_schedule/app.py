@@ -688,8 +688,20 @@ HEADER_ALIASES = {
     'must ship time':                            'Must Ship Date',
 }
 
-# Reference sheets that are not order lines.
+# Reference sheets in the supplier workbook that are not order lines; they are
+# never imported, compared or shown.
 IGNORED_SHEETS = {'TOOLING', 'LEADTIMES', 'LEAD TIMES'}
+
+
+def is_ignored_sheet(name):
+    return str(name).strip().upper() in IGNORED_SHEETS
+
+
+def load_schedule(path):
+    """Read a saved week (current / previous), leaving out reference sheets.
+    Schedules saved before these sheets were skipped still contain them."""
+    data = load_json(path, {})
+    return {sheet: rows for sheet, rows in data.items() if not is_ignored_sheet(sheet)}
 
 def normalize_header(value):
     text = '' if value is None else str(value)
@@ -730,7 +742,7 @@ def parse_excel(file_bytes, password):
         raise InvalidExcelFile('The uploaded file is not a valid .xlsx workbook.') from exc
     result = {}
     for sheet_name in wb.sheetnames:
-        if sheet_name.strip().upper() in IGNORED_SHEETS:
+        if is_ignored_sheet(sheet_name):
             continue
         ws = wb[sheet_name]
         raw_rows =[list(r) for r in ws.iter_rows(values_only=True)
@@ -1085,8 +1097,8 @@ def healthz():
 
 @app.route('/')
 def index():
-    current = load_json(CURRENT_FILE, {})
-    previous = load_json(PREVIOUS_FILE, {})
+    current = load_schedule(CURRENT_FILE)
+    previous = load_schedule(PREVIOUS_FILE)
     if current and previous:
         statuses, typo_flags, shipped_rows = compute_changes(previous, current)
     else:
@@ -1234,8 +1246,8 @@ def index():
 
 @app.route('/export/comparison.xlsx')
 def export_comparison_excel():
-    current = load_json(CURRENT_FILE, {})
-    previous = load_json(PREVIOUS_FILE, {})
+    current = load_schedule(CURRENT_FILE)
+    previous = load_schedule(PREVIOUS_FILE)
     inspections = load_json(INSPECTIONS_CACHE, {})
     statuses, _, shipped_rows = (
         compute_changes(previous, current)
@@ -1337,8 +1349,8 @@ def _format_export_sheet(worksheet):
 
 @app.route('/dashboard')
 def dashboard():
-    current     = load_json(CURRENT_FILE, {})
-    previous    = load_json(PREVIOUS_FILE, {})
+    current     = load_schedule(CURRENT_FILE)
+    previous    = load_schedule(PREVIOUS_FILE)
     config      = load_config()
     inspections = load_json(INSPECTIONS_CACHE, {})
 
@@ -1546,7 +1558,7 @@ def dashboard():
 
 def _upload_block_reason(data):
     """Return an error message if this parsed schedule must not be applied."""
-    previous_data = load_json(PREVIOUS_FILE, {})
+    previous_data = load_schedule(PREVIOUS_FILE)
     if previous_data and data == previous_data:
         return tr('已阻止上传：该文件与已保存的上周排期相同，上传会颠倒新增/已出货状态，破坏当前对比。',
                   'Upload blocked: this file matches the saved previous-week '
@@ -1730,7 +1742,7 @@ def upload_preview():
     if not pending.get('data'):
         flash(tr('没有待确认的排期上传', 'No schedule upload is waiting for confirmation'), 'warning')
         return redirect(url_for('index'))
-    summary = schedule_diff_summary(load_json(CURRENT_FILE, {}), pending['data'])
+    summary = schedule_diff_summary(load_schedule(CURRENT_FILE), pending['data'])
     return render_template('upload_preview.html', pending=pending, summary=summary,
                            config=load_config())
 
@@ -1803,7 +1815,7 @@ def _apply_schedule(data, baseline=False):
     remember_schedule_upload(data, datetime.now().strftime('%d %b %Y %H:%M'))
 
     # ── Detect header changes vs previous week (poka-yoke) ───────────
-    prev_for_check = load_json(PREVIOUS_FILE, {})
+    prev_for_check = load_schedule(PREVIOUS_FILE)
     header_warnings = []
     for sheet, rows in data.items():
         if not rows:
@@ -1843,8 +1855,8 @@ def _apply_schedule(data, baseline=False):
                     (_snap_label, _snap_date, _sheet, _count))
 
     # ── Auto-create inspection tasks + persist outstanding jobs ──────
-    previous = load_json(PREVIOUS_FILE, {})
-    current_data = load_json(CURRENT_FILE, {})
+    previous = load_schedule(PREVIOUS_FILE)
+    current_data = load_schedule(CURRENT_FILE)
     if current_data:
         if previous:
             statuses, _, newly_shipped = compute_changes(previous, current_data)
@@ -1960,7 +1972,7 @@ def debug_info():
 def find_job(job_key):
     """Job details for a job_key: current schedule, manual orders, or a
     fully shipped job kept in outstanding_jobs. Returns a dict or None."""
-    current = load_json(CURRENT_FILE, {})
+    current = load_schedule(CURRENT_FILE)
     job_info = None
 
     # Search current week Excel data
@@ -2223,7 +2235,7 @@ def submit_inspection(job_key):
     save_json(INSPECTIONS_CACHE, cache)
 
     # Auto-update QA BRTs Sent? → YES in current schedule
-    current_sched = load_json(CURRENT_FILE, {})
+    current_sched = load_schedule(CURRENT_FILE)
     qa_updated = False
     for sheet, rows in current_sched.items():
         if not rows or len(rows) < 2:
@@ -2570,7 +2582,7 @@ def supplier_edit(sid):
 
 @app.route('/suppliers/import-from-schedule', methods=['POST'])
 def suppliers_import():
-    current = load_json(CURRENT_FILE, {})
+    current = load_schedule(CURRENT_FILE)
     found = set()
     for sheet, rows in current.items():
         if not rows or len(rows) < 2:
@@ -3928,12 +3940,12 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 init_db()
 
-for _known_schedule in (load_json(PREVIOUS_FILE, {}), load_json(CURRENT_FILE, {})):
+for _known_schedule in (load_schedule(PREVIOUS_FILE), load_schedule(CURRENT_FILE)):
     remember_schedule_upload(_known_schedule)
 
 def _backfill_fully_shipped_history():
-    previous = load_json(PREVIOUS_FILE, {})
-    current = load_json(CURRENT_FILE, {})
+    previous = load_schedule(PREVIOUS_FILE)
+    current = load_schedule(CURRENT_FILE)
     if not previous or not current:
         return
     if load_config().get('last_upload_baseline'):
@@ -3947,6 +3959,33 @@ def _backfill_fully_shipped_history():
         logger.info(
             'Backfilled %s fully shipped job(s); %s require QA BRT reports',
             persisted, pending)
+
+def _purge_ignored_sheet_records():
+    """Remove alerts / open tasks / chart points created from reference sheets
+    (TOOLING, LEADTIMES) by uploads made before those sheets were skipped.
+    Tasks that already have an inspection are kept."""
+    names = sorted(IGNORED_SHEETS)
+    marks = ','.join('?' * len(names))
+    inspected = set(load_json(INSPECTIONS_CACHE, {}).keys())
+    with db_conn() as conn:
+        jobs = conn.execute(
+            f'DELETE FROM outstanding_jobs WHERE UPPER(TRIM(sheet)) IN ({marks})', names).rowcount
+        task_rows = conn.execute(
+            f'SELECT id, job_key FROM inspection_tasks WHERE UPPER(TRIM(region)) IN ({marks})',
+            names).fetchall()
+        stale = [r['id'] for r in task_rows if r['job_key'] not in inspected]
+        for task_id in stale:
+            conn.execute('DELETE FROM inspection_tasks WHERE id=?', (task_id,))
+        snaps = conn.execute(
+            f'DELETE FROM weekly_snapshots WHERE UPPER(TRIM(region)) IN ({marks})', names).rowcount
+    if jobs or stale or snaps:
+        logger.info('Removed reference-sheet records: %s shipped jobs, %s tasks, %s snapshots',
+                    jobs, len(stale), snaps)
+
+try:
+    _purge_ignored_sheet_records()
+except Exception:
+    logger.exception('Unable to purge reference-sheet records')
 
 try:
     _backfill_fully_shipped_history()

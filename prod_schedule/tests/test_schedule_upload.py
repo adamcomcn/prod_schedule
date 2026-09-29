@@ -71,6 +71,53 @@ class ParseRealLayoutTests(unittest.TestCase):
         self.assertIn('Unit weight (kg)', data['PRETAPS'][0])
 
 
+class ReferenceSheetTests(unittest.TestCase):
+    """TOOLING / LEADTIMES are never shown, even in schedules saved before
+    the parser started skipping them."""
+
+    def setUp(self):
+        app.app.config.update(TESTING=True)
+        with db_conn() as conn:
+            conn.execute('DELETE FROM users')
+            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('ref-admin','x','admin')")
+            self.uid = conn.execute("SELECT id FROM users WHERE username='ref-admin'").fetchone()[0]
+        headers = ['Order Number', 'Daemco Purchase Order', 'Item Code', 'Quantity']
+        old_week = {
+            'MELBOURNE': [headers, ['DPL1', 'PO-1', 'ITEM1', '5']],
+            'TOOLING': [['Tool', 'Cost'], ['Mould A', '100']],
+            'LEADTIMES': [['Item', 'Weeks'], ['Valve', '8']],
+        }
+        app.save_json(app.CURRENT_FILE, old_week)
+        app.save_json(app.PREVIOUS_FILE, old_week)
+
+    def test_saved_reference_sheets_are_hidden(self):
+        self.assertEqual(list(app.load_schedule(app.CURRENT_FILE)), ['MELBOURNE'])
+        client = app.app.test_client()
+        with client.session_transaction() as session:
+            session['user_id'] = self.uid
+        page = client.get('/').get_data(as_text=True)
+        self.assertIn('sheet=MELBOURNE', page)
+        self.assertNotIn('sheet=TOOLING', page)
+        self.assertNotIn('sheet=LEADTIMES', page)
+        self.assertNotIn('Mould A', page)
+
+    def test_purge_removes_old_reference_sheet_records(self):
+        with db_conn() as conn:
+            conn.execute("INSERT INTO outstanding_jobs (job_key, sheet) VALUES ('TOOLING|X|Y', 'TOOLING')")
+            conn.execute("INSERT INTO inspection_tasks (job_key, region, status) VALUES ('LEADTIMES|A|B', 'LEADTIMES', 'Pending')")
+            conn.execute("INSERT INTO inspection_tasks (job_key, region, status) VALUES ('MELBOURNE|PO-1|ITEM1', 'MELBOURNE', 'Pending')")
+            conn.execute("INSERT INTO weekly_snapshots (week_label, week_date, region, total_orders) VALUES ('w', '2026-06-11', 'TOOLING', 2)")
+        app._purge_ignored_sheet_records()
+        with db_conn() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM outstanding_jobs WHERE sheet='TOOLING'").fetchone()[0], 0)
+            regions = [r[0] for r in conn.execute('SELECT region FROM inspection_tasks')]
+            self.assertIn('MELBOURNE', regions)
+            self.assertNotIn('LEADTIMES', regions)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM weekly_snapshots WHERE region='TOOLING'").fetchone()[0], 0)
+            conn.execute('DELETE FROM inspection_tasks')
+            conn.execute('DELETE FROM weekly_snapshots')
+
+
 class UploadFlowTests(unittest.TestCase):
     def setUp(self):
         app.app.config.update(TESTING=True)
