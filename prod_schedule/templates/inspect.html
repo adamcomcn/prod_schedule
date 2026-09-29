@@ -17,6 +17,12 @@
                  border-bottom:2px solid #e8eaee; }
 .row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+.hq-mail { margin:4px 0; font-size:.74rem; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.hq-ok { color:#059669; }
+.hq-pending { color:#2563eb; }
+.hq-fail { color:#dc2626; }
+.hq-resend { border:1px solid #d0d5dd; background:#fff; border-radius:4px; padding:1px 8px;
+             font-size:.72rem; cursor:pointer; color:#374151; }
 @media(max-width:600px){
   .row2, .row3 { grid-template-columns:1fr; gap:0; }
   .result-group { flex-direction:column; gap:8px; }
@@ -407,6 +413,23 @@ input[name=result] { display:none; }
                class="btn btn-sm btn-outline" style="padding:2px 8px; font-size:.72rem;"
                title="{{ tr('PDF 检验报告', 'PDF inspection report') }}">&#128196; PDF</a>
           </div>
+          {% set em = report_emails.get(pidx) %}
+          {% if em or g.can_assign %}
+          <div class="hq-mail">
+            {% if em and em.status == 'sent' %}
+              <span class="hq-ok" title="{{ em.detail }}">&#9993; {{ tr('已发送总部', 'Sent to HQ') }} · {{ em.created_at[:16] }}</span>
+            {% elif em and em.status == 'pending' %}
+              <span class="hq-pending">&#9993; {{ tr('正在发送给总部…（刷新查看）', 'Sending to HQ… (refresh to check)') }}</span>
+            {% elif em %}
+              <span class="hq-fail" title="{{ em.detail }}">&#9888; {{ tr('发送总部失败', 'HQ e-mail failed') }}: {{ em.detail }}</span>
+            {% endif %}
+            {% if g.can_assign %}
+            <form method="POST" action="{{ url_for('resend_report_email', job_key=job.job_key, index=pidx) }}" style="display:inline;">
+              <button type="submit" class="hq-resend">{{ tr('重新发送' if em else '发送给总部', 'Resend' if em else 'E-mail to HQ') }}</button>
+            </form>
+            {% endif %}
+          </div>
+          {% endif %}
           <div>{{ tr('抽检 ' ~ p.quantity_inspected ~ ' / 订单 ' ~ p.quantity_ordered, 'Inspected: ' ~ p.quantity_inspected ~ ' / ' ~ p.quantity_ordered ~ ' ordered') }}{% if p.quantity_passed %} · {{ tr('合格 ', 'passed ') }}{{ p.quantity_passed }}{% endif %}</div>
           {% if p.packing_condition or p.marking %}<div>{{ tr('包装', 'Packing') }}: {{ p.packing_condition or '—' }} · {{ tr('标识', 'Marking') }}: {{ p.marking or '—' }}</div>{% endif %}
 

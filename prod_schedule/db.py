@@ -780,6 +780,20 @@ def init_db():
             except Exception:
                 pass
 
+        # Log of inspection-report e-mails to HQ (one row per send attempt)
+        conn.execute('''CREATE TABLE IF NOT EXISTS report_emails (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_key     TEXT NOT NULL,
+            insp_index  INTEGER NOT NULL,
+            recipients  TEXT DEFAULT '',
+            status      TEXT DEFAULT 'pending',
+            detail      TEXT DEFAULT '',
+            created_by  TEXT DEFAULT '',
+            created_at  TEXT DEFAULT (datetime('now', 'localtime'))
+        )''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_report_emails_job '
+                     'ON report_emails (job_key, insp_index)')
+
         # Task assignment (lead inspector delegates jobs to inspectors)
         for col, defn in [('assigned_to', 'INTEGER DEFAULT NULL'),
                           ('assigned_by', "TEXT DEFAULT ''"),

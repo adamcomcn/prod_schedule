@@ -2112,6 +2112,7 @@ def inspect_form(job_key):
                            job=job_info,
                            past_inspections=past,
                            past_attachments=dict(past_attachments),
+                           report_emails=report_email_status(job_key),
                            is_valve=valve_flag,
                            defect_groups=defect_groups,
                            matched_tpl=matched_tpl,
@@ -2243,6 +2244,8 @@ def submit_inspection(job_key):
         save_json(CURRENT_FILE, current_sched)
 
     _update_task_after_inspection(job_key, inspection_data['result'])
+    if hq_report_wanted(inspection_data['result']):
+        queue_report_email(job_key, len(cache[job_key]) - 1)
 
     # Mark outstanding_jobs entry as completed
     with db_conn() as conn:
@@ -2300,17 +2303,11 @@ def _pdf_font_embedded():
         return False
 
 
-@app.route('/inspect/<path:job_key>/report.pdf')
-def inspection_report_pdf(job_key):
+def build_report_pdf(job_key, index, generated_by=''):
+    """Return (pdf_bytes, report_no, filename, record) or None."""
     records = load_json(INSPECTIONS_CACHE, {}).get(job_key, [])
-    if not records:
-        abort(404)
-    try:
-        index = int(request.args.get('i', len(records) - 1))
-    except ValueError:
-        abort(404)
     if not 0 <= index < len(records):
-        abort(404)
+        return None
     record = records[index]
     job = find_job(job_key) or {
         'region': record.get('region'), 'Order Number': record.get('order_number'),
@@ -2333,14 +2330,126 @@ def inspection_report_pdf(job_key):
         evidence_labels={k: (v.get('label_zh') or v['label'], v['label']) for k, v in EVIDENCE_META.items()},
         checklist=_latest_checklist(job_key),
         logo_path=os.path.join(BASE_DIR, 'static', 'daemco_logo.png'),
-        generated_by=g.get('display_name') or g.get('username', ''))
-
+        generated_by=generated_by)
     safe = re.sub(r'[^A-Za-z0-9._-]+', '_', f"{record.get('order_number') or ''}_{record.get('item_code') or ''}")
+    return pdf, report_no, f'{report_no}_{safe}.pdf'.replace('__', '_'), record
+
+
+@app.route('/inspect/<path:job_key>/report.pdf')
+def inspection_report_pdf(job_key):
+    records = load_json(INSPECTIONS_CACHE, {}).get(job_key, [])
+    if not records:
+        abort(404)
+    try:
+        index = int(request.args.get('i', len(records) - 1))
+    except ValueError:
+        abort(404)
+    built = build_report_pdf(job_key, index, g.get('display_name') or g.get('username', ''))
+    if not built:
+        abort(404)
+    pdf, _report_no, filename, _record = built
     response = send_file(io.BytesIO(pdf), mimetype='application/pdf',
                          as_attachment=request.args.get('download') == '1',
-                         download_name=f'{report_no}_{safe}.pdf'.replace('__', '_'))
+                         download_name=filename)
     response.headers['Cache-Control'] = 'private, no-store'
     return response
+
+
+HQ_REPORT_MODES = ('all', 'issues', 'off')
+MAX_EMAIL_ATTACHMENT = 15 * 1024 * 1024
+
+
+def hq_report_wanted(result):
+    config = load_config()
+    mode = config.get('hq_report_mode', 'all')
+    if mode == 'off' or not _email_list(config.get('hq_report_emails', '')):
+        return False
+    return mode == 'all' or result in ('Fail', 'Partial Pass')
+
+
+def _send_report_email(log_id, job_key, index, sent_by, links):
+    """Build the PDF and e-mail it to HQ; record the outcome in report_emails.
+    Runs in a background thread (no request context)."""
+    status, detail = 'failed', ''
+    try:
+        recipients = _email_list(load_config().get('hq_report_emails', ''))
+        built = build_report_pdf(job_key, index, sent_by)
+        if not built:
+            detail = 'inspection not found'
+        else:
+            pdf, report_no, filename, rec = built
+            result = rec.get('result', '')
+            result_zh = {'Pass': '合格', 'Fail': '不合格', 'Partial Pass': '部分合格'}.get(result, '')
+            subject = (f"【检验报告 Inspection Report】{rec.get('order_number', '')} "
+                       f"{rec.get('item_code', '')} — {result_zh} {result} ({report_no})")
+            lines = [
+                f"报告编号 Report No.: {report_no}",
+                f"区域 Region: {rec.get('region', '')}",
+                f"订单 Order: {rec.get('order_number', '')}    物料 Item: {rec.get('item_code', '')}",
+                f"描述 Description: {rec.get('item_description', '')}",
+                f"检验员 Inspector: {rec.get('inspector_name', '')}    日期 Date: {rec.get('inspection_date', '')}",
+                f"抽检 / 合格 Inspected / passed: {rec.get('quantity_inspected', '')} / {rec.get('quantity_passed', '') or '—'}",
+                f"结果 Result: {result_zh} {result}",
+            ]
+            if rec.get('defect_codes'):
+                lines.append(f"缺陷代码 Defect codes: {', '.join(rec['defect_codes'])}")
+            if rec.get('notes'):
+                lines += ['', f"备注 Notes: {rec['notes']}"]
+            lines += ['', f"在线查看 View online: {links['inspect']}"]
+            attachments = []
+            if len(pdf) <= MAX_EMAIL_ATTACHMENT:
+                attachments.append((filename, pdf, 'application/pdf'))
+            else:
+                lines.append(f"PDF 过大未附上，请在线下载 PDF too large to attach — download: {links['pdf']}")
+            lines += ['', '— Daemco QC 系统自动发送 / sent automatically by the Daemco QC system']
+            ok, detail = _smtp_send(subject, '\n'.join(lines), recipients, attachments)
+            status = 'sent' if ok else 'failed'
+            detail = detail if not ok else ', '.join(recipients)
+    except Exception as exc:  # never let a background send crash silently
+        logger.exception('HQ report e-mail failed')
+        detail = type(exc).__name__
+    with db_conn() as conn:
+        conn.execute('UPDATE report_emails SET status=?, detail=? WHERE id=?', (status, detail[:500], log_id))
+
+
+def queue_report_email(job_key, index):
+    """Log and send the HQ e-mail for one inspection (background thread)."""
+    recipients = _email_list(load_config().get('hq_report_emails', ''))
+    sent_by = g.get('display_name') or g.get('username', '')
+    links = {'inspect': url_for('inspect_form', job_key=job_key, _external=True),
+             'pdf': url_for('inspection_report_pdf', job_key=job_key, i=index, _external=True)}
+    with db_conn() as conn:
+        cur = conn.execute(
+            'INSERT INTO report_emails (job_key, insp_index, recipients, status, created_by) '
+            'VALUES (?,?,?,?,?)', (job_key, index, ', '.join(recipients), 'pending', g.get('username', '')))
+        log_id = cur.lastrowid
+    args = (log_id, job_key, index, sent_by, links)
+    if app.config.get('SEND_EMAIL_SYNC'):
+        _send_report_email(*args)
+    else:
+        import threading
+        threading.Thread(target=_send_report_email, args=args, daemon=True).start()
+
+
+def report_email_status(job_key):
+    """{insp_index: latest report_emails row}"""
+    with db_conn() as conn:
+        rows = conn.execute('SELECT * FROM report_emails WHERE job_key=? ORDER BY id', (job_key,)).fetchall()
+    return {r['insp_index']: r for r in rows}
+
+
+@app.route('/inspect/<path:job_key>/report/<int:index>/email', methods=['POST'])
+def resend_report_email(job_key, index):
+    if not g.can_assign:
+        abort(403)
+    if not 0 <= index < len(load_json(INSPECTIONS_CACHE, {}).get(job_key, [])):
+        abort(404)
+    if not _email_list(load_config().get('hq_report_emails', '')):
+        flash(tr('请先在设置中填写总部报告邮箱', 'Set the HQ report e-mails in Settings first'), 'error')
+    else:
+        queue_report_email(job_key, index)
+        flash(tr('正在发送检验报告给总部…', 'Sending the inspection report to HQ…'), 'success')
+    return redirect(url_for('inspect_form', job_key=job_key))
 
 
 @app.route('/settings', methods=['GET', 'POST'])
@@ -2352,6 +2461,9 @@ def settings():
         raw_prefixes = request.form.get('valve_prefixes', 'RSV')
         config['valve_prefixes'] = [p.strip().upper() for p in raw_prefixes.split(',') if p.strip()]
         config['task_notify_emails'] = ', '.join(_email_list(request.form.get('task_notify_emails', '')))
+        config['hq_report_emails'] = ', '.join(_email_list(request.form.get('hq_report_emails', '')))
+        mode = request.form.get('hq_report_mode', 'all')
+        config['hq_report_mode'] = mode if mode in HQ_REPORT_MODES else 'all'
         for legacy_secret in ('smtp_pass', 'smtp_user', 'smtp_host', 'smtp_port'):
             config.pop(legacy_secret, None)
         save_json(CONFIG_FILE, config)
@@ -2731,8 +2843,9 @@ def smtp_configured():
                 and os.environ.get('SMTP_PASSWORD'))
 
 
-def _smtp_send(subject, body, recipients):
+def _smtp_send(subject, body, recipients, attachments=()):
     """Send a plain-text UTF-8 e-mail. Returns (ok, message).
+    attachments: [(filename, bytes, 'maintype/subtype'), ...]
 
     Port 465 uses implicit TLS (common for Chinese corporate mail such as
     Aliyun / Tencent Exmail); other ports use STARTTLS.
@@ -2749,8 +2862,18 @@ def _smtp_send(subject, body, recipients):
 
     import smtplib
     from email.header import Header
+    from email.mime.application import MIMEApplication
+    from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
-    msg = MIMEText(body, 'plain', 'utf-8')
+    if attachments:
+        msg = MIMEMultipart()
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        for filename, data, mimetype in attachments:
+            part = MIMEApplication(data, _subtype=mimetype.split('/', 1)[-1])
+            part.add_header('Content-Disposition', 'attachment', filename=('utf-8', '', filename))
+            msg.attach(part)
+    else:
+        msg = MIMEText(body, 'plain', 'utf-8')
     msg['Subject'] = str(Header(subject, 'utf-8'))
     msg['From']    = sender
     msg['To']      = ', '.join(recipients)
@@ -2764,9 +2887,9 @@ def _smtp_send(subject, body, recipients):
                 srv.ehlo(); srv.starttls(); srv.login(user, pwd)
                 srv.sendmail(sender, recipients, msg.as_string())
         return True, tr(f'邮件已发送至 {", ".join(recipients)}', f'E-mail sent to {", ".join(recipients)}')
-    except Exception:
+    except Exception as exc:
         logger.exception('E-mail delivery failed')
-        return False, tr('邮件发送失败', 'E-mail delivery failed')
+        return False, tr('邮件发送失败', 'E-mail delivery failed') + f' ({type(exc).__name__})'
 
 
 def _task_lines(t):

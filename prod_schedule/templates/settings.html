@@ -73,6 +73,22 @@
           </div>
 
           <div class="form-group">
+            <label>&#128196; {{ tr('总部报告邮箱', 'HQ report e-mails') }}</label>
+            <input type="text" name="hq_report_emails" value="{{ config.get('hq_report_emails', '') }}"
+                   placeholder="qa@hq.example.com, manager@hq.example.com">
+            <select name="hq_report_mode" style="margin-top:6px;">
+              {% set mode = config.get('hq_report_mode', 'all') %}
+              <option value="all" {% if mode == 'all' %}selected{% endif %}>{{ tr('每次提交检验都发送 PDF 报告', 'Send the PDF for every submitted inspection') }}</option>
+              <option value="issues" {% if mode == 'issues' %}selected{% endif %}>{{ tr('仅不合格 / 部分合格时发送', 'Only for Fail / Partial Pass') }}</option>
+              <option value="off" {% if mode == 'off' %}selected{% endif %}>{{ tr('不自动发送', 'Do not send automatically') }}</option>
+            </select>
+            <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
+              {{ tr('检验员提交检验后，系统在后台生成 PDF 检验报告并作为附件发送到这些邮箱（多个用逗号分隔）。检验页面会显示发送状态，主管和管理员可以重新发送。',
+                    'When an inspection is submitted, the PDF report is generated in the background and e-mailed to these addresses (comma-separated). The inspection page shows the delivery status; leads and admins can resend.') }}
+            </div>
+          </div>
+
+          <div class="form-group">
             <label>{{ tr('阀门物料编码前缀（需要 V-Trust）', 'Valve Item Code Prefixes (V-Trust required)') }}</label>
             <input type="text" name="valve_prefixes"
                    value="{{ config.get('valve_prefixes', ['RSV'])|join(', ') }}"
