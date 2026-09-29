@@ -125,7 +125,8 @@ input[name=result] { display:none; }
         <form method="POST"
               action="{{ url_for('submit_inspection', job_key=job.job_key) }}"
               enctype="multipart/form-data"
-              id="inspect-form">
+              id="inspect-form"
+              data-max-bytes="{{ config['MAX_CONTENT_LENGTH'] or 0 }}">
 
           <input type="hidden" name="region"           value="{{ job.get('region', '') }}">
           <input type="hidden" name="order_number"     value="{{ job.get('Order Number', '') }}">
@@ -546,11 +547,40 @@ function evRenderList(etype) {
     const sz = f.size > 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(0)+' KB';
     list.innerHTML += `<div class="ev-file-item">
       <span>${icon}</span>
-      <span class="ev-file-name">${f.name}</span>
+      <span class="ev-file-name">${escapeHtml(f.name)}</span>
       <span class="ev-file-size">${sz}</span>
       <button class="ev-remove" type="button" onclick="evRemoveFile('${etype}',${i})">✕</button>
     </div>`;
   });
 }
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ── Pre-submit checks (the server validates too) ────────────────────────────
+document.getElementById('inspect-form').addEventListener('submit', function (e) {
+  if (!document.getElementById('result-input').value) {
+    e.preventDefault();
+    alert('请选择总体检验结果（Pass / Fail / Partial Pass）\nPlease choose an overall result.');
+    return;
+  }
+  const maxBytes = parseInt(this.dataset.maxBytes || '0', 10);
+  let total = 0;
+  this.querySelectorAll('input[type=file]').forEach(inp => {
+    Array.from(inp.files || []).forEach(f => { total += f.size; });
+  });
+  if (maxBytes && total > maxBytes) {
+    e.preventDefault();
+    alert('附件总大小 ' + (total/1048576).toFixed(1) + ' MB，超过上限 ' +
+          (maxBytes/1048576).toFixed(0) + ' MB，请压缩或分次提交。\n' +
+          'Attachments exceed the upload limit.');
+    return;
+  }
+  const btn = this.querySelector('button[type=submit]');
+  if (btn) { btn.disabled = true; btn.textContent = '提交中… Submitting…'; }
+});
 </script>
 {% endblock %}

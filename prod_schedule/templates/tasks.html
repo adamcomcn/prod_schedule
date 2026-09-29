@@ -370,18 +370,18 @@
           {% set last_result = insp_list[-1].result if insp_list else '' %}
 
           {% set est = (t.est_completion or '')[:10] %}
-          {% set today_str = today | string %}
+          {% set days_left = days_until(t.est_completion, today) %}
           {% if t.status == 'Completed' %}
             {% set urg_cls = 'done' %}{% set row_cls = '' %}{% set days_label = '—' %}{% set days_cls = 'days-none' %}
-          {% elif not est %}
-            {% set urg_cls = 'ok' %}{% set row_cls = '' %}{% set days_label = '无截止日' %}{% set days_cls = 'days-none' %}
-          {% elif est < today_str %}
+          {% elif days_left is none %}
+            {% set urg_cls = 'ok' %}{% set row_cls = '' %}{% set days_label = est or '无截止日' %}{% set days_cls = 'days-none' %}
+          {% elif days_left < 0 %}
             {% set urg_cls = 'overdue' %}{% set row_cls = 'overdue' %}
             {% set days_label = '已逾期' %}{% set days_cls = 'days-overdue' %}
-          {% elif est <= today_str[:8] + '%02d'|format((today.day + 7)) %}
+          {% elif days_left <= 7 %}
             {% set urg_cls = 'urgent' %}{% set row_cls = 'urgent' %}
             {% set days_label = est %}{% set days_cls = 'days-urgent' %}
-          {% elif est <= today_str[:8] + '%02d'|format((today.day + 14)) %}
+          {% elif days_left <= 14 %}
             {% set urg_cls = 'soon' %}{% set row_cls = '' %}
             {% set days_label = est %}{% set days_cls = 'days-soon' %}
           {% else %}

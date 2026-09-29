@@ -6,6 +6,7 @@ from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, send_file, g, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 import msoffcrypto
 import openpyxl
 from db import db_conn, init_db
@@ -25,6 +26,10 @@ except ImportError:
     GOOGLE_AVAILABLE = False
 
 app = Flask(__name__)
+# Railway (and most PaaS hosts) sit behind a reverse proxy; trust one hop of
+# X-Forwarded-* so request.remote_addr is the real client, not the proxy.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=int(os.environ.get('TRUSTED_PROXY_HOPS', '1')),
+                        x_proto=1, x_host=1)
 IS_PRODUCTION = bool(
     os.environ.get('RAILWAY_ENVIRONMENT_ID')
     or os.environ.get('RAILWAY_ENVIRONMENT_NAME')
@@ -55,7 +60,8 @@ INSPECTIONS_CACHE = os.path.join(DATA_DIR, 'inspections_cache.json')
 EXCEL_PASSWORD   = os.environ.get('EXCEL_PASSWORD', '')
 PRODUCT_IMG_DIR  = os.path.join(APP_DATA_DIR, 'product_images')
 
-EVIDENCE_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.csv', '.jpg', '.jpeg', '.png', '.mp4', '.mov', '.avi', '.mkv'}
+EVIDENCE_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.csv', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif',
+                       '.mp4', '.mov', '.avi', '.mkv'}
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 INVOICE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png'}
 
@@ -94,8 +100,14 @@ def load_json(path, default=None):
     return default if default is not None else {}
 
 def save_json(path, data):
-    with open(path, 'w', encoding='utf-8') as f:
+    # Write to a temp file then atomically replace, so a crash mid-write
+    # never leaves a truncated JSON file behind.
+    tmp_path = f'{path}.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
 
 def schedule_fingerprint(data):
     canonical = json.dumps(
@@ -140,15 +152,44 @@ def _requested_employee_id(form):
 def google_credentials_configured():
     return bool(os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON_B64'))
 
+def _display_filename(filename):
+    """Keep the user's original file name (including Chinese characters) for
+    display only; the file itself is always saved under a random name."""
+    name = os.path.basename((filename or '').replace('\\', '/'))
+    name = ''.join(ch for ch in name if ch.isprintable()).strip()
+    return name[:200]
+
+def _upload_extension(filename):
+    return os.path.splitext(_display_filename(filename))[1].lower()
+
 def _save_uploaded_file(file_obj, directory, allowed_extensions):
-    original = secure_filename(file_obj.filename or '')
-    extension = os.path.splitext(original)[1].lower()
+    # secure_filename() strips non-ASCII characters, so "检验报告.pdf" would
+    # become "pdf" with no extension; take the extension from the raw name.
+    original = _display_filename(file_obj.filename) or secure_filename(file_obj.filename or '')
+    extension = _upload_extension(file_obj.filename)
     if not original or extension not in allowed_extensions:
         raise ValueError('Unsupported file type')
     os.makedirs(directory, exist_ok=True)
     saved_name = f'{uuid.uuid4().hex}{extension}'
     file_obj.save(os.path.join(directory, saved_name))
     return original, saved_name
+
+def _parse_date(value):
+    """Parse a schedule date cell ('2026-10-05', '2026/10/05', '05/10/2026',
+    '2026-10-05 00:00:00'); return None for blanks or text such as 'TBC'."""
+    text = str(value or '').strip()[:10]
+    for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%d/%m/%Y', '%d.%m.%Y'):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+def days_until(value, today):
+    parsed = _parse_date(value)
+    return (parsed - today).days if parsed else None
+
+app.jinja_env.globals['days_until'] = days_until
 
 def load_config():
     return load_json(CONFIG_FILE, {
@@ -359,12 +400,20 @@ def get_evidence_requirements(item_code, category_name=''):
 
 
 def get_vtrust_status(inspections_list):
-    """Return the V-Trust result from the most recent inspection that has one."""
-    for record in reversed(inspections_list):
-        r = record.get('vtrust_result', '').strip()
+    """Return the V-Trust result from the most recent inspection that has one.
+
+    Submissions store it under evidence['vtrust']['result']; older records may
+    carry a top-level 'vtrust_result'.
+    """
+    for record in reversed(inspections_list or []):
+        evidence = record.get('evidence') or {}
+        r = ((evidence.get('vtrust') or {}).get('result') or
+             record.get('vtrust_result') or '').strip()
         if r:
             return r
     return ''
+
+app.jinja_env.globals['vtrust_status'] = get_vtrust_status
 
 def qa_brt_missing(row, headers, status):
     if status not in {'shipped', 'partially_shipped'}:
@@ -1597,10 +1646,31 @@ def inspect_form(job_key):
                            now_date=datetime.now().strftime('%Y-%m-%d'),
                            google_configured=bool(config.get('sheet_id') and google_credentials_configured()))
 
+INSPECTION_RESULTS = {'Pass', 'Fail', 'Partial Pass'}
+
 @app.route('/inspect/<path:job_key>/submit', methods=['POST'])
 def submit_inspection(job_key):
     form = request.form
-    now_ts = datetime.now().strftime('%Y%m%d%H%M%S')
+
+    # ── Validate before anything is written ──────────────────────────────
+    errors = []
+    if form.get('result', '') not in INSPECTION_RESULTS:
+        errors.append('请选择总体检验结果 / Please choose an overall result')
+    if not form.get('inspector_name', '').strip():
+        errors.append('请填写检验员 / Inspector name is required')
+    if not form.get('inspection_date', '').strip():
+        errors.append('请填写检验日期 / Inspection date is required')
+    bad_files = [
+        f.filename for key in request.files if key.startswith('ev_file_')
+        for f in request.files.getlist(key)
+        if f.filename and _upload_extension(f.filename) not in EVIDENCE_EXTENSIONS
+    ]
+    if bad_files:
+        errors.append('不支持的文件类型 / Unsupported file type: ' + ', '.join(bad_files))
+    if errors:
+        for error in errors:
+            flash(error, 'error')
+        return redirect(url_for('inspect_form', job_key=job_key))
 
     inspection_data = {
         'job_key':           job_key,
@@ -1613,10 +1683,14 @@ def submit_inspection(job_key):
         'inspector_name':    form.get('inspector_name', ''),
         'inspection_date':   form.get('inspection_date', ''),
         'quantity_inspected':form.get('quantity_inspected', ''),
+        'quantity_passed':   form.get('quantity_passed', ''),
         'result':            form.get('result', ''),
         'defect_codes':      request.form.getlist('defect_codes'),
         'defects':           form.get('defects', ''),
+        'packing_condition': form.get('packing_condition', ''),
+        'marking':           form.get('marking', ''),
         'notes':             form.get('notes', ''),
+        'submitted_by':      g.get('username', ''),
         'submitted_at':      datetime.now().isoformat(),
     }
 
@@ -1700,7 +1774,7 @@ def submit_inspection(job_key):
             (datetime.now().isoformat(), job_key))
 
     # Try Google Sheets
-    ok, msg = append_inspection_to_sheet(inspection_data, file_links)
+    ok, msg = append_inspection_to_sheet(inspection_data, all_file_links)
 
     if ok:
         flash('Inspection saved to Google Sheets!', 'success')
@@ -2227,13 +2301,13 @@ def tasks():
     for t in all_tasks:
         if t['status'] == 'Completed':
             continue
-        est = (t['est_completion'] or '')[:10]
-        if not est:
+        est_date = _parse_date(t['est_completion'])
+        if not est_date:
             urg['no_date'] += 1
-        elif est < today_str:
+        elif est_date < today:
             urg['overdue'] += 1
         else:
-            delta = (datetime.strptime(est, '%Y-%m-%d').date() - today).days
+            delta = (est_date - today).days
             if delta <= 7:
                 urg['week'] += 1
             elif delta <= 14:
@@ -2248,8 +2322,8 @@ def tasks():
         region_data[r]['total'] += 1
         if t['status'] == 'Completed':
             region_data[r]['completed'] += 1
-        est = (t['est_completion'] or '')[:10]
-        if est and est < today_str and t['status'] != 'Completed':
+        est_date = _parse_date(t['est_completion'])
+        if est_date and est_date < today and t['status'] != 'Completed':
             region_data[r]['overdue'] += 1
     region_stats = sorted(region_data.items(), key=lambda x: x[1]['total'], reverse=True)
     max_region = max((v['total'] for _, v in region_stats), default=1)
@@ -3074,6 +3148,33 @@ def _bootstrap_admin():
 
 _bootstrap_admin()
 
+def _startup_safety_checks():
+    """Log deployment risks and disable legacy accounts whose password equals
+    the username (early versions seeded admin/admin, qc1/qc1, qc2/qc2)."""
+    if IS_PRODUCTION and not os.environ.get('APP_DATA_DIR'):
+        logger.error(
+            'APP_DATA_DIR is not set: the database, schedules and uploads are '
+            'stored inside the container and will be LOST on the next deploy. '
+            'Mount a Railway Volume at /data and set APP_DATA_DIR=/data.')
+    with db_conn() as conn:
+        users = conn.execute(
+            'SELECT id, username, password_hash, role FROM users WHERE active=1'
+        ).fetchall()
+        active_admins = sum(1 for u in users if u['role'] == 'admin')
+        for user in users:
+            if not check_password_hash(user['password_hash'], user['username']):
+                continue
+            if user['role'] == 'admin' and active_admins <= 1:
+                logger.error('Account %r uses its username as password and is the only '
+                             'admin; change its password immediately.', user['username'])
+                continue
+            conn.execute('UPDATE users SET active=0 WHERE id=?', (user['id'],))
+            if user['role'] == 'admin':
+                active_admins -= 1
+            logger.warning('Disabled account %r: password equals username.', user['username'])
+
+_startup_safety_checks()
+
 @app.route('/admin/users')
 def users_admin():
     with db_conn() as conn:
@@ -3199,11 +3300,13 @@ def login():
     if 'user_id' in session:
         return redirect(url_for('index'))
     if request.method == 'POST':
-        client_id = request.remote_addr or 'unknown'
+        username = request.form.get('username', '').strip()
+        # Count failures per username+IP so one person's typos (or everyone
+        # sharing an office IP) cannot lock out the whole team.
+        client_id = f"{username.lower()}|{request.remote_addr or 'unknown'}"
         if _login_rate_limited(client_id):
             flash('登录尝试次数过多，请稍后再试', 'error')
             return render_template('login.html'), 429
-        username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         with db_conn() as conn:
             user = conn.execute(
@@ -3242,7 +3345,9 @@ def security_headers(response):
 
 @app.errorhandler(413)
 def upload_too_large(_error):
-    return 'Uploaded file is too large', 413
+    limit_mb = (app.config.get('MAX_CONTENT_LENGTH') or 0) // (1024 * 1024)
+    return (f'上传文件过大（上限 {limit_mb} MB），请压缩后重试或分次提交。'
+            f' / Upload too large (limit {limit_mb} MB).'), 413
 
 @app.errorhandler(500)
 def internal_error(_error):

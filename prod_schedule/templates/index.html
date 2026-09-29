@@ -238,8 +238,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% set qa_warn = status in ['shipped', 'partially_shipped'] and qa_val not in ['yes', 'y'] %}
           {# V-Trust alert: valve item shipped/partial without V-Trust pass #}
           {% set insp = inspections.get(job_key, []) %}
-          {% set vtrust_val = '' %}
-          {% for r in insp|reverse %}{% if r.get('vtrust_result') and not vtrust_val %}{% set vtrust_val = r.vtrust_result %}{% endif %}{% endfor %}
+          {% set vtrust_val = vtrust_status(insp) %}
           {% set is_v = job_key in valve_keys %}
           {% set vtrust_warn = is_v and status in ['shipped', 'partially_shipped'] and vtrust_val|lower != 'pass' %}
         <tr class="row-{{ status }}{% if qa_warn %} row-qa-warn{% endif %}{% if vtrust_warn %} row-vtrust-warn{% endif %}" data-key="{{ job_key }}">
@@ -319,8 +318,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% endfor %}
           {% set shipped_key = sheet_name ~ '|' ~ (ns2.po if ns2.po else ns2.order) ~ '|' ~ ns2.item %}
           {% set insp2 = inspections.get(shipped_key, []) %}
-          {% set vtrust_val2 = '' %}
-          {% for r in insp2|reverse %}{% if r.get('vtrust_result') and not vtrust_val2 %}{% set vtrust_val2 = r.vtrust_result %}{% endif %}{% endfor %}
+          {% set vtrust_val2 = vtrust_status(insp2) %}
           {% set is_v2 = shipped_key in valve_keys %}
           {% set vtrust_warn2 = is_v2 and vtrust_val2|lower != 'pass' %}
           {% set qa_val2 = (row[ns_qa.idx] if ns_qa.idx >= 0 and ns_qa.idx < row|length else '')|lower|trim %}
