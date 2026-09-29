@@ -1,7 +1,7 @@
-import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time, base64, uuid, zipfile
+import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time, base64, uuid, zipfile, re, unicodedata, shutil
 from collections import defaultdict, deque
 from difflib import SequenceMatcher
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session, send_from_directory, send_file, g, abort
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -56,6 +56,8 @@ CONFIG_FILE = os.path.join(DATA_DIR, 'config.json')
 CURRENT_FILE = os.path.join(DATA_DIR, 'current_week.json')
 PREVIOUS_FILE = os.path.join(DATA_DIR, 'previous_week.json')
 INSPECTIONS_CACHE = os.path.join(DATA_DIR, 'inspections_cache.json')
+PENDING_UPLOAD_FILE = os.path.join(DATA_DIR, 'pending_upload.json')
+HISTORY_DIR = os.path.join(DATA_DIR, 'history')
 
 EXCEL_PASSWORD   = os.environ.get('EXCEL_PASSWORD', '')
 PRODUCT_IMG_DIR  = os.path.join(APP_DATA_DIR, 'product_images')
@@ -75,7 +77,7 @@ LOGIN_MAX_FAILURES = 5
 _login_failures = defaultdict(deque)
 
 ADMIN_ENDPOINTS = {
-    'debug_info', 'upload_excel', 'settings', 'office_location_add',
+    'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings', 'office_location_add',
     'office_location_delete', 'supplier_new', 'supplier_edit', 'suppliers_import',
     'supplier_delete', 'category_new', 'category_delete', 'inspector_add',
     'inspector_delete', 'product_new', 'product_edit', 'product_delete',
@@ -427,9 +429,11 @@ def qa_brt_missing(row, headers, status):
     return qa_value not in {'yes', 'y'}
 
 def fmt_date(val):
-    if val and '00:00:00' in str(val):
+    if val is None:
+        return ''
+    if '00:00:00' in str(val):
         return str(val).replace(' 00:00:00', '')
-    return str(val) if val else ''
+    return str(val)
 
 def make_job_key(sheet_name, row, headers):
     def col(name):
@@ -498,6 +502,49 @@ def decrypt_excel(file_bytes, password):
     dec.seek(0)
     return dec
 
+# Supplier workbooks label the same column differently per sheet; map the
+# variants onto one canonical header so every sheet is read the same way.
+HEADER_ALIASES = {
+    'estimated completion / ready to ship date': 'Estimated Completion Date',
+    'estimated completion/ready to ship date':   'Estimated Completion Date',
+    'estimated ready to ship date':              'Estimated Completion Date',
+    'must ship time':                            'Must Ship Date',
+}
+
+# Reference sheets that are not order lines.
+IGNORED_SHEETS = {'TOOLING', 'LEADTIMES', 'LEAD TIMES'}
+
+def normalize_header(value):
+    text = '' if value is None else str(value)
+    # NFKC turns full-width punctuation such as "（kg）" into "(kg)".
+    text = unicodedata.normalize('NFKC', text)
+    text = re.sub(r'(\w)\(', r'\1 (', text)
+    text = ' '.join(text.split())
+    return HEADER_ALIASES.get(text.lower(), text)
+
+def _is_date_header(header):
+    h = header.lower()
+    return 'date' in h or h.endswith(' time')
+
+def _format_cell(value, is_date_col):
+    if value is None:
+        return ''
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d') if not (value.hour or value.minute or value.second)             else value.strftime('%Y-%m-%d %H:%M')
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)):
+        # Many date cells are stored as plain serial numbers with "General"
+        # formatting (e.g. 46106 = 2026-03-24).
+        if is_date_col and 20000 <= value <= 80000:
+            return (datetime(1899, 12, 30) + timedelta(days=int(value))).strftime('%Y-%m-%d')
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+    return fmt_date(value)
+
 def parse_excel(file_bytes, password):
     dec = decrypt_excel(file_bytes, password)
     try:
@@ -506,12 +553,25 @@ def parse_excel(file_bytes, password):
         raise InvalidExcelFile('The uploaded file is not a valid .xlsx workbook.') from exc
     result = {}
     for sheet_name in wb.sheetnames:
+        if sheet_name.strip().upper() in IGNORED_SHEETS:
+            continue
         ws = wb[sheet_name]
-        rows = []
-        for row in ws.iter_rows(values_only=True):
-            r = [fmt_date(c) for c in row]
-            if any(v.strip() for v in r):
-                rows.append(r)
+        raw_rows =[list(r) for r in ws.iter_rows(values_only=True)
+                    if any(c is not None and str(c).strip() for c in r)]
+        if not raw_rows:
+            result[sheet_name] = []
+            continue
+        width = max(len(r) for r in raw_rows)
+        headers = [normalize_header(h) for h in raw_rows[0]] + [''] * (width - len(raw_rows[0]))
+        # Drop spacer columns: no header and no data in any row.
+        keep = [i for i in range(width)
+                if headers[i] or any(i < len(r) and r[i] is not None and str(r[i]).strip()
+                                     for r in raw_rows[1:])]
+        date_cols = {i for i in keep if _is_date_header(headers[i])}
+        rows = [[headers[i] for i in keep]]
+        for r in raw_rows[1:]:
+            rows.append([_format_cell(r[i] if i < len(r) else None, i in date_cols)
+                         for i in keep])
         result[sheet_name] = rows
     wb.close()
     return result
@@ -620,10 +680,9 @@ def compute_changes(previous, current):
                 score, reason, field = item_sim,  'Item code may have a typo',             'item_code'
             elif n_item == s_item and THRESHOLD <= order_sim < 1.0:
                 score, reason, field = order_sim, 'Order number may have a typo',          'order_number'
-            elif order_sim >= THRESHOLD and item_sim >= THRESHOLD:
-                score, reason, field = (order_sim + item_sim) / 2, \
-                                        'Order number or item code may have a typo', 'both'
             else:
+                # Both PO and item differing is a different order line, not a
+                # typo (e.g. PO-4507/DFCT151000F vs PO-4257/DFCT151200F).
                 continue
 
             if score > best_score:
@@ -657,7 +716,9 @@ def compute_changes(previous, current):
     # One representative row per unique key (split rows are deduplicated).
     # The quantity cell is updated to reflect the aggregated total so the
     # display and outstanding_jobs records show the correct combined quantity.
-    fully_shipped_keys = genuine_shipped - typo_shipped_keys
+    # Typo matches are advisory only: a row that disappeared is still treated
+    # as fully shipped (the supplier removes rows once everything has shipped).
+    fully_shipped_keys = genuine_shipped
     shipped_rows = {}   # sheet → list of row lists
 
     for k in sorted(fully_shipped_keys):   # sorted for determinism
@@ -751,7 +812,7 @@ def persist_fully_shipped_jobs(previous, current, shipped_rows, week_label):
                      or get_col('daemco purchase order', row),
                      get_col('item code', row),
                      get_col('item description', row),
-                     get_col('supplier', row),
+                     get_col('supplier', row) or get_col('foundry', row),
                      get_col('quantity', row),
                      get_col('estimated completion date', row),
                      get_col('must ship date', row),
@@ -1306,6 +1367,138 @@ def dashboard():
                            chart_datasets=_chart_datasets)
 
 
+def _upload_block_reason(data):
+    """Return an error message if this parsed schedule must not be applied."""
+    previous_data = load_json(PREVIOUS_FILE, {})
+    if previous_data and data == previous_data:
+        return ('Upload blocked: this file matches the saved previous-week '
+                'schedule. Uploading it would reverse NEW/SHIPPED statuses and '
+                'corrupt the current comparison.')
+    with db_conn() as conn:
+        prior_upload = conn.execute(
+            'SELECT upload_date FROM schedule_uploads WHERE fingerprint=?',
+            (schedule_fingerprint(data),)
+        ).fetchone()
+    if prior_upload:
+        label = prior_upload['upload_date'] or 'an earlier upload'
+        return (f'Upload blocked: this schedule was already uploaded ({label}). '
+                'Only upload the latest weekly schedule.')
+    return None
+
+
+def _row_details(sheet, row, headers):
+    hlow = [str(h).lower() for h in headers]
+
+    def col(name):
+        return str(row[hlow.index(name)]) if name in hlow and hlow.index(name) < len(row) else ''
+
+    return {
+        'sheet': sheet,
+        'order_number': col('order number'),
+        'po': col('daemco purchase order') or col('purchase order'),
+        'item_code': col('item code'),
+        'description': col('item description'),
+        'quantity': col('quantity'),
+        'est_completion': col('estimated completion date'),
+    }
+
+
+def schedule_diff_summary(current, new):
+    """Describe what applying `new` on top of `current` would change."""
+    summary = {'sheets': [], 'new': [], 'shipped': [], 'partial': [], 'typo': [],
+               'date_changes': [], 'warnings': [], 'first_upload': not current}
+    if not current:
+        for sheet, rows in new.items():
+            summary['sheets'].append({'name': sheet, 'rows': max(0, len(rows) - 1),
+                                      'new': max(0, len(rows) - 1), 'shipped': 0,
+                                      'partial': 0, 'added': [], 'removed': []})
+        return summary
+
+    statuses, typo_flags, _ = compute_changes(current, new)
+    old_rows, new_rows = {}, {}
+    for source, target in ((current, old_rows), (new, new_rows)):
+        for sheet, rows in source.items():
+            if not rows:
+                continue
+            for row in rows[1:]:
+                key = make_job_key(sheet, row, rows[0])
+                target.setdefault(key, _row_details(sheet, row, rows[0]))
+
+    per_sheet = defaultdict(lambda: {'new': 0, 'shipped': 0, 'partial': 0})
+    for key, status in statuses.items():
+        sheet = key.split('|', 1)[0]
+        if status in ('new', 'typo'):
+            per_sheet[sheet]['new'] += 1
+            summary['new'].append(new_rows.get(key, {'sheet': sheet, 'item_code': key}))
+        elif status == 'partially_shipped':
+            per_sheet[sheet]['partial'] += 1
+            detail = dict(new_rows.get(key, {'sheet': sheet, 'item_code': key}))
+            detail['previous_quantity'] = old_rows.get(key, {}).get('quantity', '')
+            summary['partial'].append(detail)
+    summary['typo'] = typo_flags
+    # A row that disappeared entirely means the job fully shipped.
+    for key, detail in old_rows.items():
+        if key not in new_rows and key.split('|')[1]:
+            per_sheet[detail['sheet']]['shipped'] += 1
+            summary['shipped'].append(detail)
+
+    for key, detail in new_rows.items():
+        old = old_rows.get(key)
+        if old and old['est_completion'] != detail['est_completion']:
+            summary['date_changes'].append(dict(detail, previous_est=old['est_completion']))
+
+    for sheet in list(new.keys()) + [s for s in current if s not in new]:
+        new_sheet_rows = new.get(sheet) or []
+        old_sheet_rows = current.get(sheet) or []
+        new_headers = list(new_sheet_rows[0]) if new_sheet_rows else []
+        old_headers = list(old_sheet_rows[0]) if old_sheet_rows else []
+        info = {
+            'name': sheet,
+            'rows': max(0, len(new_sheet_rows) - 1),
+            'previous_rows': max(0, len(old_sheet_rows) - 1),
+            'added': [h for h in new_headers if h and h not in old_headers] if old_headers else [],
+            'removed': [h for h in old_headers if h and h not in new_headers] if new_headers else [],
+            **per_sheet[sheet],
+        }
+        summary['sheets'].append(info)
+        if sheet not in current:
+            summary['warnings'].append(f'新 sheet「{sheet}」/ New sheet "{sheet}"')
+        if sheet not in new and info['shipped']:
+            summary['warnings'].append(
+                f'sheet「{sheet}」在新文件中不存在，其中 {info["shipped"]} 行将全部视为已出货 / '
+                f'Sheet "{sheet}" is missing: all its rows would be treated as shipped')
+        lower = [str(h).lower() for h in new_headers]
+        if new_sheet_rows and len(new_sheet_rows) > 1 and 'item code' not in lower:
+            summary['warnings'].append(
+                f'sheet「{sheet}」缺少 Item Code 列 / Sheet "{sheet}" has no Item Code column')
+        if info['previous_rows'] >= 10 and info['rows'] >= 10 \
+                and info['shipped'] >= 0.8 * info['previous_rows'] \
+                and info['new'] >= 0.8 * info['rows']:
+            summary['warnings'].append(
+                f'sheet「{sheet}」几乎所有行都变成"新增+已出货"，可能是列名或单号格式变了 / '
+                f'Sheet "{sheet}": almost every row looks new AND shipped – '
+                'a key column was probably renamed')
+    return summary
+
+
+def has_pending_upload():
+    return os.path.exists(PENDING_UPLOAD_FILE)
+
+app.jinja_env.globals['has_pending_upload'] = has_pending_upload
+
+
+def _discard_pending_upload():
+    pending = load_json(PENDING_UPLOAD_FILE, {})
+    raw = pending.get('raw_file')
+    if raw:
+        try:
+            os.remove(os.path.join(HISTORY_DIR, raw))
+        except OSError:
+            pass
+    if os.path.exists(PENDING_UPLOAD_FILE):
+        os.remove(PENDING_UPLOAD_FILE)
+
+
 @app.route('/upload', methods=['POST'])
 def upload_excel():
     if 'file' not in request.files:
@@ -1313,158 +1506,252 @@ def upload_excel():
         return redirect(url_for('index'))
 
     f = request.files['file']
-    if os.path.splitext(secure_filename(f.filename or ''))[1].lower() != '.xlsx':
+    if _upload_extension(f.filename) != '.xlsx':
         flash('Only .xlsx schedule files are supported', 'error')
         return redirect(url_for('index'))
 
     try:
         file_bytes = f.read()
         data = parse_excel(file_bytes, EXCEL_PASSWORD)
-
-        previous_data = load_json(PREVIOUS_FILE, {})
-        if previous_data and data == previous_data:
-            flash(
-                'Upload blocked: this file matches the saved previous-week '
-                'schedule. Uploading it would reverse NEW/SHIPPED statuses and '
-                'corrupt the current comparison.', 'error')
-            return redirect(url_for('index'))
-        with db_conn() as conn:
-            prior_upload = conn.execute(
-                'SELECT upload_date FROM schedule_uploads WHERE fingerprint=?',
-                (schedule_fingerprint(data),)
-            ).fetchone()
-        if prior_upload:
-            label = prior_upload['upload_date'] or 'an earlier upload'
-            flash(
-                f'Upload blocked: this schedule was already uploaded ({label}). '
-                'Only upload the latest weekly schedule.', 'error')
+        blocked = _upload_block_reason(data)
+        if blocked:
+            flash(blocked, 'error')
             return redirect(url_for('index'))
 
-        # Rotate: current → previous
-        if os.path.exists(CURRENT_FILE):
-            import shutil
-            shutil.copy(CURRENT_FILE, PREVIOUS_FILE)
-
-        save_json(CURRENT_FILE, data)
-        remember_schedule_upload(data, datetime.now().strftime('%d %b %Y %H:%M'))
-
-        # ── Detect header changes vs previous week (poka-yoke) ───────────
-        prev_for_check = load_json(PREVIOUS_FILE, {})
-        header_warnings = []
-        for sheet, rows in data.items():
-            if not rows:
-                continue
-            curr_hdrs = list(rows[0])
-            prev_rows = prev_for_check.get(sheet)
-            if not prev_rows:
-                continue
-            prev_hdrs = list(prev_rows[0])
-            added   = [h for h in curr_hdrs if h not in prev_hdrs]
-            removed = [h for h in prev_hdrs if h not in curr_hdrs]
-            if added or removed:
-                parts = []
-                if added:   parts.append('新增列: ' + ', '.join(f'「{h}」' for h in added))
-                if removed: parts.append('移除列: ' + ', '.join(f'「{h}」' for h in removed))
-                header_warnings.append(f'[{sheet}] ' + '；'.join(parts))
-        if header_warnings:
-            flash('⚠ 列结构与上周不同（Shipped 行已自动对齐，请核实列名变更是否符合预期）：'
-                  + ' | '.join(header_warnings), 'warning')
-
-        config = load_config()
-        config['upload_date'] = datetime.now().strftime('%d %b %Y %H:%M')
-        save_json(CONFIG_FILE, config)
-
-        # ── Save weekly snapshot for trend chart ─────────────────────────
-        _snap_label = config['upload_date']
-        _snap_date  = datetime.now().strftime('%Y-%m-%d')
-        with db_conn() as conn:
-            for _sheet, _rows in data.items():
-                _count = max(0, len(_rows) - 1)  # subtract header row
-                if _count > 0:
-                    conn.execute(
-                        'INSERT OR REPLACE INTO weekly_snapshots '
-                        '(week_label, week_date, region, total_orders) VALUES (?,?,?,?)',
-                        (_snap_label, _snap_date, _sheet, _count))
-
-        # ── Auto-create inspection tasks + persist outstanding jobs ──────
-        previous = load_json(PREVIOUS_FILE, {})
-        current_data = load_json(CURRENT_FILE, {})
-        if previous and current_data:
-            statuses, _, newly_shipped = compute_changes(previous, current_data)
-
-            # Keep all fully shipped jobs in history. Missing QA BRT reports
-            # remain outstanding until an inspection is submitted.
-            _, pending_shipped = persist_fully_shipped_jobs(
-                previous, current_data, newly_shipped, config.get('upload_date', ''))
-            if pending_shipped:
-                flash(
-                    f'{pending_shipped} fully shipped job(s) require a QA BRT '
-                    'inspection report.', 'warning')
-            new_tasks_created = []
-            with db_conn() as conn:
-                existing_keys = {r[0] for r in conn.execute(
-                    'SELECT job_key FROM inspection_tasks').fetchall()}
-                for sheet, rows in current_data.items():
-                    if not rows or len(rows) < 2:
-                        continue
-                    headers = rows[0]
-                    def _col(h, row):
-                        try:
-                            return str(row[[x.lower() for x in h].index(h_lower)]) \
-                                   if (h_lower := h.lower()) in [x.lower() for x in headers] else ''
-                        except Exception:
-                            return ''
-                    hlow = [x.lower() for x in headers]
-                    def gcol(name, row):
-                        try:
-                            return str(row[hlow.index(name.lower())])
-                        except (ValueError, IndexError):
-                            return ''
-                    for row in rows[1:]:
-                        jk = make_job_key(sheet, row, headers)
-                        if statuses.get(jk) == 'new' and jk not in existing_keys:
-                            task = dict(
-                                job_key=jk, order_number=gcol('order number', row),
-                                region=sheet, item_code=gcol('item code', row),
-                                description=gcol('item description', row),
-                                supplier=gcol('supplier', row),
-                                quantity=gcol('quantity', row),
-                                est_completion=gcol('estimated completion date', row),
-                                must_ship=gcol('must ship date', row),
-                                week_label=config.get('upload_date', ''))
-                            conn.execute(
-                                'INSERT OR IGNORE INTO inspection_tasks '
-                                '(job_key,order_number,region,item_code,description,'
-                                'supplier,quantity,est_completion,must_ship,week_label)'
-                                ' VALUES (?,?,?,?,?,?,?,?,?,?)',
-                                (task['job_key'], task['order_number'], task['region'],
-                                 task['item_code'], task['description'], task['supplier'],
-                                 task['quantity'], task['est_completion'],
-                                 task['must_ship'], task['week_label']))
-                            new_tasks_created.append(task)
-                            existing_keys.add(jk)
-
-            if new_tasks_created:
-                ok, msg = _send_task_email(new_tasks_created)
-                if ok:
-                    flash(f'排期已更新，{len(new_tasks_created)} 个新任务已创建，{msg}', 'success')
-                else:
-                    flash(f'排期已更新，{len(new_tasks_created)} 个新任务已创建。邮件通知：{msg}', 'warning')
-            else:
-                flash('Schedule updated successfully!', 'success')
-        else:
-            flash('Schedule updated successfully!', 'success')
+        _discard_pending_upload()
+        os.makedirs(HISTORY_DIR, exist_ok=True)
+        raw_name = f"pending-{datetime.now().strftime('%Y%m%d-%H%M%S')}.xlsx"
+        with open(os.path.join(HISTORY_DIR, raw_name), 'wb') as out:
+            out.write(file_bytes)
+        save_json(PENDING_UPLOAD_FILE, {
+            'data': data,
+            'filename': _display_filename(f.filename),
+            'raw_file': raw_name,
+            'uploaded_by': g.get('username', ''),
+            'uploaded_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        })
     except ExcelUploadError as exc:
         logger.warning('Schedule upload rejected: %s', exc)
         flash(str(exc), 'error')
+        return redirect(url_for('index'))
     except Exception:
         tb = traceback.format_exc()
         logger.error('Upload failed:\n%s', tb)
         _last_error['tb'] = tb
         _last_error['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         flash('Unable to read the uploaded schedule. Check the file format and encryption password.', 'error')
+        return redirect(url_for('index'))
 
+    return redirect(url_for('upload_preview'))
+
+
+@app.route('/upload/preview')
+def upload_preview():
+    pending = load_json(PENDING_UPLOAD_FILE, {})
+    if not pending.get('data'):
+        flash('没有待确认的排期上传 / No schedule upload is waiting for confirmation', 'warning')
+        return redirect(url_for('index'))
+    summary = schedule_diff_summary(load_json(CURRENT_FILE, {}), pending['data'])
+    return render_template('upload_preview.html', pending=pending, summary=summary,
+                           config=load_config())
+
+
+@app.route('/upload/cancel', methods=['POST'])
+def upload_cancel():
+    _discard_pending_upload()
+    flash('已取消本次上传，网站数据未改变 / Upload cancelled – nothing was changed', 'info')
     return redirect(url_for('index'))
+
+
+@app.route('/upload/confirm', methods=['POST'])
+def upload_confirm():
+    pending = load_json(PENDING_UPLOAD_FILE, {})
+    data = pending.get('data')
+    if not data:
+        flash('没有待确认的排期上传 / No schedule upload is waiting for confirmation', 'warning')
+        return redirect(url_for('index'))
+    blocked = _upload_block_reason(data)
+    if blocked:
+        _discard_pending_upload()
+        flash(blocked, 'error')
+        return redirect(url_for('index'))
+
+    baseline = request.form.get('baseline') == '1'
+    try:
+        _archive_upload(pending)
+        _apply_schedule(data, baseline=baseline)
+    except Exception:
+        tb = traceback.format_exc()
+        logger.error('Applying schedule failed:\n%s', tb)
+        _last_error['tb'] = tb
+        _last_error['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        flash('应用排期时出错，请联系管理员 / Applying the schedule failed', 'error')
+        return redirect(url_for('index'))
+    if os.path.exists(PENDING_UPLOAD_FILE):
+        os.remove(PENDING_UPLOAD_FILE)
+    return redirect(url_for('index'))
+
+
+def _archive_upload(pending):
+    """Keep every applied upload: the original workbook plus the schedule it
+    replaced, so any week can be inspected or restored later."""
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    folder = os.path.join(HISTORY_DIR, stamp)
+    os.makedirs(folder, exist_ok=True)
+    raw = pending.get('raw_file')
+    if raw and os.path.exists(os.path.join(HISTORY_DIR, raw)):
+        os.replace(os.path.join(HISTORY_DIR, raw), os.path.join(folder, 'source.xlsx'))
+    save_json(os.path.join(folder, 'schedule.json'), pending['data'])
+    if os.path.exists(CURRENT_FILE):
+        shutil.copy(CURRENT_FILE, os.path.join(folder, 'replaced_schedule.json'))
+    save_json(os.path.join(folder, 'meta.json'), {
+        'filename': pending.get('filename', ''),
+        'uploaded_by': pending.get('uploaded_by', ''),
+        'uploaded_at': pending.get('uploaded_at', ''),
+        'applied_by': g.get('username', ''),
+        'applied_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+    })
+
+
+def _apply_schedule(data, baseline=False):
+    """Make `data` the current week. With baseline=True (first sync after a
+    long gap) rows that disappeared are not turned into QA BRT alerts and no
+    task e-mail is sent."""
+    if os.path.exists(CURRENT_FILE):
+        shutil.copy(CURRENT_FILE, PREVIOUS_FILE)
+
+    save_json(CURRENT_FILE, data)
+    remember_schedule_upload(data, datetime.now().strftime('%d %b %Y %H:%M'))
+
+    # ── Detect header changes vs previous week (poka-yoke) ───────────
+    prev_for_check = load_json(PREVIOUS_FILE, {})
+    header_warnings = []
+    for sheet, rows in data.items():
+        if not rows:
+            continue
+        curr_hdrs = list(rows[0])
+        prev_rows = prev_for_check.get(sheet)
+        if not prev_rows:
+            continue
+        prev_hdrs = list(prev_rows[0])
+        added   = [h for h in curr_hdrs if h not in prev_hdrs]
+        removed = [h for h in prev_hdrs if h not in curr_hdrs]
+        if added or removed:
+            parts = []
+            if added:   parts.append('新增列: ' + ', '.join(f'「{h}」' for h in added))
+            if removed: parts.append('移除列: ' + ', '.join(f'「{h}」' for h in removed))
+            header_warnings.append(f'[{sheet}] ' + '；'.join(parts))
+    if header_warnings:
+        flash('⚠ 列结构与上周不同（Shipped 行已自动对齐，请核实列名变更是否符合预期）：'
+              + ' | '.join(header_warnings), 'warning')
+
+    config = load_config()
+    config['upload_date'] = datetime.now().strftime('%d %b %Y %H:%M')
+    save_json(CONFIG_FILE, config)
+
+    # ── Save weekly snapshot for trend chart ─────────────────────────
+    _snap_label = config['upload_date']
+    _snap_date  = datetime.now().strftime('%Y-%m-%d')
+    with db_conn() as conn:
+        for _sheet, _rows in data.items():
+            _count = max(0, len(_rows) - 1)  # subtract header row
+            if _count > 0:
+                conn.execute(
+                    'INSERT OR REPLACE INTO weekly_snapshots '
+                    '(week_label, week_date, region, total_orders) VALUES (?,?,?,?)',
+                    (_snap_label, _snap_date, _sheet, _count))
+
+    # ── Auto-create inspection tasks + persist outstanding jobs ──────
+    previous = load_json(PREVIOUS_FILE, {})
+    current_data = load_json(CURRENT_FILE, {})
+    if current_data:
+        if previous:
+            statuses, _, newly_shipped = compute_changes(previous, current_data)
+        else:
+            # First upload: every row is new.
+            statuses, newly_shipped = {}, {}
+            for sheet, rows in current_data.items():
+                for row in (rows or [])[1:]:
+                    statuses[make_job_key(sheet, row, rows[0])] = 'new'
+
+        # Keep all fully shipped jobs in history. Missing QA BRT reports
+        # remain outstanding until an inspection is submitted.
+        if not baseline:
+            _, pending_shipped = persist_fully_shipped_jobs(
+                previous, current_data, newly_shipped, config.get('upload_date', ''))
+            if pending_shipped:
+                flash(
+                    f'{pending_shipped} 个已全部出货的订单缺少 QA BRT 检验报告 / '
+                    f'{pending_shipped} fully shipped job(s) require a QA BRT '
+                    'inspection report.', 'warning')
+        new_tasks_created = []
+        tasks_updated = 0
+        seen_this_upload = set()
+        with db_conn() as conn:
+            existing_keys = {r[0] for r in conn.execute(
+                'SELECT job_key FROM inspection_tasks').fetchall()}
+            for sheet, rows in current_data.items():
+                if not rows or len(rows) < 2:
+                    continue
+                headers = rows[0]
+                hlow = [x.lower() for x in headers]
+                def gcol(name, row):
+                    try:
+                        return str(row[hlow.index(name.lower())])
+                    except (ValueError, IndexError):
+                        return ''
+                for row in rows[1:]:
+                    jk = make_job_key(sheet, row, headers)
+                    if jk in seen_this_upload:
+                        continue  # split lot: same PO + item on several rows
+                    seen_this_upload.add(jk)
+                    if jk in existing_keys:
+                        # Suppliers move completion / ship dates week to week;
+                        # keep open tasks in step with the latest schedule.
+                        est, ship, qty = (gcol('estimated completion date', row),
+                                          gcol('must ship date', row), gcol('quantity', row))
+                        cur = conn.execute(
+                            "UPDATE inspection_tasks SET est_completion=?, must_ship=?, "
+                            "quantity=? WHERE job_key=? AND IFNULL(status, '') != 'Completed' AND "
+                            "(IFNULL(est_completion, '') != ? OR IFNULL(must_ship, '') != ? "
+                            " OR IFNULL(quantity, '') != ?)",
+                            (est, ship, qty, jk, est, ship, qty))
+                        tasks_updated += cur.rowcount
+                        continue
+                    if statuses.get(jk) in ('new', 'typo'):
+                        task = dict(
+                            job_key=jk, order_number=gcol('order number', row),
+                            region=sheet, item_code=gcol('item code', row),
+                            description=gcol('item description', row),
+                            supplier=gcol('supplier', row) or gcol('foundry', row),
+                            quantity=gcol('quantity', row),
+                            est_completion=gcol('estimated completion date', row),
+                            must_ship=gcol('must ship date', row),
+                            week_label=config.get('upload_date', ''))
+                        conn.execute(
+                            'INSERT OR IGNORE INTO inspection_tasks '
+                            '(job_key,order_number,region,item_code,description,'
+                            'supplier,quantity,est_completion,must_ship,week_label)'
+                            ' VALUES (?,?,?,?,?,?,?,?,?,?)',
+                            (task['job_key'], task['order_number'], task['region'],
+                             task['item_code'], task['description'], task['supplier'],
+                             task['quantity'], task['est_completion'],
+                             task['must_ship'], task['week_label']))
+                        new_tasks_created.append(task)
+                        existing_keys.add(jk)
+
+        updated_note = f'，{tasks_updated} 个任务日期/数量已同步' if tasks_updated else ''
+        if new_tasks_created and not baseline:
+            ok, msg = _send_task_email(new_tasks_created)
+            if ok:
+                flash(f'排期已更新，{len(new_tasks_created)} 个新任务已创建{updated_note}，{msg}', 'success')
+            else:
+                flash(f'排期已更新，{len(new_tasks_created)} 个新任务已创建{updated_note}。邮件通知：{msg}', 'warning')
+        else:
+            flash(f'排期已更新，{len(new_tasks_created)} 个新任务已创建{updated_note} / '
+                  'Schedule updated successfully!', 'success')
+    else:
+        flash('Schedule updated successfully!', 'success')
 
 
 @app.route('/debug')

@@ -86,6 +86,13 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 
 {% block content %}
 <div class="page" style="padding-bottom:0; padding-top: 16px;">
+  {% if g.is_admin and has_pending_upload() %}
+  <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
+    &#9888; <span class="lt" data-en="An uploaded schedule is waiting for confirmation." data-zh="有一份已上传的排期等待确认。">有一份已上传的排期等待确认。</span>
+    <a href="{{ url_for('upload_preview') }}" class="btn btn-sm btn-primary" style="margin-left:8px;">
+      <span class="lt" data-en="Review" data-zh="去确认">去确认</span></a>
+  </div>
+  {% endif %}
   <div class="toolbar">
     {% if g.is_admin %}
     <form method="POST" action="{{ url_for('upload_excel') }}" enctype="multipart/form-data"

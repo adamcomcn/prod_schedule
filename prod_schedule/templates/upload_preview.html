@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}确认排期上传 / Confirm Schedule Upload{% endblock %}
+
+{% block extra_style %}
+<style>
+.pv-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:16px; }
+.pv-stat { background:#fff; border-radius:10px; padding:14px 16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+.pv-stat .num { font-size:1.6rem; font-weight:700; }
+.pv-stat .lbl { font-size:.8rem; color:#6b7280; }
+.pv-new .num { color:#2563eb; } .pv-shipped .num { color:#059669; }
+.pv-partial .num { color:#d97706; } .pv-date .num { color:#7c3aed; }
+.pv-warn { background:#fef3c7; border:1px solid #f59e0b; color:#92400e; border-radius:8px;
+           padding:10px 14px; margin-bottom:8px; font-size:.9rem; }
+.pv-table-wrap { overflow-x:auto; }
+.pv-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+.pv-table th, .pv-table td { padding:6px 8px; border-bottom:1px solid #eef0f3; text-align:left; }
+.pv-table th { background:#f8fafc; font-weight:600; white-space:nowrap; }
+details.pv { background:#fff; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.08);
+             margin-bottom:12px; padding:12px 16px; }
+details.pv summary { cursor:pointer; font-weight:600; }
+.pv-actions { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:18px 0 40px; }
+.pv-baseline { background:#f1f5f9; border-radius:8px; padding:10px 14px; font-size:.88rem; }
+.muted { color:#6b7280; font-size:.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page" style="padding-top:16px;">
+  <h2 style="margin-bottom:4px;">
+    <span class="lt" data-en="Confirm schedule upload" data-zh="确认排期上传">确认排期上传</span>
+  </h2>
+  <p class="muted" style="margin-bottom:16px;">
+    {{ pending.filename }} · {{ pending.uploaded_by }} · {{ pending.uploaded_at }}<br>
+    <span class="lt" data-en="Nothing has changed yet. Review the differences, then apply or cancel."
+          data-zh="网站数据尚未改变。请核对以下差异，再选择应用或取消。">网站数据尚未改变。请核对以下差异，再选择应用或取消。</span>
+    {% if config.upload_date %}
+      <span class="lt" data-en="Compared with the schedule uploaded on" data-zh="对比对象：上次上传的排期">对比对象：上次上传的排期</span>
+      {{ config.upload_date }}
+    {% endif %}
+  </p>
+
+  {% for w in summary.warnings %}
+    <div class="pv-warn">&#9888; {{ w }}</div>
+  {% endfor %}
+
+  {% if summary.first_upload %}
+    <div class="pv-warn">
+      <span class="lt" data-en="First upload: every row will be treated as new."
+            data-zh="首次上传：所有行都将视为新增。">首次上传：所有行都将视为新增。</span>
+    </div>
+  {% endif %}
+
+  <div class="pv-stats">
+    <div class="pv-stat pv-new"><div class="num">{{ summary.new|length if not summary.first_upload else summary.sheets|sum(attribute='rows') }}</div>
+      <div class="lbl lt" data-en="New rows" data-zh="新增">新增</div></div>
+    <div class="pv-stat pv-shipped"><div class="num">{{ summary.shipped|length }}</div>
+      <div class="lbl lt" data-en="Fully shipped (row gone)" data-zh="全部出货（行已消失）">全部出货（行已消失）</div></div>
+    <div class="pv-stat pv-partial"><div class="num">{{ summary.partial|length }}</div>
+      <div class="lbl lt" data-en="Partially shipped (qty down)" data-zh="部分出货（数量减少）">部分出货（数量减少）</div></div>
+    <div class="pv-stat pv-date"><div class="num">{{ summary.date_changes|length }}</div>
+      <div class="lbl lt" data-en="Completion date changed" data-zh="预计完成日变更">预计完成日变更</div></div>
+    {% if summary.typo %}
+    <div class="pv-stat"><div class="num">{{ summary.typo|length }}</div>
+      <div class="lbl lt" data-en="Possible typos" data-zh="疑似笔误">疑似笔误</div></div>
+    {% endif %}
+  </div>
+
+  <details class="pv" open>
+    <summary><span class="lt" data-en="By sheet" data-zh="按 Sheet 汇总">按 Sheet 汇总</span></summary>
+    <div class="pv-table-wrap">
+    <table class="pv-table" style="margin-top:10px;">
+      <tr><th>Sheet</th>
+        <th class="lt" data-en="Rows (prev → new)" data-zh="行数（上次 → 本次）">行数（上次 → 本次）</th>
+        <th class="lt" data-en="New" data-zh="新增">新增</th>
+        <th class="lt" data-en="Shipped" data-zh="全部出货">全部出货</th>
+        <th class="lt" data-en="Partial" data-zh="部分出货">部分出货</th>
+        <th class="lt" data-en="Column changes" data-zh="列变化">列变化</th></tr>
+      {% for s in summary.sheets %}
+      <tr>
+        <td><strong>{{ s.name }}</strong></td>
+        <td>{{ s.previous_rows if s.previous_rows is defined else '—' }} → {{ s.rows }}</td>
+        <td>{{ s.new }}</td><td>{{ s.shipped }}</td><td>{{ s.partial }}</td>
+        <td>
+          {% if s.added %}<div style="color:#2563eb">+ {{ s.added|join(', ') }}</div>{% endif %}
+          {% if s.removed %}<div style="color:#dc2626">− {{ s.removed|join(', ') }}</div>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+  </details>
+
+  {% macro rows_table(items, extra_label='', extra_key='', extra_label2='', extra_key2='') %}
+    <div class="pv-table-wrap">
+    <table class="pv-table" style="margin-top:10px;">
+      <tr><th>Sheet</th><th>Order</th><th>PO</th><th>Item Code</th><th>Description</th><th>Qty</th>
+        {% if extra_label %}<th>{{ extra_label }}</th>{% endif %}
+        {% if extra_label2 %}<th>{{ extra_label2 }}</th>{% endif %}</tr>
+      {% for r in items[:300] %}
+      <tr><td>{{ r.sheet }}</td><td>{{ r.order_number }}</td><td>{{ r.po }}</td>
+        <td>{{ r.item_code }}</td><td>{{ r.description }}</td><td>{{ r.quantity }}</td>
+        {% if extra_key %}<td>{{ r[extra_key] }}</td>{% endif %}
+        {% if extra_key2 %}<td>{{ r[extra_key2] }}</td>{% endif %}</tr>
+      {% endfor %}
+    </table>
+    {% if items|length > 300 %}<p class="muted">… {{ items|length - 300 }} more</p>{% endif %}
+    </div>
+  {% endmacro %}
+
+  {% if summary.shipped %}
+  <details class="pv">
+    <summary><span class="lt" data-en="Fully shipped" data-zh="全部出货">全部出货</span> ({{ summary.shipped|length }})</summary>
+    {{ rows_table(summary.shipped) }}
+  </details>
+  {% endif %}
+  {% if summary.partial %}
+  <details class="pv">
+    <summary><span class="lt" data-en="Partially shipped" data-zh="部分出货">部分出货</span> ({{ summary.partial|length }})</summary>
+    {{ rows_table(summary.partial, 'Prev Qty', 'previous_quantity') }}
+  </details>
+  {% endif %}
+  {% if summary.new %}
+  <details class="pv">
+    <summary><span class="lt" data-en="New rows" data-zh="新增">新增</span> ({{ summary.new|length }})</summary>
+    {{ rows_table(summary.new, 'Est. Completion', 'est_completion') }}
+  </details>
+  {% endif %}
+  {% if summary.date_changes %}
+  <details class="pv">
+    <summary><span class="lt" data-en="Completion date changed" data-zh="预计完成日变更">预计完成日变更</span> ({{ summary.date_changes|length }})</summary>
+    {{ rows_table(summary.date_changes, 'Previous', 'previous_est', 'Now', 'est_completion') }}
+  </details>
+  {% endif %}
+
+  <div class="pv-actions">
+    <form method="POST" action="{{ url_for('upload_confirm') }}" style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+      <label class="pv-baseline">
+        <input type="checkbox" name="baseline" value="1">
+        <span class="lt"
+              data-en="Baseline re-sync (site data is out of date): do not create QA BRT alerts for rows that disappeared, and do not e-mail new tasks."
+              data-zh="基准重新同步（网站数据已过时）：消失的行不生成 QA BRT 提醒，也不发送新任务邮件。">基准重新同步（网站数据已过时）：消失的行不生成 QA BRT 提醒，也不发送新任务邮件。</span>
+      </label>
+      <button type="submit" class="btn btn-success">
+        &#10003; <span class="lt" data-en="Apply this schedule" data-zh="确认应用">确认应用</span></button>
+    </form>
+    <form method="POST" action="{{ url_for('upload_cancel') }}">
+      <button type="submit" class="btn btn-outline">
+        <span class="lt" data-en="Cancel" data-zh="取消">取消</span></button>
+    </form>
+  </div>
+</div>
+{% endblock %}
