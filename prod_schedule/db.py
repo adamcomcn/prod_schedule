@@ -773,6 +773,23 @@ def init_db():
         except Exception:
             pass
 
+        for col, defn in [('email', "TEXT DEFAULT ''"),
+                          ('display_name', "TEXT DEFAULT ''")]:
+            try:
+                conn.execute(f'ALTER TABLE users ADD COLUMN {col} {defn}')
+            except Exception:
+                pass
+
+        # Task assignment (lead inspector delegates jobs to inspectors)
+        for col, defn in [('assigned_to', 'INTEGER DEFAULT NULL'),
+                          ('assigned_by', "TEXT DEFAULT ''"),
+                          ('assigned_at', "TEXT DEFAULT ''"),
+                          ('assign_note', "TEXT DEFAULT ''")]:
+            try:
+                conn.execute(f'ALTER TABLE inspection_tasks ADD COLUMN {col} {defn}')
+            except Exception:
+                pass
+
         # Defect codes
         existing_dc = {r[0] for r in conn.execute('SELECT code FROM defect_codes').fetchall()}
         for row in _DEFECT_SEEDS:

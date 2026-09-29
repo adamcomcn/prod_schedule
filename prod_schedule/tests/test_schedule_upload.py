@@ -171,6 +171,10 @@ class UploadFlowTests(unittest.TestCase):
         self.client.post('/upload/confirm', data={'_csrf_token': 'tok', 'baseline': '1'})
         with db_conn() as conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM outstanding_jobs').fetchone()[0], 0)
+        # The startup backfill (runs on every deploy/restart) must respect it too.
+        app._backfill_fully_shipped_history()
+        with db_conn() as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outstanding_jobs').fetchone()[0], 0)
 
     def test_cancel_discards_pending_upload(self):
         before = app.load_json(app.CURRENT_FILE)

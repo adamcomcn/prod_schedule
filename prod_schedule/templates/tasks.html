@@ -83,6 +83,21 @@
 .chip-orange { background:#ffedd5; color:#c2410c; }
 .chip-green  { background:#d1fae5; color:#065f46; }
 .chip-grey   { background:#f3f4f6; color:#6b7280; }
+.scope-tabs { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
+.scope-tabs a { padding:8px 16px; border-radius:8px; background:#fff; border:1px solid #d0d5dd;
+                color:#374151; font-weight:600; font-size:.88rem; text-decoration:none; }
+.scope-tabs a.active { background:#1a3a5c; color:#fff; border-color:#1a3a5c; }
+.scope-count { display:inline-block; min-width:20px; padding:0 6px; margin-left:4px; border-radius:10px;
+               background:rgba(0,0,0,.08); font-size:.75rem; text-align:center; }
+.scope-tabs a.active .scope-count { background:rgba(255,255,255,.25); }
+.assign-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; background:#eff6ff;
+              border:1px solid #bfdbfe; border-radius:10px; padding:10px 14px; margin-bottom:12px; }
+.assign-count { font-size:.8rem; color:#1e40af; }
+.assignee { display:inline-block; background:#e0e7ff; color:#3730a3; border-radius:12px;
+            padding:2px 10px; font-size:.78rem; font-weight:600; }
+.assignee-me { background:#dcfce7; color:#166534; }
+.assign-note { font-size:.72rem; color:#6b7280; max-width:180px; white-space:normal; margin-top:2px; }
+tr.mine td { background:#f0fdf4; }
 {% endblock %}
 
 {% block content %}
@@ -317,28 +332,59 @@
 
   {% endif %}{# end stats.total > 0 #}
 
+  {# ══════════════ SCOPE TABS ══════════════ #}
+  <div class="scope-tabs">
+    {% for key, zh, en in [('mine', '我的任务', 'My tasks'), ('unassigned', '未分配', 'Unassigned'), ('all', '全部任务', 'All tasks')] %}
+    <a href="{{ url_for('tasks', scope=key) }}" class="{{ 'active' if scope == key }}">
+      {{ tr(zh, en) }} <span class="scope-count">{{ scope_counts[key] }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  {% if g.can_assign %}
+  {# Bulk assignment (lead inspector / admin). Row checkboxes use form="assignForm". #}
+  <form method="POST" action="{{ url_for('task_assign') }}" id="assignForm" class="assign-bar">
+    <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+    <label style="margin:0; display:flex; align-items:center; gap:6px; font-weight:600;">
+      <input type="checkbox" id="checkAll" onclick="document.querySelectorAll('.task-check').forEach(c => c.checked = this.checked); updateAssignCount();">
+      {{ tr('全选', 'Select all') }}
+    </label>
+    <span id="assignCount" class="assign-count">{{ tr('已选 0 项', '0 selected') }}</span>
+    <select name="assignee_id" required style="width:auto; min-width:150px;">
+      <option value="" disabled selected>{{ tr('分配给…', 'Assign to…') }}</option>
+      {% for u in assignees %}
+      <option value="{{ u.id }}">{{ u.display_name or u.username }}{% if u.role == 'lead' %} ({{ tr('主管', 'lead') }}){% endif %}{% if u.id == g.user_id %} — {{ tr('我', 'me') }}{% endif %}</option>
+      {% endfor %}
+      <option value="">— {{ tr('取消分配', 'Unassign') }} —</option>
+    </select>
+    <input type="text" name="note" maxlength="500" placeholder="{{ tr('备注（选填，会写入邮件）', 'Note (optional, included in the e-mail)') }}"
+           style="flex:1; min-width:180px;">
+    <button type="submit" class="btn btn-primary btn-sm">&#9993; {{ tr('分配并发邮件', 'Assign & e-mail') }}</button>
+  </form>
+  {% endif %}
+
   {# ══════════════ FILTER BAR ══════════════ #}
   <div class="filter-bar">
     <span style="font-size:.8rem; color:#6b7280;">
       {{ tr('筛选：', 'Filter:') }}
     </span>
-    <a href="{{ url_for('tasks') }}"                       class="{{ 'active' if not status_filter }}">
+    <a href="{{ url_for('tasks', scope=scope) }}" class="{{ 'active' if not status_filter }}">
       {{ tr('全部', 'All') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.total if stats else 0 }})</span>
     </a>
-    <a href="{{ url_for('tasks', status='Pending') }}"     class="{{ 'active' if status_filter=='Pending' }}">
+    <a href="{{ url_for('tasks', status='Pending', scope=scope) }}"     class="{{ 'active' if status_filter=='Pending' }}">
       {{ tr('待处理', 'Pending') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('Pending',0) if stats else 0 }})</span>
     </a>
-    <a href="{{ url_for('tasks', status='In Progress') }}" class="{{ 'active' if status_filter=='In Progress' }}">
+    <a href="{{ url_for('tasks', status='In Progress', scope=scope) }}" class="{{ 'active' if status_filter=='In Progress' }}">
       {{ tr('进行中', 'In Progress') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('In Progress',0) if stats else 0 }})</span>
     </a>
-    <a href="{{ url_for('tasks', status='Completed') }}"   class="{{ 'active' if status_filter=='Completed' }}">
+    <a href="{{ url_for('tasks', status='Completed', scope=scope) }}"   class="{{ 'active' if status_filter=='Completed' }}">
       {{ tr('已完成', 'Completed') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('Completed',0) if stats else 0 }})</span>
     </a>
-    <a href="{{ url_for('tasks', status='On Hold') }}"     class="{{ 'active' if status_filter=='On Hold' }}">
+    <a href="{{ url_for('tasks', status='On Hold', scope=scope) }}"     class="{{ 'active' if status_filter=='On Hold' }}">
       {{ tr('暂停', 'On Hold') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('On Hold',0) if stats else 0 }})</span>
     </a>
@@ -351,6 +397,7 @@
       <table class="task-table">
         <thead>
           <tr>
+            {% if g.can_assign %}<th style="width:28px;"></th>{% endif %}
             <th style="width:12px;"></th>
             <th>{{ tr('区域', 'Region') }}</th>
             <th>{{ tr('订单号', 'Order No.') }}</th>
@@ -360,6 +407,7 @@
             <th>{{ tr('预计完工', 'Est. Completion') }}</th>
             <th>{{ tr('距今天数', 'Days Until Due') }}</th>
             <th>{{ tr('检验结果', 'Inspection Result') }}</th>
+            <th>{{ tr('负责人', 'Assigned to') }}</th>
             <th>{{ tr('任务状态', 'Task Status') }}</th>
           </tr>
         </thead>
@@ -373,10 +421,10 @@
           {% if t.status == 'Completed' %}
             {% set urg_cls = 'done' %}{% set row_cls = '' %}{% set days_label = '—' %}{% set days_cls = 'days-none' %}
           {% elif days_left is none %}
-            {% set urg_cls = 'ok' %}{% set row_cls = '' %}{% set days_label = est or '无截止日' %}{% set days_cls = 'days-none' %}
+            {% set urg_cls = 'ok' %}{% set row_cls = '' %}{% set days_label = est or tr('无截止日', 'No due date') %}{% set days_cls = 'days-none' %}
           {% elif days_left < 0 %}
             {% set urg_cls = 'overdue' %}{% set row_cls = 'overdue' %}
-            {% set days_label = '已逾期' %}{% set days_cls = 'days-overdue' %}
+            {% set days_label = tr('已逾期', 'Overdue') %}{% set days_cls = 'days-overdue' %}
           {% elif days_left <= 7 %}
             {% set urg_cls = 'urgent' %}{% set row_cls = 'urgent' %}
             {% set days_label = est %}{% set days_cls = 'days-urgent' %}
@@ -388,7 +436,10 @@
             {% set days_label = est %}{% set days_cls = 'days-ok' %}
           {% endif %}
 
-          <tr class="{{ row_cls }}">
+          <tr class="{{ row_cls }}{% if t.assigned_to == g.user_id %} mine{% endif %}">
+            {% if g.can_assign %}
+            <td><input type="checkbox" class="task-check" name="task_ids" value="{{ t.id }}" form="assignForm" onchange="updateAssignCount()"></td>
+            {% endif %}
             <td><span class="urgency-dot urg-{{ urg_cls }}"></span></td>
             <td><strong>{{ t.region }}</strong></td>
             <td>
@@ -412,16 +463,28 @@
               {% elif last_result == 'Fail' %}
                 <span class="badge badge-not_shipped">&#10007; {{ tr('不合格', 'Fail') }}</span>
               {% elif last_result %}
-                <span class="badge badge-partially_shipped">~ {{ last_result }}</span>
+                <span class="badge badge-partially_shipped">~ {{ last_result|status_label }}</span>
               {% elif insp_list %}
                 <span style="font-size:.75rem; color:#6b7280;">{{ tr(insp_list|length ~ ' 份报告', insp_list|length ~ ' report(s)') }}</span>
               {% else %}
                 <span style="font-size:.75rem; color:#9ca3af;">—</span>
               {% endif %}
             </td>
+            <td style="white-space:nowrap;">
+              {% if t.assigned_to %}
+                <span class="assignee{% if t.assigned_to == g.user_id %} assignee-me{% endif %}"
+                      title="{{ tr('分配人', 'Assigned by') }}: {{ t.assigned_by }} · {{ t.assigned_at }}{% if t.assign_note %} · {{ t.assign_note }}{% endif %}">
+                  {{ t.assignee_name }}</span>
+                {% if t.assign_note %}<div class="assign-note">{{ t.assign_note }}</div>{% endif %}
+              {% else %}
+                <span style="color:#9ca3af; font-size:.78rem;">{{ tr('未分配', 'Unassigned') }}</span>
+              {% endif %}
+            </td>
             <td>
+              {% if g.can_assign or t.assigned_to == g.user_id %}
               <form method="POST" action="{{ url_for('task_status_update', tid=t.id) }}"
                     style="display:inline;">
+                <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
                 <select name="status" class="status-sel"
                         onchange="this.form.submit()"
                         style="border-color: {% if t.status=='Completed' %}#10b981
@@ -432,6 +495,9 @@
                   {% endfor %}
                 </select>
               </form>
+              {% else %}
+                <span style="font-size:.8rem;">{{ t.status|status_label }}</span>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -442,6 +508,10 @@
     <div style="text-align:center; padding:50px; color:#9ca3af; font-size:.9rem;">
       {% if status_filter %}
         {{ tr('该状态下暂无任务', 'No tasks with this status') }}
+      {% elif scope == 'mine' %}
+        {{ tr('暂无分配给你的任务', 'No tasks are assigned to you yet') }}
+      {% elif scope == 'unassigned' %}
+        {{ tr('所有任务都已分配', 'Every task has been assigned') }}
       {% else %}
         {{ tr('暂无任务记录', 'No tasks yet') }}<br>
         <span style="font-size:.8rem; margin-top:6px; display:block;">
@@ -462,4 +532,12 @@
 
 </div>
 </div>
+
+<script>
+function updateAssignCount() {
+  var n = document.querySelectorAll('.task-check:checked').length;
+  var el = document.getElementById('assignCount');
+  if (el) el.textContent = {{ tr('已选 ', '')|tojson }} + n + {{ tr(' 项', ' selected')|tojson }};
+}
+</script>
 {% endblock %}

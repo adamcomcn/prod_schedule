@@ -1,25 +1,40 @@
 {% extends "base.html" %}
 {% block title %}{{ tr('账号管理', 'User Accounts') }}{% endblock %}
 {% block extra_style %}
-.user-create-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; align-items:end; }
+.user-create-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; align-items:end; }
 .user-table { width:100%; border-collapse:collapse; font-size:.85rem; }
 .user-table th { text-align:left; padding:8px; background:#f8fafc; border-bottom:1px solid #e2e8f0; white-space:nowrap; }
 .user-table td { padding:8px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.user-edit { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.user-edit input[type=text], .user-edit input[type=email] { width:170px; }
 .user-actions { display:flex; gap:8px; flex-wrap:wrap; }
 .user-actions input[type=password] { width:170px; }
+.role-help { font-size:.78rem; color:#6b7280; margin-top:10px; line-height:1.6; }
 {% endblock %}
+{% macro role_options(selected) %}
+  <option value="inspector" {% if selected == 'inspector' %}selected{% endif %}>{{ tr('检验员', 'Inspector') }}</option>
+  <option value="lead" {% if selected == 'lead' %}selected{% endif %}>{{ tr('检验主管（可分配任务）', 'Lead inspector (assigns tasks)') }}</option>
+  <option value="admin" {% if selected == 'admin' %}selected{% endif %}>{{ tr('管理员', 'Admin') }}</option>
+{% endmacro %}
 {% block content %}
 <div class="page">
   <div class="card">
     <div class="card-title">{{ tr('新建账号', 'Create user account') }}</div>
     <form method="POST" action="{{ url_for('user_create') }}">
       <div class="user-create-grid">
-        <div><label>{{ tr('用户名', 'Username') }}</label><input type="text" name="username" required></div>
+        <div><label>{{ tr('用户名（登录用）', 'Username (for login)') }}</label><input type="text" name="username" required></div>
+        <div><label>{{ tr('显示名称', 'Display name') }}</label><input type="text" name="display_name" placeholder="{{ tr('如 Murphy / 于工', 'e.g. Murphy') }}"></div>
+        <div><label>{{ tr('邮箱（接收任务通知）', 'E-mail (task notifications)') }}</label><input type="email" name="email"></div>
         <div><label>{{ tr('临时密码（至少 12 位）', 'Temporary password (12+ characters)') }}</label><input type="password" name="password" minlength="12" required autocomplete="new-password"></div>
-        <div><label>{{ tr('角色', 'Role') }}</label><select name="role"><option value="inspector">{{ tr('检验员', 'Inspector') }}</option><option value="admin">{{ tr('管理员', 'Admin') }}</option></select></div>
+        <div><label>{{ tr('角色', 'Role') }}</label><select name="role">{{ role_options('inspector') }}</select></div>
         <div><label>{{ tr('关联员工', 'Employee link') }}</label><select name="employee_id"><option value="">{{ tr('无', 'None') }}</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
       </div>
       <button class="btn btn-primary" type="submit" style="margin-top:14px;">{{ tr('创建账号', 'Create account') }}</button>
+      <div class="role-help">
+        {{ tr('检验员：只看到并更新分配给自己的任务。', 'Inspector: sees and updates the tasks assigned to them.') }}<br>
+        {{ tr('检验主管：可以把任务分配给自己或其他检验员，分配后自动发送邮件通知。', 'Lead inspector: assigns tasks to themselves or other inspectors; an e-mail is sent automatically.') }}<br>
+        {{ tr('管理员：上传排期、系统设置、账号管理，也可以分配任务。', 'Admin: uploads schedules, manages settings and accounts, and can also assign tasks.') }}
+      </div>
     </form>
   </div>
 
@@ -27,15 +42,17 @@
     <div class="card-title">{{ tr('账号列表', 'User accounts') }}</div>
     <div style="overflow-x:auto;">
     <table class="user-table">
-      <thead><tr><th>{{ tr('用户名', 'Username') }}</th><th colspan="2">{{ tr('角色 / 关联员工', 'Role / Employee') }}</th><th>{{ tr('状态', 'Status') }}</th><th>{{ tr('操作', 'Actions') }}</th></tr></thead>
+      <thead><tr><th>{{ tr('用户名', 'Username') }}</th><th>{{ tr('显示名称 / 邮箱 / 角色 / 关联员工', 'Name / E-mail / Role / Employee') }}</th><th>{{ tr('状态', 'Status') }}</th><th>{{ tr('操作', 'Actions') }}</th></tr></thead>
       <tbody>
       {% for user in users %}
         <tr>
-          <td>{{ user.username }}</td>
-          <td colspan="2">
-            <form method="POST" action="{{ url_for('user_update', uid=user.id) }}" style="display:flex;gap:6px;flex-wrap:wrap;">
-              <select name="role" style="width:auto;"><option value="inspector" {% if user.role == 'inspector' %}selected{% endif %}>{{ tr('检验员', 'Inspector') }}</option><option value="admin" {% if user.role == 'admin' %}selected{% endif %}>{{ tr('管理员', 'Admin') }}</option></select>
-              <select name="employee_id" style="width:auto;"><option value="">{{ tr('无', 'None') }}</option>{% for e in employees %}<option value="{{ e.id }}" {% if user.employee_id == e.id %}selected{% endif %}>{{ e.name }}</option>{% endfor %}</select>
+          <td><strong>{{ user.username }}</strong></td>
+          <td>
+            <form method="POST" action="{{ url_for('user_update', uid=user.id) }}" class="user-edit">
+              <input type="text" name="display_name" value="{{ user.display_name or '' }}" placeholder="{{ tr('显示名称', 'Display name') }}">
+              <input type="email" name="email" value="{{ user.email or '' }}" placeholder="{{ tr('邮箱', 'E-mail') }}">
+              <select name="role" style="width:auto;">{{ role_options(user.role) }}</select>
+              <select name="employee_id" style="width:auto;"><option value="">{{ tr('无关联员工', 'No employee') }}</option>{% for e in employees %}<option value="{{ e.id }}" {% if user.employee_id == e.id %}selected{% endif %}>{{ e.name }}</option>{% endfor %}</select>
               <button class="btn btn-outline btn-sm" type="submit">{{ tr('保存', 'Update') }}</button>
             </form>
           </td>

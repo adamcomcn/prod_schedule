@@ -1827,6 +1827,7 @@ def _apply_schedule(data, baseline=False):
 
     config = load_config()
     config['upload_date'] = datetime.now().strftime('%d %b %Y %H:%M')
+    config['last_upload_baseline'] = bool(baseline)
     save_json(CONFIG_FILE, config)
 
     # ── Save weekly snapshot for trend chart ─────────────────────────
@@ -2234,6 +2235,8 @@ def submit_inspection(job_key):
     if qa_updated:
         save_json(CURRENT_FILE, current_sched)
 
+    _update_task_after_inspection(job_key, inspection_data['result'])
+
     # Mark outstanding_jobs entry as completed
     with db_conn() as conn:
         conn.execute(
@@ -2258,6 +2261,7 @@ def settings():
         config['drive_folder_id'] = request.form.get('drive_folder_id', '').strip()
         raw_prefixes = request.form.get('valve_prefixes', 'RSV')
         config['valve_prefixes'] = [p.strip().upper() for p in raw_prefixes.split(',') if p.strip()]
+        config['task_notify_emails'] = ', '.join(_email_list(request.form.get('task_notify_emails', '')))
         for legacy_secret in ('smtp_pass', 'smtp_user', 'smtp_host', 'smtp_port'):
             config.pop(legacy_secret, None)
         save_json(CONFIG_FILE, config)
@@ -2269,7 +2273,7 @@ def settings():
                            config=config,
                            modules=MODULES,
                            credentials_exist=google_credentials_configured(),
-                           smtp_configured=bool(os.environ.get('SMTP_HOST') and os.environ.get('SMTP_USERNAME') and os.environ.get('SMTP_PASSWORD')),
+                           smtp_configured=smtp_configured(),
                            excel_password_configured=bool(EXCEL_PASSWORD))
 
 @app.route('/settings/modules', methods=['POST'])
@@ -2631,53 +2635,115 @@ def order_delete(oid):
 def product_image(filename):
     return send_from_directory(PRODUCT_IMG_DIR, filename)
 
-def _send_task_email(new_tasks):
-    """Send inspection task notification email to all active employees."""
+def smtp_configured():
+    return bool(os.environ.get('SMTP_HOST') and os.environ.get('SMTP_USERNAME')
+                and os.environ.get('SMTP_PASSWORD'))
+
+
+def _smtp_send(subject, body, recipients):
+    """Send a plain-text UTF-8 e-mail. Returns (ok, message).
+
+    Port 465 uses implicit TLS (common for Chinese corporate mail such as
+    Aliyun / Tencent Exmail); other ports use STARTTLS.
+    """
     host = os.environ.get('SMTP_HOST', '').strip()
     port = int(os.environ.get('SMTP_PORT', '587'))
     user = os.environ.get('SMTP_USERNAME', '').strip()
     pwd  = os.environ.get('SMTP_PASSWORD', '')
     sender = os.environ.get('SMTP_FROM', user).strip()
     if not all([host, user, pwd]):
-        return False, 'SMTP not configured'
+        return False, tr('邮件服务未配置', 'SMTP not configured')
+    if not recipients:
+        return False, tr('没有收件人', 'No recipients')
 
-    with db_conn() as conn:
-        employees = conn.execute(
-            "SELECT name, email FROM employees WHERE active=1 AND email != ''"
-        ).fetchall()
-    if not employees:
-        return False, 'No active employees with email addresses'
+    import smtplib
+    from email.header import Header
+    from email.mime.text import MIMEText
+    msg = MIMEText(body, 'plain', 'utf-8')
+    msg['Subject'] = str(Header(subject, 'utf-8'))
+    msg['From']    = sender
+    msg['To']      = ', '.join(recipients)
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=15) as srv:
+                srv.login(user, pwd)
+                srv.sendmail(sender, recipients, msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=15) as srv:
+                srv.ehlo(); srv.starttls(); srv.login(user, pwd)
+                srv.sendmail(sender, recipients, msg.as_string())
+        return True, tr(f'邮件已发送至 {", ".join(recipients)}', f'E-mail sent to {", ".join(recipients)}')
+    except Exception:
+        logger.exception('E-mail delivery failed')
+        return False, tr('邮件发送失败', 'E-mail delivery failed')
 
-    recipients = [e['email'] for e in employees]
+
+def _task_lines(t):
+    lines = [f"[{t['region']}]  {t['order_number']}  {t['item_code']}"]
+    lines.append(f"    描述 Description: {t.get('description') or '—'}    数量 Qty: {t.get('quantity') or '—'}")
+    if t.get('est_completion') or t.get('must_ship'):
+        lines.append(f"    预计完工 Est. completion: {t.get('est_completion') or '—'}    "
+                     f"最迟出货 Must ship: {t.get('must_ship') or '—'}")
+    return lines
+
+
+def _send_task_email(new_tasks):
+    """Tell the lead inspector (Settings → task notification e-mails) that new
+    jobs arrived and need assigning. Falls back to all active employees."""
+    recipients = _email_list(load_config().get('task_notify_emails', ''))
+    if not recipients:
+        with db_conn() as conn:
+            recipients = [e['email'] for e in conn.execute(
+                "SELECT email FROM employees WHERE active=1 AND email != ''").fetchall()]
+    if not recipients:
+        return False, tr('未设置通知邮箱', 'No notification e-mail configured')
+
+    today = datetime.now().strftime('%Y-%m-%d')
     lines = [
-        f"生产排期已更新 — {datetime.now().strftime('%Y-%m-%d')}",
-        f"本次新增 {len(new_tasks)} 个检验任务，请尽快安排检验：",
+        f"生产排期已更新 Production schedule updated — {today}",
+        f"本次新增 {len(new_tasks)} 个检验任务，请登录系统分配检验员。",
+        f"{len(new_tasks)} new inspection task(s) — please log in and assign them.",
         '',
     ]
     for i, t in enumerate(new_tasks, 1):
-        lines.append(f"{i}. [{t['region']}]  {t['order_number']}  {t['item_code']}")
-        lines.append(f"   描述: {t['description']}    数量: {t['quantity']}")
-        if t.get('est_completion'):
-            lines.append(f"   预计完工: {t['est_completion']}")
+        task_lines = _task_lines(t)
+        lines.append(f"{i}. {task_lines[0]}")
+        lines.extend(task_lines[1:])
         lines.append('')
-    lines.append('请登录检验系统查看任务详情。')
+    lines.append(url_for('tasks', scope='unassigned', _external=True))
+    return _smtp_send(f"【新检验任务 {len(new_tasks)} 项 / {len(new_tasks)} new inspection tasks】{today}",
+                      '\n'.join(lines), recipients)
 
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    msg = MIMEMultipart()
-    msg['Subject'] = f"【新检验任务 {len(new_tasks)} 项】{datetime.now().strftime('%Y-%m-%d')}"
-    msg['From']    = sender
-    msg['To']      = ', '.join(recipients)
-    msg.attach(MIMEText('\n'.join(lines), 'plain', 'utf-8'))
-    try:
-        with smtplib.SMTP(host, port, timeout=10) as srv:
-            srv.ehlo(); srv.starttls(); srv.login(user, pwd)
-            srv.sendmail(sender, recipients, msg.as_string())
-        return True, f'邮件已发送给 {len(recipients)} 名员工'
-    except Exception:
-        logger.exception('Task notification email failed')
-        return False, 'Email delivery failed'
+
+def _send_assignment_email(tasks, assignee, note=''):
+    """Notify the lead (task notification e-mails) and the assignee that
+    inspection tasks were assigned."""
+    recipients = _email_list(load_config().get('task_notify_emails', ''))
+    if assignee and assignee['email']:
+        recipients = _email_list(', '.join(recipients + [assignee['email']]))
+    if not recipients:
+        return False, tr('未设置通知邮箱', 'No notification e-mail configured')
+
+    name = (assignee['display_name'] or assignee['username']) if assignee else tr('未分配', 'Unassigned')
+    by = g.get('display_name') or g.get('username', '')
+    lines = [
+        f"检验任务分配通知 Inspection task assignment",
+        f"负责人 Assigned to: {name}",
+        f"分配人 Assigned by: {by}    时间 Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+    ]
+    if note:
+        lines.append(f"备注 Note: {note}")
+    lines.append('')
+    for i, t in enumerate(tasks, 1):
+        task_lines = _task_lines(t)
+        lines.append(f"{i}. {task_lines[0]}")
+        lines.extend(task_lines[1:])
+        lines.append('    ' + url_for('inspect_form', job_key=t['job_key'], _external=True))
+        lines.append('')
+    lines.append(tr('请登录系统查看“我的任务”。', 'Log in to see "My tasks".') + ' '
+                 + url_for('tasks', scope='mine', _external=True))
+    subject = f"【任务分配】{len(tasks)} 项检验任务 → {name} / {len(tasks)} inspection task(s) assigned to {name}"
+    return _smtp_send(subject, '\n'.join(lines), recipients)
 
 
 # ── Employee routes ───────────────────────────────────────────────────────────
@@ -2748,13 +2814,33 @@ def tasks():
     from collections import defaultdict
     from datetime import timedelta
     status_filter = request.args.get('status', '')
+    # Inspectors land on their own tasks; the lead / admin on everything.
+    scope = request.args.get('scope') or ('all' if g.can_assign else 'mine')
+    if scope not in ('mine', 'unassigned', 'all'):
+        scope = 'all'
     today = datetime.now().date()
-    today_str = today.isoformat()
 
     with db_conn() as conn:
-        all_tasks = conn.execute(
-            'SELECT * FROM inspection_tasks ORDER BY est_completion ASC, created_at ASC'
+        every_task = conn.execute(
+            "SELECT t.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS assignee_name "
+            'FROM inspection_tasks t LEFT JOIN users u ON u.id = t.assigned_to '
+            'ORDER BY t.est_completion ASC, t.created_at ASC'
         ).fetchall()
+        assignees = assignable_users(conn)
+
+    scope_counts = {
+        'mine': sum(1 for t in every_task if t['assigned_to'] == g.user_id
+                    and t['status'] != 'Completed'),
+        'unassigned': sum(1 for t in every_task if not t['assigned_to']
+                          and t['status'] != 'Completed'),
+        'all': len(every_task),
+    }
+    if scope == 'mine':
+        all_tasks = [t for t in every_task if t['assigned_to'] == g.user_id]
+    elif scope == 'unassigned':
+        all_tasks = [t for t in every_task if not t['assigned_to']]
+    else:
+        all_tasks = every_task
 
     inspections = load_json(INSPECTIONS_CACHE, {})
 
@@ -2838,7 +2924,59 @@ def tasks():
     )
 
     return render_template('tasks.html', tasks=rows, inspections=inspections,
-                           today=today, status_filter=status_filter, stats=stats)
+                           today=today, status_filter=status_filter, stats=stats,
+                           scope=scope, scope_counts=scope_counts, assignees=assignees)
+
+
+def assignable_users(conn):
+    return conn.execute(
+        "SELECT id, username, display_name, email, role FROM users "
+        "WHERE active=1 AND role IN ('lead', 'inspector') "
+        "ORDER BY CASE role WHEN 'lead' THEN 0 ELSE 1 END, "
+        "COALESCE(NULLIF(display_name, ''), username)"
+    ).fetchall()
+
+
+@app.route('/tasks/assign', methods=['POST'])
+def task_assign():
+    if not g.can_assign:
+        abort(403)
+    ids = [int(i) for i in request.form.getlist('task_ids') if i.isdigit()]
+    raw_assignee = request.form.get('assignee_id', '')
+    note = request.form.get('note', '').strip()[:500]
+    back = redirect(_safe_next_url(request.form.get('next')) or url_for('tasks'))
+    if not ids:
+        flash(tr('请先勾选要分配的任务', 'Select at least one task first'), 'error')
+        return back
+
+    with db_conn() as conn:
+        assignee = None
+        if raw_assignee:
+            assignee = conn.execute(
+                "SELECT id, username, display_name, email FROM users "
+                "WHERE id=? AND active=1 AND role IN ('lead', 'inspector')",
+                (raw_assignee,)).fetchone()
+            if not assignee:
+                flash(tr('无效的检验员', 'Invalid inspector'), 'error')
+                return back
+        placeholders = ','.join('?' * len(ids))
+        tasks = conn.execute(
+            f'SELECT * FROM inspection_tasks WHERE id IN ({placeholders})', ids).fetchall()
+        conn.execute(
+            f'UPDATE inspection_tasks SET assigned_to=?, assigned_by=?, assigned_at=?, '
+            f'assign_note=? WHERE id IN ({placeholders})',
+            [assignee['id'] if assignee else None, g.username,
+             datetime.now().strftime('%Y-%m-%d %H:%M'), note, *ids])
+
+    if not assignee:
+        flash(tr(f'已取消 {len(tasks)} 个任务的分配', f'Unassigned {len(tasks)} task(s)'), 'success')
+        return back
+
+    name = assignee['display_name'] or assignee['username']
+    ok, msg = _send_assignment_email([dict(t) for t in tasks], assignee, note)
+    flash(tr(f'已将 {len(tasks)} 个任务分配给 {name}。', f'Assigned {len(tasks)} task(s) to {name}. ')
+          + msg, 'success' if ok else 'warning')
+    return back
 
 @app.route('/attachments/<int:aid>')
 def serve_attachment(aid):
@@ -2859,9 +2997,28 @@ def serve_attachment(aid):
 @app.route('/tasks/<int:tid>/status', methods=['POST'])
 def task_status_update(tid):
     new_status = request.form.get('status', 'Pending')
+    if new_status not in TASK_STATUSES:
+        abort(400)
     with db_conn() as conn:
+        task = conn.execute('SELECT assigned_to FROM inspection_tasks WHERE id=?', (tid,)).fetchone()
+        if not task:
+            abort(404)
+        # Inspectors may only update tasks assigned to them.
+        if not g.can_assign and task['assigned_to'] != g.user_id:
+            abort(403)
         conn.execute('UPDATE inspection_tasks SET status=? WHERE id=?', (new_status, tid))
-    return redirect(request.referrer or url_for('tasks'))
+    return redirect(_safe_next_url(request.form.get('next')) or url_for('tasks'))
+
+
+TASK_STATUSES = ('Pending', 'In Progress', 'Completed', 'On Hold')
+
+
+def _update_task_after_inspection(job_key, result):
+    """An inspection report drives the task status: Pass -> Completed,
+    anything else -> In Progress (needs follow-up)."""
+    status = 'Completed' if result == 'Pass' else 'In Progress'
+    with db_conn() as conn:
+        conn.execute('UPDATE inspection_tasks SET status=? WHERE job_key=?', (status, job_key))
 
 
 def _save_product_image(file_obj):
@@ -3592,6 +3749,10 @@ def _backfill_fully_shipped_history():
     current = load_json(CURRENT_FILE, {})
     if not previous or not current:
         return
+    if load_config().get('last_upload_baseline'):
+        # The admin applied the current week as a baseline re-sync: rows
+        # that vanished since the stale data must not become QA BRT alerts.
+        return
     _, _, shipped_rows = compute_changes(previous, current)
     persisted, pending = persist_fully_shipped_jobs(
         previous, current, shipped_rows, load_config().get('upload_date', ''))
@@ -3651,6 +3812,21 @@ def _startup_safety_checks():
 
 _startup_safety_checks()
 
+# admin: everything; lead: inspector who also assigns tasks; inspector: own tasks
+ROLES = ('admin', 'lead', 'inspector')
+
+def _valid_email(value):
+    return bool(re.fullmatch(r'[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+', value or ''))
+
+def _email_list(value):
+    """Split 'a@x.com, b@y.com; c@z.com' into valid addresses (deduplicated)."""
+    seen, out = set(), []
+    for part in re.split(r'[,;\s]+', value or ''):
+        if _valid_email(part) and part.lower() not in seen:
+            seen.add(part.lower())
+            out.append(part)
+    return out
+
 @app.route('/admin/users')
 def users_admin():
     with db_conn() as conn:
@@ -3669,18 +3845,24 @@ def user_create():
     password = request.form.get('password', '')
     role = request.form.get('role', 'inspector')
     employee_id = request.form.get('employee_id') or None
+    email = request.form.get('email', '').strip()
+    display_name = request.form.get('display_name', '').strip()
     if not username or not username.replace('_', '').replace('-', '').isalnum():
         flash(tr('用户名只能包含字母、数字、下划线和连字符', 'Username may only contain letters, digits, underscores and hyphens'), 'error')
     elif len(password) < 12:
         flash(tr('密码至少需要 12 个字符', 'Password must be at least 12 characters'), 'error')
-    elif role not in {'admin', 'inspector'}:
+    elif role not in ROLES:
         flash(tr('无效角色', 'Invalid role'), 'error')
+    elif email and not _valid_email(email):
+        flash(tr('邮箱格式不正确', 'Invalid e-mail address'), 'error')
     else:
         try:
             with db_conn() as conn:
                 conn.execute(
-                    'INSERT INTO users (username,password_hash,role,employee_id) VALUES (?,?,?,?)',
-                    (username, generate_password_hash(password), role, employee_id))
+                    'INSERT INTO users (username,password_hash,role,employee_id,email,display_name) '
+                    'VALUES (?,?,?,?,?,?)',
+                    (username, generate_password_hash(password), role, employee_id,
+                     email, display_name))
             flash(tr('账号已创建', 'Account created'), 'success')
         except Exception:
             flash(tr('用户名已存在或员工关联无效', 'Username already exists or the employee link is invalid'), 'error')
@@ -3722,8 +3904,13 @@ def user_reset_password(uid):
 def user_update(uid):
     role = request.form.get('role', 'inspector')
     employee_id = request.form.get('employee_id') or None
-    if role not in {'admin', 'inspector'}:
+    email = request.form.get('email', '').strip()
+    display_name = request.form.get('display_name', '').strip()
+    if role not in ROLES:
         flash(tr('无效角色', 'Invalid role'), 'error')
+        return redirect(url_for('users_admin'))
+    if email and not _valid_email(email):
+        flash(tr('邮箱格式不正确', 'Invalid e-mail address'), 'error')
         return redirect(url_for('users_admin'))
     with db_conn() as conn:
         user = conn.execute('SELECT role,active FROM users WHERE id=?', (uid,)).fetchone()
@@ -3735,8 +3922,8 @@ def user_update(uid):
                 flash(tr('至少需要保留一个启用的管理员', 'At least one active admin is required'), 'error')
                 return redirect(url_for('users_admin'))
         conn.execute(
-            'UPDATE users SET role=?,employee_id=? WHERE id=?',
-            (role, employee_id, uid))
+            'UPDATE users SET role=?,employee_id=?,email=?,display_name=? WHERE id=?',
+            (role, employee_id, email, display_name, uid))
     flash(tr('账号资料已更新', 'Account updated'), 'success')
     return redirect(url_for('users_admin'))
 
@@ -3758,7 +3945,8 @@ def _auth_check():
         return redirect(url_for('login', next=request.full_path.rstrip('?')))
     with db_conn() as conn:
         user = conn.execute(
-            'SELECT id, username, role, employee_id, language FROM users WHERE id=? AND active=1',
+            'SELECT id, username, role, employee_id, language, display_name, email '
+            'FROM users WHERE id=? AND active=1',
             (user_id,)
         ).fetchone()
     if not user:
@@ -3771,6 +3959,8 @@ def _auth_check():
     g.role = user['role']
     g.employee_id = user['employee_id']
     g.is_admin = user['role'] == 'admin'
+    g.can_assign = user['role'] in ('admin', 'lead')
+    g.display_name = user['display_name'] or user['username']
     if request.endpoint in ADMIN_ENDPOINTS and not g.is_admin:
         return tr('无权限访问此页面', 'Forbidden'), 403
     disabled = _disabled_module_for_path(request.path)

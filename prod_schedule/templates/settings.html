@@ -63,6 +63,16 @@
 
         <form method="POST">
           <div class="form-group">
+            <label>&#9993; {{ tr('任务通知邮箱（检验主管）', 'Task notification e-mails (lead inspector)') }}</label>
+            <input type="text" name="task_notify_emails" value="{{ config.get('task_notify_emails', '') }}"
+                   placeholder="lead@example.com">
+            <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
+              {{ tr('多个邮箱用逗号分隔。上传排期产生新任务、以及分配任务时都会发邮件到这里；被分配的检验员如果在账号中填写了邮箱，也会收到。',
+                    'Comma-separated. These addresses are e-mailed when a schedule upload creates new tasks and whenever tasks are assigned; the assigned inspector also gets a copy if their account has an e-mail.') }}
+            </div>
+          </div>
+
+          <div class="form-group">
             <label>{{ tr('阀门物料编码前缀（需要 V-Trust）', 'Valve Item Code Prefixes (V-Trust required)') }}</label>
             <input type="text" name="valve_prefixes"
                    value="{{ config.get('valve_prefixes', ['RSV'])|join(', ') }}"
@@ -121,8 +131,8 @@
     <div class="card" style="margin-top:0;">
       <div class="card-title">&#128231; {{ tr('邮件通知', 'E-mail notifications') }}</div>
       <p style="font-size:.85rem; color:#6b7280; margin-bottom:16px;">
-        {{ tr('每次上传新排期后，系统会向员工档案中有邮箱的在职员工发送新任务通知。',
-              'After each new schedule upload, active employees with an e-mail address receive a new-task notification.') }}
+        {{ tr('新任务和任务分配通知发送到上方“任务通知邮箱”（未填写时发给员工档案中有邮箱的在职员工）。支持 587（STARTTLS）和 465（SSL）端口，适用于阿里云、腾讯企业邮等。',
+              'New-task and assignment e-mails go to the "Task notification e-mails" above (if empty, to active employees with an e-mail). Ports 587 (STARTTLS) and 465 (SSL) are supported.') }}
       </p>
       <div style="font-size:.82rem; margin-bottom:14px;">
         <span class="status-dot {{ 'dot-green' if smtp_configured else 'dot-red' }}"></span>
