@@ -214,6 +214,23 @@
     </div>
     {% endif %}
 
+    <!-- PDF report font -->
+    <div class="card" style="margin-top:0;">
+      <div class="card-title">&#128196; {{ tr('PDF 检验报告', 'PDF inspection reports') }}</div>
+      <div style="font-size:.85rem;">
+        <span class="status-dot {{ 'dot-green' if pdf_font_embedded else 'dot-red' }}"></span>
+        {{ tr('中文字体', 'Chinese font') }}:
+        <strong>{{ tr('已嵌入（所有设备都能正常显示中文）', 'embedded — Chinese displays on every device') if pdf_font_embedded
+                   else tr('未找到，PDF 中的中文在部分阅读器里可能显示为空白', 'not found — Chinese may show blank in some PDF viewers') }}</strong>
+      </div>
+      {% if not pdf_font_embedded %}
+      <p style="font-size:.8rem;color:#6b7280;margin-top:8px;">
+        {{ tr('部署时会通过 nixpacks.toml 安装 fonts-wqy-microhei；也可以在 Railway 设置 PDF_FONT_PATH 指向一个 TrueType 中文字体文件。',
+              'Deployments install fonts-wqy-microhei via nixpacks.toml; alternatively set PDF_FONT_PATH in Railway to a TrueType Chinese font file.') }}
+      </p>
+      {% endif %}
+    </div>
+
     <!-- Excel password config -->
     <div class="card">
       <div class="card-title">&#128196; {{ tr('Excel 设置', 'Excel Settings') }}</div>

@@ -466,6 +466,10 @@ tr.mine td { background:#f0fdf4; }
                 <span class="badge badge-partially_shipped">~ {{ last_result|status_label }}</span>
               {% elif insp_list %}
                 <span style="font-size:.75rem; color:#6b7280;">{{ tr(insp_list|length ~ ' 份报告', insp_list|length ~ ' report(s)') }}</span>
+              {% endif %}
+              {% if insp_list %}
+                <a href="{{ url_for('inspection_report_pdf', job_key=t.job_key) }}" target="_blank"
+                   style="font-size:.72rem; margin-left:4px;">&#128196; PDF</a>
               {% else %}
                 <span style="font-size:.75rem; color:#9ca3af;">—</span>
               {% endif %}

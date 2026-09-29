@@ -403,6 +403,9 @@ input[name=result] { display:none; }
             {% endif %}
             <span>{{ p.inspector_name }}</span>
             <span style="color:#9ca3af; margin-left:auto">{{ p.inspection_date }}</span>
+            <a href="{{ url_for('inspection_report_pdf', job_key=job.job_key, i=pidx) }}" target="_blank"
+               class="btn btn-sm btn-outline" style="padding:2px 8px; font-size:.72rem;"
+               title="{{ tr('PDF 检验报告', 'PDF inspection report') }}">&#128196; PDF</a>
           </div>
           <div>{{ tr('抽检 ' ~ p.quantity_inspected ~ ' / 订单 ' ~ p.quantity_ordered, 'Inspected: ' ~ p.quantity_inspected ~ ' / ' ~ p.quantity_ordered ~ ' ordered') }}{% if p.quantity_passed %} · {{ tr('合格 ', 'passed ') }}{{ p.quantity_passed }}{% endif %}</div>
           {% if p.packing_condition or p.marking %}<div>{{ tr('包装', 'Packing') }}: {{ p.packing_condition or '—' }} · {{ tr('标识', 'Marking') }}: {{ p.marking or '—' }}</div>{% endif %}

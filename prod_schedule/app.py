@@ -1957,8 +1957,9 @@ def debug_info():
         info['db_error'] = 'database check failed'
     return f'<pre style="white-space:pre-wrap;font-size:13px">{json.dumps(info, indent=2, ensure_ascii=False)}</pre>'
 
-@app.route('/inspect/<path:job_key>')
-def inspect_form(job_key):
+def find_job(job_key):
+    """Job details for a job_key: current schedule, manual orders, or a
+    fully shipped job kept in outstanding_jobs. Returns a dict or None."""
     current = load_json(CURRENT_FILE, {})
     job_info = None
 
@@ -2023,6 +2024,12 @@ def inspect_form(job_key):
                     job_info['region'] = shipped_job['sheet']
                     job_info['job_key'] = job_key
 
+    return job_info
+
+
+@app.route('/inspect/<path:job_key>')
+def inspect_form(job_key):
+    job_info = find_job(job_key)
     if not job_info:
         flash(tr('找不到该订单', 'Job not found'), 'error')
         return redirect(url_for('index'))
@@ -2253,6 +2260,89 @@ def submit_inspection(job_key):
 
     return redirect(url_for('inspect_form', job_key=job_key))
 
+def report_number(job_key, record, index):
+    day = (record.get('inspection_date') or record.get('submitted_at') or '')[:10].replace('-', '')
+    return f"QC-{day or 'NODATE'}-{hashlib.sha1(job_key.encode('utf-8')).hexdigest()[:6].upper()}-{index + 1}"
+
+
+def _latest_checklist(job_key):
+    """Latest digital checklist for the job, flattened for the PDF."""
+    with db_conn() as conn:
+        resp = conn.execute(
+            'SELECT * FROM form_responses WHERE job_key=? ORDER BY submitted_at DESC, id DESC LIMIT 1',
+            (job_key,)).fetchone()
+        if not resp:
+            return None
+        tpl = conn.execute('SELECT sections_json FROM form_templates WHERE id=?',
+                           (resp['template_id'],)).fetchone()
+    try:
+        sections = json.loads(tpl['sections_json'] or '[]') if tpl else []
+        answers = json.loads(resp['answers'] or '{}')
+    except (TypeError, json.JSONDecodeError):
+        sections, answers = [], {}
+    rows = []
+    for si, sect in enumerate(sections):
+        for qi, q in enumerate(sect.get('questions', [])):
+            ans = answers.get(f'{si}_{qi}', {})
+            label = ' '.join(str(x) for x in (q.get('part'), q.get('num')) if x)
+            rows.append((sect.get('name', '') + (f' · {label}' if label else ''),
+                         q.get('guideline', ''), ans.get('result', ''), ans.get('notes', '')))
+    return {'name': resp['template_name'], 'inspector': resp['inspector'], 'date': resp['insp_date'],
+            'overall': resp['overall'], 'summary': resp['summary'], 'rows': rows}
+
+
+def _pdf_font_embedded():
+    try:
+        from pdf_report import font_is_embedded
+        return font_is_embedded()
+    except Exception:
+        logger.exception('PDF font check failed')
+        return False
+
+
+@app.route('/inspect/<path:job_key>/report.pdf')
+def inspection_report_pdf(job_key):
+    records = load_json(INSPECTIONS_CACHE, {}).get(job_key, [])
+    if not records:
+        abort(404)
+    try:
+        index = int(request.args.get('i', len(records) - 1))
+    except ValueError:
+        abort(404)
+    if not 0 <= index < len(records):
+        abort(404)
+    record = records[index]
+    job = find_job(job_key) or {
+        'region': record.get('region'), 'Order Number': record.get('order_number'),
+        'Item Code': record.get('item_code'), 'Item Description': record.get('item_description'),
+        'Supplier': record.get('supplier'), 'Quantity': record.get('quantity_ordered')}
+
+    with db_conn() as conn:
+        attachments = [dict(a) for a in conn.execute(
+            'SELECT * FROM inspection_attachments WHERE job_key=? AND insp_index=? ORDER BY id',
+            (job_key, index)).fetchall()]
+        defect_names = {r['code']: (r['name'], r['name_cn'] or '') for r in conn.execute(
+            'SELECT code, name, name_cn FROM defect_codes').fetchall()}
+
+    from pdf_report import build_inspection_pdf
+    report_no = report_number(job_key, record, index)
+    pdf = build_inspection_pdf(
+        job, record, report_no,
+        attachments=attachments,
+        defect_names=defect_names,
+        evidence_labels={k: (v.get('label_zh') or v['label'], v['label']) for k, v in EVIDENCE_META.items()},
+        checklist=_latest_checklist(job_key),
+        logo_path=os.path.join(BASE_DIR, 'static', 'daemco_logo.png'),
+        generated_by=g.get('display_name') or g.get('username', ''))
+
+    safe = re.sub(r'[^A-Za-z0-9._-]+', '_', f"{record.get('order_number') or ''}_{record.get('item_code') or ''}")
+    response = send_file(io.BytesIO(pdf), mimetype='application/pdf',
+                         as_attachment=request.args.get('download') == '1',
+                         download_name=f'{report_no}_{safe}.pdf'.replace('__', '_'))
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
+
+
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
     config = load_config()
@@ -2274,6 +2364,7 @@ def settings():
                            modules=MODULES,
                            credentials_exist=google_credentials_configured(),
                            smtp_configured=smtp_configured(),
+                           pdf_font_embedded=_pdf_font_embedded(),
                            excel_password_configured=bool(EXCEL_PASSWORD))
 
 @app.route('/settings/modules', methods=['POST'])
@@ -3065,34 +3156,7 @@ def inspect_checklist(job_key):
         ).fetchall()
 
     # Load job info (same logic as inspect_form)
-    current  = load_json(CURRENT_FILE, {})
-    job_info = None
-    for sheet_name, rows in current.items():
-        if not rows: continue
-        headers = rows[0]
-        for row in rows[1:]:
-            k = make_job_key(sheet_name, row, headers)
-            if k == job_key:
-                job_info = dict(zip(headers, row))
-                job_info['region']  = sheet_name
-                job_info['job_key'] = job_key
-                break
-        if job_info: break
-
-    if not job_info:
-        # Try SQLite orders
-        parts = job_key.split('|')
-        if len(parts) == 3:
-            with db_conn() as conn:
-                o = conn.execute(
-                    'SELECT o.*, s.name AS supplier_name FROM orders o '
-                    'LEFT JOIN suppliers s ON o.supplier_id=s.id '
-                    'WHERE o.region=? AND o.order_number=? AND o.item_code=?',
-                    (parts[0], parts[1], parts[2])).fetchone()
-            if o:
-                job_info = {'Order Number': o['order_number'], 'Item Code': o['item_code'],
-                            'Item Description': o['description'], 'Supplier': o['supplier_name'] or '',
-                            'Quantity': o['quantity'], 'region': o['region'], 'job_key': job_key}
+    job_info = find_job(job_key)
 
     if not job_info:
         flash(tr('找不到该订单', 'Job not found'), 'error'); return redirect(url_for('index'))

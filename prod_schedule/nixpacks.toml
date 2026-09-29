@@ -1,0 +1,5 @@
+# Chinese TrueType font for the PDF inspection reports (pdf_report.py looks
+# for /usr/share/fonts/truetype/wqy/wqy-microhei.ttc). The start command
+# lives in railway.toml.
+[phases.setup]
+aptPkgs = ["...", "fonts-wqy-microhei"]

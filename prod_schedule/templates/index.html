@@ -304,6 +304,10 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
                class="btn btn-sm {% if insp %}btn-outline{% else %}btn-success{% endif %}">
               &#128203; {% if insp %}{{ tr('查看', 'View') }}{% else %}{{ tr('检验', 'Inspect') }}{% endif %}
             </a>
+            {% if insp %}
+            <a href="{{ url_for('inspection_report_pdf', job_key=job_key) }}" target="_blank"
+               class="btn btn-sm btn-outline" title="{{ tr('最新检验报告 PDF', 'Latest inspection report (PDF)') }}">PDF</a>
+            {% endif %}
             {% endif %}
           </td>
         </tr>
