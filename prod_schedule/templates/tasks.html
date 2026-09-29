@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}检验任务{% endblock %}
+{% block title %}{{ tr('检验任务', 'Inspection Tasks') }}{% endblock %}
 
 {% block extra_style %}
 /* ── urgency dots ── */
@@ -91,10 +91,10 @@
 
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
     <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">
-      <span class="lt" data-en="Inspection Task Tracker" data-zh="检验任务跟踪">Inspection Task Tracker</span>
+      {{ tr('检验任务跟踪', 'Inspection Task Tracker') }}
     </h1>
     <span style="font-size:.8rem; color:#9ca3af;">
-      <span class="lt" data-en="Today:" data-zh="今日：">Today:</span> {{ today }}
+      {{ tr('今日：', 'Today:') }} {{ today }}
     </span>
   </div>
 
@@ -107,10 +107,10 @@
     {# Status Overview #}
     <div class="stat-card">
       <div class="stat-card-title">
-        <span class="lt" data-en="Task Status Overview" data-zh="任务状态分布">Task Status Overview</span>
+        {{ tr('任务状态分布', 'Task Status Overview') }}
         <span style="float:right; font-size:.85rem; color:#374151; text-transform:none; letter-spacing:0;">
           <strong>{{ stats.total }}</strong>
-          <span class="lt" data-en=" total" data-zh=" 条"> total</span>
+          {{ tr(' 条', ' total') }}
         </span>
       </div>
 
@@ -124,7 +124,7 @@
       {% set pct = (cnt / stats.total * 100) | round(1) if stats.total else 0 %}
       <div class="status-row">
         <div class="status-label">
-          <span class="lt" data-en="{{ label }}" data-zh="{{ zh }}">{{ label }}</span>
+          {{ tr('{{ zh }}', '{{ label }}') }}
         </div>
         <div class="status-bar-wrap">
           <div class="status-bar" style="width:{{ pct }}%; background:{{ color }};"></div>
@@ -140,7 +140,7 @@
       <div style="margin-top:14px; padding-top:12px; border-top:1px solid #f1f5f9;
                   display:flex; align-items:center; gap:12px;">
         <div style="font-size:.78rem; color:#6b7280;">
-          <span class="lt" data-en="Overall completion rate:" data-zh="整体完成率：">Overall completion rate:</span>
+          {{ tr('整体完成率：', 'Overall completion rate:') }}
         </div>
         <div style="flex:1; background:#f3f4f6; border-radius:6px; height:10px; overflow:hidden;">
           <div style="width:{{ done_pct }}%; height:100%; background:#10b981; border-radius:6px;"></div>
@@ -152,24 +152,24 @@
     {# Urgency Distribution #}
     <div class="stat-card">
       <div class="stat-card-title">
-        <span class="lt" data-en="Urgency Distribution (Open Tasks)" data-zh="紧迫程度（未完成任务）">Urgency Distribution (Open Tasks)</span>
+        {{ tr('紧迫程度（未完成任务）', 'Urgency Distribution (Open Tasks)') }}
       </div>
       <div class="urg-tiles">
         <div class="urg-tile urg-tile-red">
           <div class="big">{{ stats.urg.get('overdue',0) }}</div>
-          <div class="lbl"><span class="lt" data-en="Overdue" data-zh="已逾期">Overdue</span></div>
+          <div class="lbl">{{ tr('已逾期', 'Overdue') }}</div>
         </div>
         <div class="urg-tile urg-tile-orange">
           <div class="big">{{ stats.urg.get('week',0) }}</div>
-          <div class="lbl"><span class="lt" data-en="Due ≤7d" data-zh="7天内到期">Due ≤7d</span></div>
+          <div class="lbl">{{ tr('7天内到期', 'Due ≤7d') }}</div>
         </div>
         <div class="urg-tile urg-tile-yellow">
           <div class="big">{{ stats.urg.get('fortnight',0) }}</div>
-          <div class="lbl"><span class="lt" data-en="Due ≤14d" data-zh="14天内到期">Due ≤14d</span></div>
+          <div class="lbl">{{ tr('14天内到期', 'Due ≤14d') }}</div>
         </div>
         <div class="urg-tile urg-tile-green">
           <div class="big">{{ stats.urg.get('ok',0) }}</div>
-          <div class="lbl"><span class="lt" data-en="On Track" data-zh="充裕">On Track</span></div>
+          <div class="lbl">{{ tr('充裕', 'On Track') }}</div>
         </div>
       </div>
 
@@ -177,8 +177,7 @@
       {% if no_date > 0 %}
       <div style="margin-top:12px; font-size:.75rem; color:#9ca3af;">
         ⚠ {{ no_date }}
-        <span class="lt" data-en=" tasks have no estimated completion date set"
-              data-zh=" 条任务未设置预计完工日期"> tasks have no estimated completion date set</span>
+        {{ tr(' 条任务未设置预计完工日期', ' tasks have no estimated completion date set') }}
       </div>
       {% endif %}
 
@@ -190,13 +189,13 @@
         <div>
           <div style="font-size:1.3rem; font-weight:800; color:#1a3a5c;">{{ open_total }}</div>
           <div style="font-size:.7rem; color:#9ca3af; margin-top:2px;">
-            <span class="lt" data-en="Open Tasks" data-zh="未完成">Open Tasks</span>
+            {{ tr('未完成', 'Open Tasks') }}
           </div>
         </div>
         <div>
           <div style="font-size:1.3rem; font-weight:800; color:#dc2626;">{{ stats.urg.get('overdue',0) }}</div>
           <div style="font-size:.7rem; color:#9ca3af; margin-top:2px;">
-            <span class="lt" data-en="Overdue" data-zh="已逾期">Overdue</span>
+            {{ tr('已逾期', 'Overdue') }}
           </div>
         </div>
         <div>
@@ -206,7 +205,7 @@
             {{ overdue_rate }}%
           </div>
           <div style="font-size:.7rem; color:#9ca3af; margin-top:2px;">
-            <span class="lt" data-en="Overdue Rate" data-zh="逾期率">Overdue Rate</span>
+            {{ tr('逾期率', 'Overdue Rate') }}
           </div>
         </div>
       </div>
@@ -220,7 +219,7 @@
     {# By Region #}
     <div class="stat-card">
       <div class="stat-card-title">
-        <span class="lt" data-en="Tasks by Region" data-zh="按地区">Tasks by Region</span>
+        {{ tr('按地区', 'Tasks by Region') }}
       </div>
       {% if stats.region_stats %}
         {% for region, rv in stats.region_stats %}
@@ -243,7 +242,7 @@
         {% endfor %}
       {% else %}
         <div style="color:#9ca3af; font-size:.82rem; text-align:center; padding:20px 0;">
-          <span class="lt" data-en="No data" data-zh="暂无数据">No data</span>
+          {{ tr('暂无数据', 'No data') }}
         </div>
       {% endif %}
     </div>
@@ -251,7 +250,7 @@
     {# By Supplier (outstanding) #}
     <div class="stat-card">
       <div class="stat-card-title">
-        <span class="lt" data-en="Outstanding Tasks by Supplier (Top 8)" data-zh="未完成任务 — 按供应商（前8）">Outstanding Tasks by Supplier (Top 8)</span>
+        {{ tr('未完成任务 — 按供应商（前8）', 'Outstanding Tasks by Supplier (Top 8)') }}
       </div>
       {% if stats.top_suppliers %}
         {% for sup, sv in stats.top_suppliers %}
@@ -273,7 +272,7 @@
         {% endfor %}
       {% else %}
         <div style="color:#9ca3af; font-size:.82rem; text-align:center; padding:20px 0;">
-          <span class="lt" data-en="No outstanding tasks" data-zh="暂无未完成任务">No outstanding tasks</span>
+          {{ tr('暂无未完成任务', 'No outstanding tasks') }}
         </div>
       {% endif %}
     </div>
@@ -284,16 +283,16 @@
   {% if pf_total > 0 %}
   <div class="stat-card" style="margin-bottom:20px;">
     <div class="stat-card-title">
-      <span class="lt" data-en="Inspection Results (all time)" data-zh="检验结果汇总（全部）">Inspection Results (all time)</span>
+      {{ tr('检验结果汇总（全部）', 'Inspection Results (all time)') }}
       <span style="float:right; font-size:.85rem; color:#374151; text-transform:none; letter-spacing:0;">
-        {{ pf_total }} <span class="lt" data-en=" reports" data-zh=" 份报告"> reports</span>
+        {{ pf_total }} {{ tr(' 份报告', ' reports') }}
       </span>
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; align-items:center;">
       <div style="text-align:center;">
         <div style="font-size:2rem; font-weight:800; color:#10b981;">{{ stats.pass_ct }}</div>
         <div style="font-size:.75rem; color:#6b7280; margin-top:2px;">
-          <span class="lt" data-en="Pass" data-zh="通过">Pass</span>
+          {{ tr('通过', 'Pass') }}
         </div>
       </div>
       <div>
@@ -303,13 +302,13 @@
         </div>
         {% set pass_rate = (stats.pass_ct / pf_total * 100) | round(1) %}
         <div style="text-align:center; font-size:.78rem; color:#6b7280; margin-top:4px;">
-          <span style="color:#10b981; font-weight:700;">{{ pass_rate }}% pass rate</span>
+          <span style="color:#10b981; font-weight:700;">{{ tr('合格率 ', '') }}{{ pass_rate }}%{{ tr('', ' pass rate') }}</span>
         </div>
       </div>
       <div style="text-align:center;">
         <div style="font-size:2rem; font-weight:800; color:#ef4444;">{{ stats.fail_ct }}</div>
         <div style="font-size:.75rem; color:#6b7280; margin-top:2px;">
-          <span class="lt" data-en="Fail" data-zh="不通过">Fail</span>
+          {{ tr('不通过', 'Fail') }}
         </div>
       </div>
     </div>
@@ -321,26 +320,26 @@
   {# ══════════════ FILTER BAR ══════════════ #}
   <div class="filter-bar">
     <span style="font-size:.8rem; color:#6b7280;">
-      <span class="lt" data-en="Filter:" data-zh="筛选：">Filter:</span>
+      {{ tr('筛选：', 'Filter:') }}
     </span>
     <a href="{{ url_for('tasks') }}"                       class="{{ 'active' if not status_filter }}">
-      <span class="lt" data-en="All" data-zh="全部">All</span>
+      {{ tr('全部', 'All') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.total if stats else 0 }})</span>
     </a>
     <a href="{{ url_for('tasks', status='Pending') }}"     class="{{ 'active' if status_filter=='Pending' }}">
-      <span class="lt" data-en="Pending" data-zh="待处理">Pending</span>
+      {{ tr('待处理', 'Pending') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('Pending',0) if stats else 0 }})</span>
     </a>
     <a href="{{ url_for('tasks', status='In Progress') }}" class="{{ 'active' if status_filter=='In Progress' }}">
-      <span class="lt" data-en="In Progress" data-zh="进行中">In Progress</span>
+      {{ tr('进行中', 'In Progress') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('In Progress',0) if stats else 0 }})</span>
     </a>
     <a href="{{ url_for('tasks', status='Completed') }}"   class="{{ 'active' if status_filter=='Completed' }}">
-      <span class="lt" data-en="Completed" data-zh="已完成">Completed</span>
+      {{ tr('已完成', 'Completed') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('Completed',0) if stats else 0 }})</span>
     </a>
     <a href="{{ url_for('tasks', status='On Hold') }}"     class="{{ 'active' if status_filter=='On Hold' }}">
-      <span class="lt" data-en="On Hold" data-zh="暂停">On Hold</span>
+      {{ tr('暂停', 'On Hold') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('On Hold',0) if stats else 0 }})</span>
     </a>
   </div>
@@ -353,15 +352,15 @@
         <thead>
           <tr>
             <th style="width:12px;"></th>
-            <th><span class="lt" data-en="Region"          data-zh="区域">Region</span></th>
-            <th><span class="lt" data-en="Order No."       data-zh="订单号">Order No.</span></th>
-            <th><span class="lt" data-en="Item Code"       data-zh="产品编码">Item Code</span></th>
-            <th><span class="lt" data-en="Description"     data-zh="描述">Description</span></th>
-            <th><span class="lt" data-en="Qty"             data-zh="数量">Qty</span></th>
-            <th><span class="lt" data-en="Est. Completion" data-zh="预计完工">Est. Completion</span></th>
-            <th><span class="lt" data-en="Days Until Due"  data-zh="距今天数">Days Until Due</span></th>
-            <th><span class="lt" data-en="Inspection Result" data-zh="检验结果">Inspection Result</span></th>
-            <th><span class="lt" data-en="Task Status"     data-zh="任务状态">Task Status</span></th>
+            <th>{{ tr('区域', 'Region') }}</th>
+            <th>{{ tr('订单号', 'Order No.') }}</th>
+            <th>{{ tr('产品编码', 'Item Code') }}</th>
+            <th>{{ tr('描述', 'Description') }}</th>
+            <th>{{ tr('数量', 'Qty') }}</th>
+            <th>{{ tr('预计完工', 'Est. Completion') }}</th>
+            <th>{{ tr('距今天数', 'Days Until Due') }}</th>
+            <th>{{ tr('检验结果', 'Inspection Result') }}</th>
+            <th>{{ tr('任务状态', 'Task Status') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -409,13 +408,13 @@
             </td>
             <td>
               {% if last_result == 'Pass' %}
-                <span class="badge badge-new">&#10003; Pass</span>
+                <span class="badge badge-new">&#10003; {{ tr('合格', 'Pass') }}</span>
               {% elif last_result == 'Fail' %}
-                <span class="badge badge-not_shipped">&#10007; Fail</span>
+                <span class="badge badge-not_shipped">&#10007; {{ tr('不合格', 'Fail') }}</span>
               {% elif last_result %}
                 <span class="badge badge-partially_shipped">~ {{ last_result }}</span>
               {% elif insp_list %}
-                <span style="font-size:.75rem; color:#6b7280;">{{ insp_list|length }} report(s)</span>
+                <span style="font-size:.75rem; color:#6b7280;">{{ tr(insp_list|length ~ ' 份报告', insp_list|length ~ ' report(s)') }}</span>
               {% else %}
                 <span style="font-size:.75rem; color:#9ca3af;">—</span>
               {% endif %}
@@ -429,7 +428,7 @@
                                {% elif t.status=='In Progress' %}#3b82f6
                                {% else %}#d0d5dd{% endif %};">
                   {% for s in ['Pending','In Progress','Completed','On Hold'] %}
-                  <option {{ 'selected' if t.status == s }}>{{ s }}</option>
+                  <option value="{{ s }}" {{ 'selected' if t.status == s }}>{{ s|status_label }}</option>
                   {% endfor %}
                 </select>
               </form>
@@ -442,11 +441,11 @@
     {% else %}
     <div style="text-align:center; padding:50px; color:#9ca3af; font-size:.9rem;">
       {% if status_filter %}
-        <span class="lt" data-en="No tasks with this status" data-zh="该状态下暂无任务">No tasks with this status</span>
+        {{ tr('该状态下暂无任务', 'No tasks with this status') }}
       {% else %}
-        暂无任务记录<br>
+        {{ tr('暂无任务记录', 'No tasks yet') }}<br>
         <span style="font-size:.8rem; margin-top:6px; display:block;">
-          上传新的生产排期后，系统会自动为新增订单创建检验任务
+          {{ tr('上传新的生产排期后，系统会自动为新增订单创建检验任务', 'Inspection tasks are created automatically for new orders when a schedule is uploaded') }}
         </span>
       {% endif %}
     </div>
@@ -454,11 +453,11 @@
   </div>
 
   <div style="margin-top:12px; font-size:.78rem; color:#9ca3af; display:flex; gap:20px; flex-wrap:wrap;">
-    <span><span class="urgency-dot urg-overdue" style="vertical-align:middle;"></span> <span class="lt" data-en="Overdue" data-zh="已逾期">Overdue</span></span>
-    <span><span class="urgency-dot urg-urgent"  style="vertical-align:middle;"></span> <span class="lt" data-en="Due within 7 days" data-zh="7天内到期">Due within 7 days</span></span>
-    <span><span class="urgency-dot urg-soon"    style="vertical-align:middle;"></span> <span class="lt" data-en="Due within 14 days" data-zh="14天内到期">Due within 14 days</span></span>
-    <span><span class="urgency-dot urg-ok"      style="vertical-align:middle;"></span> <span class="lt" data-en="On track" data-zh="充裕">On track</span></span>
-    <span><span class="urgency-dot urg-done"    style="vertical-align:middle;"></span> <span class="lt" data-en="Completed" data-zh="已完成">Completed</span></span>
+    <span><span class="urgency-dot urg-overdue" style="vertical-align:middle;"></span> {{ tr('已逾期', 'Overdue') }}</span>
+    <span><span class="urgency-dot urg-urgent"  style="vertical-align:middle;"></span> {{ tr('7天内到期', 'Due within 7 days') }}</span>
+    <span><span class="urgency-dot urg-soon"    style="vertical-align:middle;"></span> {{ tr('14天内到期', 'Due within 14 days') }}</span>
+    <span><span class="urgency-dot urg-ok"      style="vertical-align:middle;"></span> {{ tr('充裕', 'On track') }}</span>
+    <span><span class="urgency-dot urg-done"    style="vertical-align:middle;"></span> {{ tr('已完成', 'Completed') }}</span>
   </div>
 
 </div>

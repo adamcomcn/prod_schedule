@@ -167,7 +167,7 @@ class SecurityAndProductionTests(unittest.TestCase):
             content_type='multipart/form-data',
             follow_redirects=True)
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b'Upload blocked', response.data)
+        self.assertIn('已阻止上传'.encode(), response.data)
         self.assertEqual(app.load_json(app.CURRENT_FILE, {}), current)
 
     def test_upload_blocks_any_previously_uploaded_schedule(self):
@@ -198,7 +198,7 @@ class SecurityAndProductionTests(unittest.TestCase):
             },
             content_type='multipart/form-data',
             follow_redirects=True)
-        self.assertIn(b'already uploaded', response.data)
+        self.assertIn('之前已上传过'.encode(), response.data)
         self.assertEqual(app.load_json(app.CURRENT_FILE, {}), current)
 
     def test_status_legend_filters_schedule_rows(self):
@@ -222,7 +222,7 @@ class SecurityAndProductionTests(unittest.TestCase):
         new_response = self.client.get('/?sheet=MELBOURNE&status=new')
         self.assertIn(b'New row', new_response.data)
         self.assertNotIn(b'Waiting row', new_response.data)
-        self.assertIn(b'Clear filter', new_response.data)
+        self.assertIn('清除筛选'.encode(), new_response.data)
 
         shipped_response = self.client.get('/?sheet=MELBOURNE&view=all&status=shipped')
         self.assertIn(b'Shipped row', shipped_response.data)
@@ -280,7 +280,14 @@ class SecurityAndProductionTests(unittest.TestCase):
         response = self.client.get('/?sheet=MELBOURNE&per_page=50')
         self.assertEqual(response.status_code, 200)
         self.assertLess(len(response.data), 200_000)
-        self.assertEqual(self.client.get('/knowledge').status_code, 200)
+        config = app.load_config()
+        config['modules'] = {'knowledge': True}
+        app.save_json(app.CONFIG_FILE, config)
+        try:
+            self.assertEqual(self.client.get('/knowledge').status_code, 200)
+        finally:
+            config['modules'] = {}
+            app.save_json(app.CONFIG_FILE, config)
 
 
 if __name__ == '__main__':

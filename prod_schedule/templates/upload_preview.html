@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}确认排期上传 / Confirm Schedule Upload{% endblock %}
+{% block title %}{{ tr('确认排期上传', 'Confirm Schedule Upload') }}{% endblock %}
 
 {% block extra_style %}
 <style>
@@ -27,14 +27,13 @@ details.pv summary { cursor:pointer; font-weight:600; }
 {% block content %}
 <div class="page" style="padding-top:16px;">
   <h2 style="margin-bottom:4px;">
-    <span class="lt" data-en="Confirm schedule upload" data-zh="确认排期上传">确认排期上传</span>
+    {{ tr('确认排期上传', 'Confirm schedule upload') }}
   </h2>
   <p class="muted" style="margin-bottom:16px;">
     {{ pending.filename }} · {{ pending.uploaded_by }} · {{ pending.uploaded_at }}<br>
-    <span class="lt" data-en="Nothing has changed yet. Review the differences, then apply or cancel."
-          data-zh="网站数据尚未改变。请核对以下差异，再选择应用或取消。">网站数据尚未改变。请核对以下差异，再选择应用或取消。</span>
+    {{ tr('网站数据尚未改变。请核对以下差异，再选择应用或取消。', 'Nothing has changed yet. Review the differences, then apply or cancel.') }}
     {% if config.upload_date %}
-      <span class="lt" data-en="Compared with the schedule uploaded on" data-zh="对比对象：上次上传的排期">对比对象：上次上传的排期</span>
+      {{ tr('对比对象：上次上传的排期', 'Compared with the schedule uploaded on') }}
       {{ config.upload_date }}
     {% endif %}
   </p>
@@ -45,36 +44,35 @@ details.pv summary { cursor:pointer; font-weight:600; }
 
   {% if summary.first_upload %}
     <div class="pv-warn">
-      <span class="lt" data-en="First upload: every row will be treated as new."
-            data-zh="首次上传：所有行都将视为新增。">首次上传：所有行都将视为新增。</span>
+      {{ tr('首次上传：所有行都将视为新增。', 'First upload: every row will be treated as new.') }}
     </div>
   {% endif %}
 
   <div class="pv-stats">
     <div class="pv-stat pv-new"><div class="num">{{ summary.new|length if not summary.first_upload else summary.sheets|sum(attribute='rows') }}</div>
-      <div class="lbl lt" data-en="New rows" data-zh="新增">新增</div></div>
+      <div class="lbl">{{ tr('新增', 'New rows') }}</div></div>
     <div class="pv-stat pv-shipped"><div class="num">{{ summary.shipped|length }}</div>
-      <div class="lbl lt" data-en="Fully shipped (row gone)" data-zh="全部出货（行已消失）">全部出货（行已消失）</div></div>
+      <div class="lbl">{{ tr('全部出货（行已消失）', 'Fully shipped (row gone)') }}</div></div>
     <div class="pv-stat pv-partial"><div class="num">{{ summary.partial|length }}</div>
-      <div class="lbl lt" data-en="Partially shipped (qty down)" data-zh="部分出货（数量减少）">部分出货（数量减少）</div></div>
+      <div class="lbl">{{ tr('部分出货（数量减少）', 'Partially shipped (qty down)') }}</div></div>
     <div class="pv-stat pv-date"><div class="num">{{ summary.date_changes|length }}</div>
-      <div class="lbl lt" data-en="Completion date changed" data-zh="预计完成日变更">预计完成日变更</div></div>
+      <div class="lbl">{{ tr('预计完成日变更', 'Completion date changed') }}</div></div>
     {% if summary.typo %}
     <div class="pv-stat"><div class="num">{{ summary.typo|length }}</div>
-      <div class="lbl lt" data-en="Possible typos" data-zh="疑似笔误">疑似笔误</div></div>
+      <div class="lbl">{{ tr('疑似笔误', 'Possible typos') }}</div></div>
     {% endif %}
   </div>
 
   <details class="pv" open>
-    <summary><span class="lt" data-en="By sheet" data-zh="按 Sheet 汇总">按 Sheet 汇总</span></summary>
+    <summary>{{ tr('按 Sheet 汇总', 'By sheet') }}</summary>
     <div class="pv-table-wrap">
     <table class="pv-table" style="margin-top:10px;">
       <tr><th>Sheet</th>
-        <th class="lt" data-en="Rows (prev → new)" data-zh="行数（上次 → 本次）">行数（上次 → 本次）</th>
-        <th class="lt" data-en="New" data-zh="新增">新增</th>
-        <th class="lt" data-en="Shipped" data-zh="全部出货">全部出货</th>
-        <th class="lt" data-en="Partial" data-zh="部分出货">部分出货</th>
-        <th class="lt" data-en="Column changes" data-zh="列变化">列变化</th></tr>
+        <th>{{ tr('行数（上次 → 本次）', 'Rows (prev → new)') }}</th>
+        <th>{{ tr('新增', 'New') }}</th>
+        <th>{{ tr('全部出货', 'Shipped') }}</th>
+        <th>{{ tr('部分出货', 'Partial') }}</th>
+        <th>{{ tr('列变化', 'Column changes') }}</th></tr>
       {% for s in summary.sheets %}
       <tr>
         <td><strong>{{ s.name }}</strong></td>
@@ -93,7 +91,7 @@ details.pv summary { cursor:pointer; font-weight:600; }
   {% macro rows_table(items, extra_label='', extra_key='', extra_label2='', extra_key2='') %}
     <div class="pv-table-wrap">
     <table class="pv-table" style="margin-top:10px;">
-      <tr><th>Sheet</th><th>Order</th><th>PO</th><th>Item Code</th><th>Description</th><th>Qty</th>
+      <tr><th>Sheet</th><th>{{ tr('订单号', 'Order') }}</th><th>{{ tr('采购单号', 'PO') }}</th><th>{{ tr('物料编码', 'Item Code') }}</th><th>{{ tr('描述', 'Description') }}</th><th>{{ tr('数量', 'Qty') }}</th>
         {% if extra_label %}<th>{{ extra_label }}</th>{% endif %}
         {% if extra_label2 %}<th>{{ extra_label2 }}</th>{% endif %}</tr>
       {% for r in items[:300] %}
@@ -103,31 +101,31 @@ details.pv summary { cursor:pointer; font-weight:600; }
         {% if extra_key2 %}<td>{{ r[extra_key2] }}</td>{% endif %}</tr>
       {% endfor %}
     </table>
-    {% if items|length > 300 %}<p class="muted">… {{ items|length - 300 }} more</p>{% endif %}
+    {% if items|length > 300 %}<p class="muted">… {{ tr('还有 ' ~ (items|length - 300) ~ ' 行', (items|length - 300) ~ ' more') }}</p>{% endif %}
     </div>
   {% endmacro %}
 
   {% if summary.shipped %}
   <details class="pv">
-    <summary><span class="lt" data-en="Fully shipped" data-zh="全部出货">全部出货</span> ({{ summary.shipped|length }})</summary>
+    <summary>{{ tr('全部出货', 'Fully shipped') }} ({{ summary.shipped|length }})</summary>
     {{ rows_table(summary.shipped) }}
   </details>
   {% endif %}
   {% if summary.partial %}
   <details class="pv">
-    <summary><span class="lt" data-en="Partially shipped" data-zh="部分出货">部分出货</span> ({{ summary.partial|length }})</summary>
+    <summary>{{ tr('部分出货', 'Partially shipped') }} ({{ summary.partial|length }})</summary>
     {{ rows_table(summary.partial, 'Prev Qty', 'previous_quantity') }}
   </details>
   {% endif %}
   {% if summary.new %}
   <details class="pv">
-    <summary><span class="lt" data-en="New rows" data-zh="新增">新增</span> ({{ summary.new|length }})</summary>
+    <summary>{{ tr('新增', 'New rows') }} ({{ summary.new|length }})</summary>
     {{ rows_table(summary.new, 'Est. Completion', 'est_completion') }}
   </details>
   {% endif %}
   {% if summary.date_changes %}
   <details class="pv">
-    <summary><span class="lt" data-en="Completion date changed" data-zh="预计完成日变更">预计完成日变更</span> ({{ summary.date_changes|length }})</summary>
+    <summary>{{ tr('预计完成日变更', 'Completion date changed') }} ({{ summary.date_changes|length }})</summary>
     {{ rows_table(summary.date_changes, 'Previous', 'previous_est', 'Now', 'est_completion') }}
   </details>
   {% endif %}
@@ -136,16 +134,14 @@ details.pv summary { cursor:pointer; font-weight:600; }
     <form method="POST" action="{{ url_for('upload_confirm') }}" style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
       <label class="pv-baseline">
         <input type="checkbox" name="baseline" value="1">
-        <span class="lt"
-              data-en="Baseline re-sync (site data is out of date): do not create QA BRT alerts for rows that disappeared, and do not e-mail new tasks."
-              data-zh="基准重新同步（网站数据已过时）：消失的行不生成 QA BRT 提醒，也不发送新任务邮件。">基准重新同步（网站数据已过时）：消失的行不生成 QA BRT 提醒，也不发送新任务邮件。</span>
+        {{ tr('基准重新同步（网站数据已过时）：消失的行不生成 QA BRT 提醒，也不发送新任务邮件。', 'Baseline re-sync (site data is out of date): do not create QA BRT alerts for rows that disappeared, and do not e-mail new tasks.') }}
       </label>
       <button type="submit" class="btn btn-success">
-        &#10003; <span class="lt" data-en="Apply this schedule" data-zh="确认应用">确认应用</span></button>
+        &#10003; {{ tr('确认应用', 'Apply this schedule') }}</button>
     </form>
     <form method="POST" action="{{ url_for('upload_cancel') }}">
       <button type="submit" class="btn btn-outline">
-        <span class="lt" data-en="Cancel" data-zh="取消">取消</span></button>
+        {{ tr('取消', 'Cancel') }}</button>
     </form>
   </div>
 </div>

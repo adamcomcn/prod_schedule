@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ 'zh-CN' if current_lang() == 'zh' else 'en' }}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Login — Production Schedule</title>
+<title>{{ tr('登录 — 生产排期', 'Login — Production Schedule') }}</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -18,10 +18,11 @@ input { width: 100%; border: 1px solid #d0d5dd; border-radius: 6px;
         padding: 10px 12px; font-size: .9rem; outline: none;
         transition: border-color .15s, box-shadow .15s; margin-bottom: 16px; }
 input:focus { border-color: #1a6fc4; box-shadow: 0 0 0 3px rgba(26,111,196,.12); }
-button { width: 100%; background: #1a6fc4; color: #fff; border: none;
+button.primary { width: 100%; background: #1a6fc4; color: #fff; border: none;
          border-radius: 6px; padding: 11px; font-size: .95rem; font-weight: 600;
          cursor: pointer; transition: background .15s; margin-top: 4px; }
-button:hover { background: #155fa0; }
+button.primary:hover { background: #155fa0; }
+.lang { display:block; text-align:right; font-size:.8rem; margin:-20px -12px 12px 0; color:#1a6fc4; text-decoration:none; }
 .alert { padding: 10px 14px; border-radius: 6px; margin-bottom: 16px;
          font-size: .85rem; background: #fee2e2; color: #991b1b;
          border: 1px solid #fca5a5; }
@@ -29,8 +30,9 @@ button:hover { background: #155fa0; }
 </head>
 <body>
 <div class="card">
-  <div class="brand">Production Schedule</div>
-  <div class="subtitle">请登录以继续 / Sign in to continue</div>
+  <a class="lang" href="{{ url_for('set_language', code='en' if current_lang() == 'zh' else 'zh', next=request.full_path.rstrip('?')) }}">{{ 'English' if current_lang() == 'zh' else '中文' }}</a>
+  <div class="brand">{{ tr('生产排期 · 质检平台', 'Production Schedule') }}</div>
+  <div class="subtitle">{{ tr('请登录以继续', 'Sign in to continue') }}</div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for category, message in messages %}
@@ -40,11 +42,11 @@ button:hover { background: #155fa0; }
 
   <form method="POST">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-    <label for="username">用户名 / Username</label>
+    <label for="username">{{ tr('用户名', 'Username') }}</label>
     <input type="text" id="username" name="username" autocomplete="username" required>
-    <label for="password">密码 / Password</label>
+    <label for="password">{{ tr('密码', 'Password') }}</label>
     <input type="password" id="password" name="password" autocomplete="current-password" required>
-    <button type="submit">登录 / Login</button>
+    <button type="submit" class="primary">{{ tr('登录', 'Log in') }}</button>
   </form>
 </div>
 </body>

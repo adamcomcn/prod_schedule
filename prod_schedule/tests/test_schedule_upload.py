@@ -185,7 +185,7 @@ class UploadFlowTests(unittest.TestCase):
         renamed = [['Order Number', 'PO Number', 'Item Code', 'Item Description', 'Quantity',
                     'Estimated Completion Date', 'QA BRTs Sent?']] + rows[1:]
         summary = app.schedule_diff_summary({'MELBOURNE': rows}, {'MELBOURNE': renamed})
-        self.assertTrue(any('renamed' in w for w in summary['warnings']))
+        self.assertTrue(any('列名' in w for w in summary['warnings']))
         self.assertTrue(current)
 
     def test_inspector_cannot_confirm_upload(self):

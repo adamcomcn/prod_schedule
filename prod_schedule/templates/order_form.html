@@ -7,7 +7,7 @@
 
   <div style="margin-bottom:16px;">
     <a href="{{ url_for('orders') }}" style="font-size:.85rem; color:#6b7280;">
-      &#8592; 返回订单列表
+      &#8592; {{ tr('返回订单列表', 'Back to orders') }}
     </a>
   </div>
 
@@ -18,16 +18,16 @@
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 20px;">
 
         <div class="form-group">
-          <label>订单号 <span style="color:#dc2626;">*</span></label>
+          <label>{{ tr('订单号', 'Order number') }} <span style="color:#dc2626;">*</span></label>
           <input type="text" name="order_number" required
                  value="{{ order.order_number if order else '' }}"
-                 placeholder="如 DPL2600">
+                 placeholder="{{ tr('如 DPL2600', 'e.g. DPL2600') }}">
         </div>
 
         <div class="form-group">
-          <label>区域</label>
+          <label>{{ tr('区域', 'Region') }}</label>
           <select name="region">
-            <option value="">— 选择区域 —</option>
+            <option value="">{{ tr('— 选择区域 —', '— Select region —') }}</option>
             {% for r in ['MELBOURNE','FIJI','QLD','NEW ZEALAND','DI FITTING','PRETAPS'] %}
             <option value="{{ r }}"
               {{ 'selected' if order and order.region == r else '' }}>{{ r }}</option>
@@ -36,30 +36,30 @@
         </div>
 
         <div class="form-group">
-          <label>产品编码</label>
+          <label>{{ tr('产品编码', 'Item code') }}</label>
           <input type="text" name="item_code"
                  value="{{ order.item_code if order else '' }}"
-                 placeholder="如 RSV0150FL">
+                 placeholder="{{ tr('如 RSV0150FL', 'e.g. RSV0150FL') }}">
         </div>
 
         <div class="form-group">
-          <label>客户</label>
+          <label>{{ tr('客户', 'Customer') }}</label>
           <input type="text" name="customer"
                  value="{{ order.customer if order else '' }}"
-                 placeholder="客户名称">
+                 placeholder="{{ tr('客户名称', 'Customer name') }}">
         </div>
 
         <div class="form-group" style="grid-column:1/-1;">
-          <label>产品描述</label>
+          <label>{{ tr('产品描述', 'Description') }}</label>
           <input type="text" name="description"
                  value="{{ order.description if order else '' }}"
-                 placeholder="产品完整描述">
+                 placeholder="{{ tr('产品完整描述', 'Full product description') }}">
         </div>
 
         <div class="form-group">
-          <label>供应商</label>
+          <label>{{ tr('供应商', 'Supplier') }}</label>
           <select name="supplier_id">
-            <option value="">— 选择供应商 —</option>
+            <option value="">{{ tr('— 选择供应商 —', '— Select supplier —') }}</option>
             {% for s in suppliers %}
             <option value="{{ s.id }}"
               {{ 'selected' if order and order.supplier_id == s.id else '' }}>
@@ -70,9 +70,9 @@
         </div>
 
         <div class="form-group">
-          <label>产品类别</label>
+          <label>{{ tr('产品类别', 'Category') }}</label>
           <select name="category_id">
-            <option value="">— 选择类别 —</option>
+            <option value="">{{ tr('— 选择类别 —', '— Select category —') }}</option>
             {% for c in cats %}
             <option value="{{ c.id }}"
               {{ 'selected' if order and order.category_id == c.id else '' }}>
@@ -83,47 +83,47 @@
         </div>
 
         <div class="form-group">
-          <label>数量</label>
+          <label>{{ tr('数量', 'Quantity') }}</label>
           <input type="number" name="quantity" min="0" step="0.01"
                  value="{{ order.quantity if order else '' }}"
                  placeholder="0">
         </div>
 
         <div class="form-group">
-          <label>状态</label>
+          <label>{{ tr('状态', 'Status') }}</label>
           <select name="status">
             {% for s in ['Pending','In Progress','Shipped','On Hold'] %}
             <option value="{{ s }}"
               {{ 'selected' if order and order.status == s else ('' if order else ('selected' if s == 'Pending' else '')) }}>
-              {{ s }}
+              {{ s|status_label }}
             </option>
             {% endfor %}
           </select>
         </div>
 
         <div class="form-group">
-          <label>下单日期</label>
+          <label>{{ tr('下单日期', 'Order date') }}</label>
           <input type="date" name="order_date"
                  value="{{ order.order_date if order else '' }}">
         </div>
 
         <div class="form-group">
-          <label>预计交期 (ETA)</label>
+          <label>{{ tr('预计交期 (ETA)', 'ETA') }}</label>
           <input type="date" name="eta"
                  value="{{ order.eta if order else '' }}">
         </div>
 
         <div class="form-group" style="grid-column:1/-1;">
-          <label>备注</label>
+          <label>{{ tr('备注', 'Notes') }}</label>
           <textarea name="notes" rows="3"
-                    placeholder="其他说明">{{ order.notes if order else '' }}</textarea>
+                    placeholder="{{ tr('其他说明', 'Other notes') }}">{{ order.notes if order else '' }}</textarea>
         </div>
 
       </div>
 
       <div style="display:flex; gap:10px; margin-top:4px;">
-        <button type="submit" class="btn btn-primary">保存</button>
-        <a href="{{ url_for('orders') }}" class="btn btn-outline">取消</a>
+        <button type="submit" class="btn btn-primary">{{ tr('保存', 'Save') }}</button>
+        <a href="{{ url_for('orders') }}" class="btn btn-outline">{{ tr('取消', 'Cancel') }}</a>
       </div>
     </form>
   </div>

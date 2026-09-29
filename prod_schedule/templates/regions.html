@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}区域管理{% endblock %}
+{% block title %}{{ tr('区域管理', 'Regions') }}{% endblock %}
 
 {% block extra_style %}
 .region-tree { font-size:.875rem; }
@@ -49,25 +49,25 @@
 <div style="max-width:900px; margin:0 auto;">
 
   <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c; margin-bottom:16px;">
-    区域信息管理
-    <span style="font-size:.8rem; font-weight:400; color:#9ca3af; margin-left:8px;">省份 → 城市 → 厂区 → 车间</span>
+    {{ tr('区域信息管理', 'Regions') }}
+    <span style="font-size:.8rem; font-weight:400; color:#9ca3af; margin-left:8px;">{{ tr('省份 → 城市 → 厂区 → 车间', 'Province → City → Factory → Workshop') }}</span>
   </h1>
 
   <!-- Add root (province) -->
   <div class="add-form">
-    <div class="add-form-title">新增省份（一级区域）</div>
+    <div class="add-form-title">{{ tr('新增省份（一级区域）', 'New province (top level)') }}</div>
     <form method="POST" action="{{ url_for('region_new') }}">
       <input type="hidden" name="level" value="1">
       <div class="add-inline">
         <div class="inline-field">
-          <label>省份名称 *</label>
-          <input type="text" name="name" required placeholder="如：广东省" style="width:160px;">
+          <label>{{ tr('省份名称 *', 'Province name *') }}</label>
+          <input type="text" name="name" required placeholder="{{ tr('如：广东省', 'e.g. Guangdong') }}" style="width:160px;">
         </div>
         <div class="inline-field">
-          <label>编码（选填）</label>
+          <label>{{ tr('编码（选填）', 'Code (optional)') }}</label>
           <input type="text" name="code" placeholder="GD" style="width:80px;">
         </div>
-        <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-end;">添加省份</button>
+        <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-end;">{{ tr('添加省份', 'Add province') }}</button>
       </div>
     </form>
   </div>
@@ -80,15 +80,15 @@
       <div class="rnode level-1" id="node-{{ prov.id }}">
         <div class="rnode-row">
           <span class="rnode-toggle" onclick="toggleNode({{ prov.id }})">▼</span>
-          <span class="level-badge lv1">省</span>
+          <span class="level-badge lv1">{{ tr('省', 'Prov') }}</span>
           <span class="rnode-name">{{ prov.name }}</span>
           {% if prov.code %}<span class="rnode-code">{{ prov.code }}</span>{% endif %}
           <div class="rnode-actions">
-            <button class="btn-add-child" onclick="openAddModal({{ prov.id }}, 2, '{{ prov.name }}')">+ 添加城市</button>
-            <button class="btn-edit-node" onclick="openEditModal({{ prov.id }}, '{{ prov.name }}', '{{ prov.code }}')">编辑</button>
+            <button class="btn-add-child" onclick="openAddModal({{ prov.id }}, 2, {{ (prov.name or '')|tojson|forceescape }})">{{ tr('+ 添加城市', '+ Add city') }}</button>
+            <button class="btn-edit-node" onclick="openEditModal({{ prov.id }}, {{ (prov.name or '')|tojson|forceescape }}, {{ (prov.code or '')|tojson|forceescape }})">{{ tr('编辑', 'Edit') }}</button>
             <form method="POST" action="{{ url_for('region_delete', rid=prov.id) }}" style="display:inline"
-                  onsubmit="return confirm('删除「{{ prov.name }}」及其所有下级区域？')">
-              <button class="btn-del-node" type="submit">删除</button>
+                  onsubmit="return confirm(this.dataset.confirm)" data-confirm="{{ tr('删除「' ~ prov.name ~ '」及其所有下级区域？', 'Delete "' ~ prov.name ~ '" and all its sub-regions?') }}">
+              <button class="btn-del-node" type="submit">{{ tr('删除', 'Delete') }}</button>
             </form>
           </div>
         </div>
@@ -97,15 +97,15 @@
           <div class="rnode level-2" id="node-{{ city.id }}">
             <div class="rnode-row">
               <span class="rnode-toggle" onclick="toggleNode({{ city.id }})">{% if city.children %}▼{% else %}&nbsp;{% endif %}</span>
-              <span class="level-badge lv2">市</span>
+              <span class="level-badge lv2">{{ tr('市', 'City') }}</span>
               <span class="rnode-name">{{ city.name }}</span>
               {% if city.code %}<span class="rnode-code">{{ city.code }}</span>{% endif %}
               <div class="rnode-actions">
-                <button class="btn-add-child" onclick="openAddModal({{ city.id }}, 3, '{{ city.name }}')">+ 添加厂区</button>
-                <button class="btn-edit-node" onclick="openEditModal({{ city.id }}, '{{ city.name }}', '{{ city.code }}')">编辑</button>
+                <button class="btn-add-child" onclick="openAddModal({{ city.id }}, 3, {{ (city.name or '')|tojson|forceescape }})">{{ tr('+ 添加厂区', '+ Add factory') }}</button>
+                <button class="btn-edit-node" onclick="openEditModal({{ city.id }}, {{ (city.name or '')|tojson|forceescape }}, {{ (city.code or '')|tojson|forceescape }})">{{ tr('编辑', 'Edit') }}</button>
                 <form method="POST" action="{{ url_for('region_delete', rid=city.id) }}" style="display:inline"
-                      onsubmit="return confirm('删除「{{ city.name }}」及其所有下级？')">
-                  <button class="btn-del-node" type="submit">删除</button>
+                      onsubmit="return confirm(this.dataset.confirm)" data-confirm="{{ tr('删除「' ~ city.name ~ '」及其所有下级？', 'Delete "' ~ city.name ~ '" and everything under it?') }}">
+                  <button class="btn-del-node" type="submit">{{ tr('删除', 'Delete') }}</button>
                 </form>
               </div>
             </div>
@@ -114,15 +114,15 @@
               <div class="rnode level-3" id="node-{{ factory.id }}">
                 <div class="rnode-row">
                   <span class="rnode-toggle" onclick="toggleNode({{ factory.id }})">{% if factory.children %}▼{% else %}&nbsp;{% endif %}</span>
-                  <span class="level-badge lv3">厂</span>
+                  <span class="level-badge lv3">{{ tr('厂', 'Fac') }}</span>
                   <span class="rnode-name">{{ factory.name }}</span>
                   {% if factory.code %}<span class="rnode-code">{{ factory.code }}</span>{% endif %}
                   <div class="rnode-actions">
-                    <button class="btn-add-child" onclick="openAddModal({{ factory.id }}, 4, '{{ factory.name }}')">+ 添加车间</button>
-                    <button class="btn-edit-node" onclick="openEditModal({{ factory.id }}, '{{ factory.name }}', '{{ factory.code }}')">编辑</button>
+                    <button class="btn-add-child" onclick="openAddModal({{ factory.id }}, 4, {{ (factory.name or '')|tojson|forceescape }})">{{ tr('+ 添加车间', '+ Add workshop') }}</button>
+                    <button class="btn-edit-node" onclick="openEditModal({{ factory.id }}, {{ (factory.name or '')|tojson|forceescape }}, {{ (factory.code or '')|tojson|forceescape }})">{{ tr('编辑', 'Edit') }}</button>
                     <form method="POST" action="{{ url_for('region_delete', rid=factory.id) }}" style="display:inline"
-                          onsubmit="return confirm('删除「{{ factory.name }}」？')">
-                      <button class="btn-del-node" type="submit">删除</button>
+                          onsubmit="return confirm(this.dataset.confirm)" data-confirm="{{ tr('删除「' ~ factory.name ~ '」？', 'Delete "' ~ factory.name ~ '"?') }}">
+                      <button class="btn-del-node" type="submit">{{ tr('删除', 'Delete') }}</button>
                     </form>
                   </div>
                 </div>
@@ -131,14 +131,14 @@
                   <div class="rnode level-4" id="node-{{ ws.id }}">
                     <div class="rnode-row">
                       <span class="rnode-toggle">&nbsp;</span>
-                      <span class="level-badge lv4">间</span>
+                      <span class="level-badge lv4">{{ tr('间', 'WS') }}</span>
                       <span class="rnode-name">{{ ws.name }}</span>
                       {% if ws.code %}<span class="rnode-code">{{ ws.code }}</span>{% endif %}
                       <div class="rnode-actions">
-                        <button class="btn-edit-node" onclick="openEditModal({{ ws.id }}, '{{ ws.name }}', '{{ ws.code }}')">编辑</button>
+                        <button class="btn-edit-node" onclick="openEditModal({{ ws.id }}, {{ (ws.name or '')|tojson|forceescape }}, {{ (ws.code or '')|tojson|forceescape }})">{{ tr('编辑', 'Edit') }}</button>
                         <form method="POST" action="{{ url_for('region_delete', rid=ws.id) }}" style="display:inline"
-                              onsubmit="return confirm('删除「{{ ws.name }}」？')">
-                          <button class="btn-del-node" type="submit">删除</button>
+                              onsubmit="return confirm(this.dataset.confirm)" data-confirm="{{ tr('删除「' ~ ws.name ~ '」？', 'Delete "' ~ ws.name ~ '"?') }}">
+                          <button class="btn-del-node" type="submit">{{ tr('删除', 'Delete') }}</button>
                         </form>
                       </div>
                     </div>
@@ -156,7 +156,7 @@
     </div>
     {% else %}
     <div style="text-align:center; padding:48px; color:#9ca3af; font-size:.9rem;">
-      暂无区域数据，请先添加省份
+      {{ tr('暂无区域数据，请先添加省份', 'No regions yet — add a province first') }}
     </div>
     {% endif %}
   </div>
@@ -167,21 +167,21 @@
 <!-- Add child modal -->
 <div class="modal-overlay" id="addModal">
   <div class="modal-box">
-    <div class="modal-title" id="addModalTitle">新增下级区域</div>
+    <div class="modal-title" id="addModalTitle">{{ tr('新增下级区域', 'New sub-region') }}</div>
     <form method="POST" action="{{ url_for('region_new') }}" id="addModalForm">
       <input type="hidden" name="level" id="addLevel">
       <input type="hidden" name="parent_id" id="addParentId">
       <div class="form-group">
-        <label id="addLabel">名称 *</label>
+        <label id="addLabel">{{ tr('名称 *', 'Name *') }}</label>
         <input type="text" name="name" required autofocus placeholder="">
       </div>
       <div class="form-group">
-        <label>编码（选填）</label>
+        <label>{{ tr('编码（选填）', 'Code (optional)') }}</label>
         <input type="text" name="code" placeholder="">
       </div>
       <div style="display:flex; gap:10px; margin-top:4px;">
-        <button type="submit" class="btn btn-primary">添加</button>
-        <button type="button" class="btn btn-outline" onclick="closeModal('addModal')">取消</button>
+        <button type="submit" class="btn btn-primary">{{ tr('添加', 'Add') }}</button>
+        <button type="button" class="btn btn-outline" onclick="closeModal('addModal')">{{ tr('取消', 'Cancel') }}</button>
       </div>
     </form>
   </div>
@@ -190,26 +190,27 @@
 <!-- Edit modal -->
 <div class="modal-overlay" id="editModal">
   <div class="modal-box">
-    <div class="modal-title">编辑区域</div>
+    <div class="modal-title">{{ tr('编辑区域', 'Edit region') }}</div>
     <form method="POST" id="editForm">
       <div class="form-group">
-        <label>名称 *</label>
+        <label>{{ tr('名称 *', 'Name *') }}</label>
         <input type="text" name="name" id="editName" required>
       </div>
       <div class="form-group">
-        <label>编码（选填）</label>
+        <label>{{ tr('编码（选填）', 'Code (optional)') }}</label>
         <input type="text" name="code" id="editCode">
       </div>
       <div style="display:flex; gap:10px; margin-top:4px;">
-        <button type="submit" class="btn btn-primary">保存</button>
-        <button type="button" class="btn btn-outline" onclick="closeModal('editModal')">取消</button>
+        <button type="submit" class="btn btn-primary">{{ tr('保存', 'Save') }}</button>
+        <button type="button" class="btn btn-outline" onclick="closeModal('editModal')">{{ tr('取消', 'Cancel') }}</button>
       </div>
     </form>
   </div>
 </div>
 
 <script>
-const LEVEL_NAMES = { 1:'省份', 2:'城市', 3:'厂区', 4:'车间' };
+const LEVEL_NAMES = {{ {1: tr('省份', 'Province'), 2: tr('城市', 'City'), 3: tr('厂区', 'Factory'), 4: tr('车间', 'Workshop')}|tojson }};
+const RTXT = {{ {'addUnder': tr('在「{0}」下添加', 'Add under "{0}": '), 'sub': tr('下级', 'sub-region'), 'name': tr('名称', 'Name')}|tojson }};
 
 function toggleNode(id) {
   const ch = document.getElementById('children-' + id);
@@ -223,8 +224,8 @@ function toggleNode(id) {
 function openAddModal(parentId, level, parentName) {
   document.getElementById('addLevel').value = level;
   document.getElementById('addParentId').value = parentId;
-  document.getElementById('addModalTitle').textContent = '在「' + parentName + '」下添加' + (LEVEL_NAMES[level] || '下级');
-  document.getElementById('addLabel').textContent = (LEVEL_NAMES[level] || '名称') + ' *';
+  document.getElementById('addModalTitle').textContent = RTXT.addUnder.replace('{0}', parentName) + (LEVEL_NAMES[level] || RTXT.sub);
+  document.getElementById('addLabel').textContent = (LEVEL_NAMES[level] || RTXT.name) + ' *';
   document.getElementById('addModal').classList.add('open');
 }
 

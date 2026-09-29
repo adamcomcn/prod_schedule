@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}{{ tr('仪表板', 'Dashboard') }}{% endblock %}
 
 {% block extra_style %}
 .dash-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 16px; }
@@ -60,43 +60,43 @@
 
   <!-- Header -->
   <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:16px;">
-    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;"><span class="lt" data-en="Dashboard" data-zh="仪表板">Dashboard</span></h1>
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">{{ tr('仪表板', 'Dashboard') }}</h1>
     {% if upload_date %}
-    <span style="font-size:.8rem; color:#9ca3af;"><span class="lt" data-en="Week uploaded:" data-zh="本周上传：">Week uploaded:</span> {{ upload_date }}</span>
+    <span style="font-size:.8rem; color:#9ca3af;">{{ tr('本周上传：', 'Week uploaded:') }} {{ upload_date }}</span>
     {% endif %}
   </div>
 
   <!-- Status cards -->
   <div class="dash-grid">
     <div class="stat-card">
-      <div class="stat-label"><span class="lt" data-en="Total Jobs" data-zh="总任务数">Total Jobs</span></div>
+      <div class="stat-label">{{ tr('总任务数', 'Total Jobs') }}</div>
       <div class="stat-value" style="color:#1a3a5c;">{{ totals.total }}</div>
-      <div class="stat-sub"><span class="lt" data-en="this week" data-zh="本周">this week</span></div>
+      <div class="stat-sub">{{ tr('本周', 'this week') }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label"><span class="lt" data-en="New" data-zh="新增">New</span></div>
+      <div class="stat-label">{{ tr('新增', 'New') }}</div>
       <div class="stat-value c-new">{{ totals.new }}</div>
-      <div class="stat-sub"><span class="lt" data-en="added this week" data-zh="本周新增">added this week</span></div>
+      <div class="stat-sub">{{ tr('本周新增', 'added this week') }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label"><span class="lt" data-en="Not Shipped" data-zh="未发货">Not Shipped</span></div>
+      <div class="stat-label">{{ tr('未发货', 'Not Shipped') }}</div>
       <div class="stat-value c-not">{{ totals.not_shipped }}</div>
-      <div class="stat-sub"><span class="lt" data-en="still with supplier" data-zh="仍在供应商处">still with supplier</span></div>
+      <div class="stat-sub">{{ tr('仍在供应商处', 'still with supplier') }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label"><span class="lt" data-en="Partially Shipped" data-zh="部分发货">Partially Shipped</span></div>
+      <div class="stat-label">{{ tr('部分发货', 'Partially Shipped') }}</div>
       <div class="stat-value c-partial">{{ totals.partially_shipped }}</div>
-      <div class="stat-sub"><span class="lt" data-en="qty reduced" data-zh="数量减少">qty reduced</span></div>
+      <div class="stat-sub">{{ tr('数量减少', 'qty reduced') }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label"><span class="lt" data-en="Shipped" data-zh="已发货">Shipped</span></div>
+      <div class="stat-label">{{ tr('已发货', 'Shipped') }}</div>
       <div class="stat-value c-shipped">{{ totals.shipped }}</div>
-      <div class="stat-sub"><span class="lt" data-en="left schedule" data-zh="已离开排期">left schedule</span></div>
+      <div class="stat-sub">{{ tr('已离开排期', 'left schedule') }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label"><span class="lt" data-en="Typo Flags" data-zh="疑似错误">Typo Flags</span></div>
+      <div class="stat-label">{{ tr('疑似错误', 'Typo Flags') }}</div>
       <div class="stat-value c-typo">{{ typo_count }}</div>
-      <div class="stat-sub"><span class="lt" data-en="need review" data-zh="需核查">need review</span></div>
+      <div class="stat-sub">{{ tr('需核查', 'need review') }}</div>
     </div>
   </div>
 
@@ -104,7 +104,7 @@
   {% if totals.total > 0 %}
   <div class="card" style="margin-bottom:16px;">
     <div class="card-title">
-      <span class="lt" data-en="Schedule Movement vs Last Week" data-zh="本周排期变动（对比上周）">Schedule Movement vs Last Week</span>
+      {{ tr('本周排期变动（对比上周）', 'Schedule Movement vs Last Week') }}
     </div>
 
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:start;">
@@ -113,7 +113,7 @@
       <div>
         <div style="font-size:.72rem; font-weight:600; text-transform:uppercase;
                     letter-spacing:.05em; color:#9ca3af; margin-bottom:14px;">
-          <span class="lt" data-en="Week-over-week flow" data-zh="周环比流转">Week-over-week flow</span>
+          {{ tr('周环比流转', 'Week-over-week flow') }}
         </div>
 
         <div style="display:flex; align-items:center; gap:10px;">
@@ -125,7 +125,7 @@
               {{ prev_total }}
             </div>
             <div style="font-size:.68rem; color:#9ca3af; margin-top:3px;">
-              <span class="lt" data-en="Last week" data-zh="上周">Last week</span>
+              {{ tr('上周', 'Last week') }}
             </div>
           </div>
 
@@ -138,7 +138,7 @@
               </span>
               <div style="flex:1; height:2px; background:#d1d5db; border-radius:1px;"></div>
               <span style="color:#6b7280; font-size:.7rem; white-space:nowrap;">
-                <span class="lt" data-en="shipped" data-zh="已发货">shipped</span>
+                {{ tr('已发货', 'shipped') }}
               </span>
             </div>
             {% endif %}
@@ -149,7 +149,7 @@
               </span>
               <div style="flex:1; height:2px; background:#6ee7b7; border-radius:1px;"></div>
               <span style="color:#059669; font-size:.7rem; white-space:nowrap;">
-                <span class="lt" data-en="new orders" data-zh="新增订单">new orders</span>
+                {{ tr('新增订单', 'new orders') }}
               </span>
             </div>
             {% endif %}
@@ -160,7 +160,7 @@
               </span>
               <div style="flex:1; height:2px; background:#fcd34d; border-radius:1px;"></div>
               <span style="color:#d97706; font-size:.7rem; white-space:nowrap;">
-                <span class="lt" data-en="partial" data-zh="部分发货">partial</span>
+                {{ tr('部分发货', 'partial') }}
               </span>
             </div>
             {% endif %}
@@ -174,7 +174,7 @@
               {{ curr_in_schedule }}
             </div>
             <div style="font-size:.68rem; color:#6b7280; margin-top:3px;">
-              <span class="lt" data-en="This week" data-zh="本周">This week</span>
+              {{ tr('本周', 'This week') }}
             </div>
           </div>
         </div>
@@ -182,18 +182,18 @@
         <!-- Net change label -->
         {% set net = curr_in_schedule - prev_total %}
         <div style="margin-top:12px; text-align:center; font-size:.82rem; color:#6b7280;">
-          <span class="lt" data-en="Net change:" data-zh="净变化：">Net change:</span>
+          {{ tr('净变化：', 'Net change:') }}
           <strong style="margin-left:4px;
             color:{% if net > 0 %}#dc2626{% elif net < 0 %}#059669{% else %}#6b7280{% endif %};">
             {% if net > 0 %}+{% endif %}{{ net }}
           </strong>
           <span style="margin-left:6px; font-size:.75rem; color:#9ca3af;">
             {% if net > 0 %}
-              <span class="lt" data-en="schedule grew" data-zh="排期增加">schedule grew</span>
+              {{ tr('排期增加', 'schedule grew') }}
             {% elif net < 0 %}
-              <span class="lt" data-en="schedule reduced" data-zh="排期缩减">schedule reduced</span>
+              {{ tr('排期缩减', 'schedule reduced') }}
             {% else %}
-              <span class="lt" data-en="no net change" data-zh="持平">no net change</span>
+              {{ tr('持平', 'no net change') }}
             {% endif %}
           </span>
         </div>
@@ -203,7 +203,7 @@
       <div>
         <div style="font-size:.72rem; font-weight:600; text-transform:uppercase;
                     letter-spacing:.05em; color:#9ca3af; margin-bottom:14px;">
-          <span class="lt" data-en="This week's status composition" data-zh="本周状态分布">This week's status composition</span>
+          {{ tr('本周状态分布', 'This week\'s status composition') }}
         </div>
 
         <!-- Stacked bar -->
@@ -212,22 +212,22 @@
           {% if totals.new > 0 %}
           <div style="width:{{ (totals.new / totals.total * 100)|round(1) }}%;
                       background:#10b981;"
-               title="New: {{ totals.new }}"></div>
+               title="{{ tr('新增', 'New') }}: {{ totals.new }}"></div>
           {% endif %}
           {% if totals.not_shipped > 0 %}
           <div style="width:{{ (totals.not_shipped / totals.total * 100)|round(1) }}%;
                       background:#ef4444;"
-               title="Not Shipped: {{ totals.not_shipped }}"></div>
+               title="{{ tr('未出货', 'Not Shipped') }}: {{ totals.not_shipped }}"></div>
           {% endif %}
           {% if totals.partially_shipped > 0 %}
           <div style="width:{{ (totals.partially_shipped / totals.total * 100)|round(1) }}%;
                       background:#f59e0b;"
-               title="Partial: {{ totals.partially_shipped }}"></div>
+               title="{{ tr('部分出货', 'Partial') }}: {{ totals.partially_shipped }}"></div>
           {% endif %}
           {% if totals.shipped > 0 %}
           <div style="width:{{ (totals.shipped / totals.total * 100)|round(1) }}%;
                       background:#9ca3af;"
-               title="Shipped: {{ totals.shipped }}"></div>
+               title="{{ tr('已出货', 'Shipped') }}: {{ totals.shipped }}"></div>
           {% endif %}
         </div>
 
@@ -236,7 +236,7 @@
           <div style="display:flex; align-items:center; gap:7px;">
             <span style="width:11px; height:11px; border-radius:3px; background:#10b981; flex-shrink:0;"></span>
             <span>
-              <span class="lt" data-en="New" data-zh="新增">New</span>:
+              {{ tr('新增', 'New') }}:
               <strong>{{ totals.new }}</strong>
               <span style="color:#9ca3af;">({{ (totals.new / totals.total * 100)|round(0)|int }}%)</span>
             </span>
@@ -244,7 +244,7 @@
           <div style="display:flex; align-items:center; gap:7px;">
             <span style="width:11px; height:11px; border-radius:3px; background:#ef4444; flex-shrink:0;"></span>
             <span>
-              <span class="lt" data-en="Not Shipped" data-zh="未发货">Not Shipped</span>:
+              {{ tr('未发货', 'Not Shipped') }}:
               <strong>{{ totals.not_shipped }}</strong>
               <span style="color:#9ca3af;">({{ (totals.not_shipped / totals.total * 100)|round(0)|int }}%)</span>
             </span>
@@ -252,7 +252,7 @@
           <div style="display:flex; align-items:center; gap:7px;">
             <span style="width:11px; height:11px; border-radius:3px; background:#f59e0b; flex-shrink:0;"></span>
             <span>
-              <span class="lt" data-en="Partial" data-zh="部分发货">Partial</span>:
+              {{ tr('部分发货', 'Partial') }}:
               <strong>{{ totals.partially_shipped }}</strong>
               <span style="color:#9ca3af;">({{ (totals.partially_shipped / totals.total * 100)|round(0)|int }}%)</span>
             </span>
@@ -260,7 +260,7 @@
           <div style="display:flex; align-items:center; gap:7px;">
             <span style="width:11px; height:11px; border-radius:3px; background:#9ca3af; flex-shrink:0;"></span>
             <span>
-              <span class="lt" data-en="Shipped" data-zh="已发货">Shipped</span>:
+              {{ tr('已发货', 'Shipped') }}:
               <strong>{{ totals.shipped }}</strong>
               <span style="color:#9ca3af;">({{ (totals.shipped / totals.total * 100)|round(0)|int }}%)</span>
             </span>
@@ -272,7 +272,7 @@
         <div style="margin-top:16px; padding-top:14px; border-top:1px solid #f1f5f9;">
           <div style="font-size:.72rem; color:#9ca3af; font-weight:600;
                       text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px;">
-            <span class="lt" data-en="By region" data-zh="按区域">By region</span>
+            {{ tr('按区域', 'By region') }}
           </div>
           {% for region, s in region_stats.items() %}
           {% if s.total > 0 %}
@@ -305,31 +305,31 @@
   <div class="alert-row">
     {% if totals.qa_violations > 0 %}
     <div class="alert-chip chip-qa">
-      &#9888; <span class="lt" data-en="QA BRT Violations:" data-zh="QA BRT违规：">QA BRT Violations:</span> <strong>{{ totals.qa_violations }}</strong>
-      <span style="font-weight:400; font-size:.8rem;"><span class="lt" data-en="shipped/partial without QA BRTs sent" data-zh="已发货/部分发货但未发送QA BRT">shipped/partial without QA BRTs sent</span></span>
+      &#9888; {{ tr('QA BRT违规：', 'QA BRT Violations:') }} <strong>{{ totals.qa_violations }}</strong>
+      <span style="font-weight:400; font-size:.8rem;">{{ tr('已发货/部分发货但未发送QA BRT', 'shipped/partial without QA BRTs sent') }}</span>
     </div>
     {% else %}
-    <div class="alert-chip chip-ok">&#10003; <span class="lt" data-en="No QA BRT violations" data-zh="无QA BRT违规">No QA BRT violations</span></div>
+    <div class="alert-chip chip-ok">&#10003; {{ tr('无QA BRT违规', 'No QA BRT violations') }}</div>
     {% endif %}
 
     {% if totals.vtrust_violations > 0 %}
     <div class="alert-chip chip-vtrust">
-      &#9888; <span class="lt" data-en="V-Trust Violations:" data-zh="V-Trust违规：">V-Trust Violations:</span> <strong>{{ totals.vtrust_violations }}</strong>
-      <span style="font-weight:400; font-size:.8rem;"><span class="lt" data-en="valves shipped/partial without V-Trust pass" data-zh="阀门已发货/部分发货但无V-Trust通过记录">valves shipped/partial without V-Trust pass</span></span>
+      &#9888; {{ tr('V-Trust违规：', 'V-Trust Violations:') }} <strong>{{ totals.vtrust_violations }}</strong>
+      <span style="font-weight:400; font-size:.8rem;">{{ tr('阀门已发货/部分发货但无V-Trust通过记录', 'valves shipped/partial without V-Trust pass') }}</span>
     </div>
     {% else %}
-    <div class="alert-chip chip-ok">&#10003; <span class="lt" data-en="No V-Trust violations" data-zh="无V-Trust违规">No V-Trust violations</span></div>
+    <div class="alert-chip chip-ok">&#10003; {{ tr('无V-Trust违规', 'No V-Trust violations') }}</div>
     {% endif %}
   </div>
 
   <!-- Inspection progress -->
   <div class="card">
-    <div class="card-title"><span class="lt" data-en="Inspection Progress" data-zh="检验进度">Inspection Progress</span></div>
+    <div class="card-title">{{ tr('检验进度', 'Inspection Progress') }}</div>
     {% if totals.total > 0 %}
     {% set inspected = totals.insp_pass + totals.insp_fail + totals.insp_partial %}
     <div style="margin-bottom:6px;">
       <span style="font-size:1.6rem; font-weight:700; color:#1a3a5c;">{{ inspected }}</span>
-      <span style="font-size:.9rem; color:#6b7280;"> / {{ totals.total }} <span class="lt" data-en="inspected" data-zh="已检验">inspected</span></span>
+      <span style="font-size:.9rem; color:#6b7280;"> / {{ totals.total }} {{ tr('已检验', 'inspected') }}</span>
     </div>
     <div class="insp-bar">
       {% if totals.insp_pass > 0 %}
@@ -343,19 +343,19 @@
       {% endif %}
     </div>
     <div class="insp-legend">
-      <span><span class="dot" style="background:#10b981;"></span><span class="lt" data-en="Pass:" data-zh="通过：">Pass:</span> <strong>{{ totals.insp_pass }}</strong></span>
-      <span><span class="dot" style="background:#ef4444;"></span><span class="lt" data-en="Fail:" data-zh="不通过：">Fail:</span> <strong>{{ totals.insp_fail }}</strong></span>
-      <span><span class="dot" style="background:#f59e0b;"></span><span class="lt" data-en="Partial Pass:" data-zh="部分通过：">Partial Pass:</span> <strong>{{ totals.insp_partial }}</strong></span>
-      <span><span class="dot" style="background:#e5e7eb;"></span><span class="lt" data-en="Pending:" data-zh="待检：">Pending:</span> <strong>{{ totals.insp_pending }}</strong></span>
+      <span><span class="dot" style="background:#10b981;"></span>{{ tr('通过：', 'Pass:') }} <strong>{{ totals.insp_pass }}</strong></span>
+      <span><span class="dot" style="background:#ef4444;"></span>{{ tr('不通过：', 'Fail:') }} <strong>{{ totals.insp_fail }}</strong></span>
+      <span><span class="dot" style="background:#f59e0b;"></span>{{ tr('部分通过：', 'Partial Pass:') }} <strong>{{ totals.insp_partial }}</strong></span>
+      <span><span class="dot" style="background:#e5e7eb;"></span>{{ tr('待检：', 'Pending:') }} <strong>{{ totals.insp_pending }}</strong></span>
     </div>
     {% else %}
-    <p style="color:#9ca3af; font-size:.875rem;"><span class="lt" data-en="No schedule data loaded." data-zh="暂无排期数据。">No schedule data loaded.</span></p>
+    <p style="color:#9ca3af; font-size:.875rem;">{{ tr('暂无排期数据。', 'No schedule data loaded.') }}</p>
     {% endif %}
   </div>
 
   <!-- Inspector KPI -->
   <div class="card">
-    <div class="card-title">&#128100; 检验员 KPI</div>
+    <div class="card-title">&#128100; {{ tr('检验员 KPI', 'Inspector KPIs') }}</div>
     {% if inspector_stats %}
 
     {# ── Summary table ── #}
@@ -363,14 +363,14 @@
       <table class="rtable">
         <thead>
           <tr>
-            <th style="text-align:left;">检验员</th>
-            <th>总检验数</th>
-            <th>&#10003; 通过</th>
-            <th>&#10007; 不通过</th>
-            <th>质检通过率</th>
-            <th>按时完成率</th>
-            <th style="min-width:90px;">按时 / 逾期</th>
-            <th>最近检验</th>
+            <th style="text-align:left;">{{ tr('检验员', 'Inspector') }}</th>
+            <th>{{ tr('总检验数', 'Inspections') }}</th>
+            <th>&#10003; {{ tr('通过', 'Passed') }}</th>
+            <th>&#10007; {{ tr('不通过', 'Failed') }}</th>
+            <th>{{ tr('质检通过率', 'Pass rate') }}</th>
+            <th>{{ tr('按时完成率', 'On-time rate') }}</th>
+            <th style="min-width:90px;">{{ tr('按时 / 逾期', 'On time / Late') }}</th>
+            <th>{{ tr('最近检验', 'Latest') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -407,14 +407,14 @@
                 </span>
               </div>
               {% else %}
-              <span style="color:#d1d5db;font-size:.78rem;">无日期数据</span>
+              <span style="color:#d1d5db;font-size:.78rem;">{{ tr('无日期数据', 'No date data') }}</span>
               {% endif %}
             </td>
             <td style="font-size:.78rem;">
               <span style="color:#059669;">{{ s.on_time }}↑</span>
               <span style="color:#d1d5db;margin:0 2px;">/</span>
               <span style="color:{% if s.late %}#dc2626{% else %}#d1d5db{% endif %};">{{ s.late }}↓</span>
-              {% if s.no_est %}<span style="color:#9ca3af;font-size:.7rem;"> ({{ s.no_est }} 无日期)</span>{% endif %}
+              {% if s.no_est %}<span style="color:#9ca3af;font-size:.7rem;"> ({{ tr(s.no_est ~ ' 无日期', s.no_est ~ ' no date') }})</span>{% endif %}
             </td>
             <td style="color:#6b7280;font-size:.82rem;">{{ s.last_date or '—' }}</td>
           </tr>
@@ -426,7 +426,7 @@
     {# ── Per-inspector weekly breakdown cards ── #}
     <div style="font-size:.8rem;font-weight:700;color:#1a3a5c;margin-bottom:12px;
                 padding-bottom:8px;border-bottom:1px solid #e8eaee;">
-      每周检验量（最近 8 周）
+      {{ tr('每周检验量（最近 8 周）', 'Inspections per week (last 8 weeks)') }}
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
       {% for name, s in inspector_stats %}
@@ -436,7 +436,7 @@
         {# Header #}
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
           <span style="font-weight:700;font-size:.9rem;color:#1a3a5c;">{{ name }}</span>
-          <span style="font-size:.75rem;color:#6b7280;">共 {{ s.total }} 份</span>
+          <span style="font-size:.75rem;color:#6b7280;">{{ tr('共 ' ~ s.total ~ ' 份', s.total ~ ' total') }}</span>
         </div>
 
         {# On-time rate big number #}
@@ -445,14 +445,14 @@
             color:{% if ot is not none %}{% if ot>=80 %}#059669{% elif ot>=50 %}#d97706{% else %}#dc2626{% endif %}{% else %}#9ca3af{% endif %};">
             {% if ot is not none %}{{ ot }}%{% else %}—{% endif %}
           </span>
-          <span style="font-size:.75rem;color:#6b7280;">按时完成率</span>
+          <span style="font-size:.75rem;color:#6b7280;">{{ tr('按时完成率', 'On-time rate') }}</span>
         </div>
         <div style="font-size:.72rem;color:#9ca3af;margin-bottom:12px;">
           {% if ot is not none %}
-            按时 {{ s.on_time }} · 逾期 {{ s.late }}
-            {% if s.no_est %} · {{ s.no_est }} 条无 Est.日期{% endif %}
+            {{ tr('按时', 'On time') }} {{ s.on_time }} · {{ tr('逾期', 'Late') }} {{ s.late }}
+            {% if s.no_est %} · {{ tr(s.no_est ~ ' 条无预计完成日', s.no_est ~ ' without est. date') }}{% endif %}
           {% else %}
-            暂无 Estimated Completion 数据
+            {{ tr('暂无预计完成日数据', 'No Estimated Completion data') }}
           {% endif %}
         </div>
 
@@ -498,7 +498,7 @@
 
     {% else %}
     <p style="color:#9ca3af;font-size:.875rem;text-align:center;padding:20px 0;">
-      暂无检验记录，提交检验报告后将显示统计数据。
+      {{ tr('暂无检验记录，提交检验报告后将显示统计数据。', 'No inspections yet — statistics appear after the first report is submitted.') }}
     </p>
     {% endif %}
   </div>
@@ -506,7 +506,7 @@
   <!-- Weekly region trend chart -->
   {% if chart_labels and chart_labels|length > 1 %}
   <div class="card">
-    <div class="card-title"><span class="lt" data-en="Weekly Orders by Region" data-zh="各区域每周订单趋势">Weekly Orders by Region</span></div>
+    <div class="card-title">{{ tr('各区域每周订单趋势', 'Weekly Orders by Region') }}</div>
     <div style="position:relative;height:260px;">
       <canvas id="weeklyRegionChart"></canvas>
     </div>
@@ -515,23 +515,23 @@
 
   <!-- Per-region table -->
   <div class="card">
-    <div class="card-title"><span class="lt" data-en="Per-Region Breakdown" data-zh="按区域统计">Per-Region Breakdown</span></div>
+    <div class="card-title">{{ tr('按区域统计', 'Per-Region Breakdown') }}</div>
     <div style="overflow-x:auto;">
       <table class="rtable">
         <thead>
           <tr>
-            <th style="text-align:left;"><span class="lt" data-en="Region" data-zh="区域">Region</span></th>
-            <th><span class="lt" data-en="Total" data-zh="总数">Total</span></th>
-            <th><span class="lt" data-en="New" data-zh="新增">New</span></th>
-            <th><span class="lt" data-en="Not Shipped" data-zh="未发货">Not Shipped</span></th>
-            <th><span class="lt" data-en="Partial" data-zh="部分发货">Partial</span></th>
-            <th><span class="lt" data-en="Shipped" data-zh="已发货">Shipped</span></th>
-            <th><span class="lt" data-en="QA Alerts" data-zh="QA警告">QA Alerts</span></th>
-            <th><span class="lt" data-en="V-Trust Alerts" data-zh="V-Trust警告">V-Trust Alerts</span></th>
-            <th>&#10003; <span class="lt" data-en="Pass" data-zh="通过">Pass</span></th>
-            <th>&#10007; <span class="lt" data-en="Fail" data-zh="不通过">Fail</span></th>
-            <th>~ <span class="lt" data-en="Partial" data-zh="部分通过">Partial</span></th>
-            <th><span class="lt" data-en="Pending" data-zh="待检">Pending</span></th>
+            <th style="text-align:left;">{{ tr('区域', 'Region') }}</th>
+            <th>{{ tr('总数', 'Total') }}</th>
+            <th>{{ tr('新增', 'New') }}</th>
+            <th>{{ tr('未发货', 'Not Shipped') }}</th>
+            <th>{{ tr('部分发货', 'Partial') }}</th>
+            <th>{{ tr('已发货', 'Shipped') }}</th>
+            <th>{{ tr('QA警告', 'QA Alerts') }}</th>
+            <th>{{ tr('V-Trust警告', 'V-Trust Alerts') }}</th>
+            <th>&#10003; {{ tr('通过', 'Pass') }}</th>
+            <th>&#10007; {{ tr('不通过', 'Fail') }}</th>
+            <th>~ {{ tr('部分通过', 'Partial') }}</th>
+            <th>{{ tr('待检', 'Pending') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -554,7 +554,7 @@
         </tbody>
         <tfoot>
           <tr>
-            <td><span class="lt" data-en="TOTAL" data-zh="合计">TOTAL</span></td>
+            <td>{{ tr('合计', 'TOTAL') }}</td>
             <td>{{ totals.total }}</td>
             <td class="{{ 'n-new' if totals.new else 'n-zero' }}">{{ totals.new if totals.new else '–' }}</td>
             <td class="{{ 'n-not' if totals.not_shipped else 'n-zero' }}">{{ totals.not_shipped if totals.not_shipped else '–' }}</td>

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}产品管理{% endblock %}
+{% block title %}{{ tr('产品管理', 'Products') }}{% endblock %}
 
 {% block extra_style %}
 .tab-bar  { display:flex; gap:0; border-bottom:2px solid #e2e8f0; margin-bottom:20px; }
@@ -48,13 +48,13 @@
 <div class="page">
 <div style="max-width:1100px; margin:0 auto;">
 
-  <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c; margin-bottom:16px;"><span class="lt" data-en="Product Management" data-zh="产品管理">Product Management</span></h1>
+  <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c; margin-bottom:16px;">{{ tr('产品管理', 'Product Management') }}</h1>
 
   <!-- Tab bar -->
   <div class="tab-bar">
-    <a href="?tab=categories"    class="tab-btn {{ 'active' if tab=='categories' }}"><span class="lt" data-en="Product Categories" data-zh="产品类别">Product Categories</span></a>
-    <a href="?tab=inspector_map" class="tab-btn {{ 'active' if tab=='inspector_map' }}"><span class="lt" data-en="Inspector Config" data-zh="检验员配置">Inspector Config</span></a>
-    <a href="?tab=archive"       class="tab-btn {{ 'active' if tab=='archive' }}"><span class="lt" data-en="Product Archive" data-zh="产品档案">Product Archive</span></a>
+    <a href="?tab=categories"    class="tab-btn {{ 'active' if tab=='categories' }}">{{ tr('产品类别', 'Product Categories') }}</a>
+    <a href="?tab=inspector_map" class="tab-btn {{ 'active' if tab=='inspector_map' }}">{{ tr('检验员配置', 'Inspector Config') }}</a>
+    <a href="?tab=archive"       class="tab-btn {{ 'active' if tab=='archive' }}">{{ tr('产品档案', 'Product Archive') }}</a>
   </div>
 
   <!-- ── Tab 1: 产品类别 ── -->
@@ -65,11 +65,11 @@
       <table class="mgmt-table">
         <thead>
           <tr>
-            <th>类别编号</th>
-            <th>类别名称</th>
-            <th>描述</th>
-            <th>产品数</th>
-            <th>操作</th>
+            <th>{{ tr('类别编号', 'Category code') }}</th>
+            <th>{{ tr('类别名称', 'Category name') }}</th>
+            <th>{{ tr('描述', 'Description') }}</th>
+            <th>{{ tr('产品数', 'Products') }}</th>
+            <th>{{ tr('操作', 'Actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -84,8 +84,8 @@
             </td>
             <td>
               <form method="POST" action="{{ url_for('category_delete', cid=c.id) }}"
-                    onsubmit="return confirm('确认删除类别「{{ c.name }}」？此操作不可恢复。')">
-                <button type="submit" class="btn btn-sm btn-del">删除</button>
+                    onsubmit="return confirm(this.dataset.confirm)" data-confirm="{{ tr('确认删除类别「' ~ c.name ~ '」？此操作不可恢复。', 'Delete category "' ~ c.name ~ '"? This cannot be undone.') }}">
+                <button type="submit" class="btn btn-sm btn-del">{{ tr('删除', 'Delete') }}</button>
               </form>
             </td>
           </tr>
@@ -94,26 +94,26 @@
       </table>
     </div>
     {% else %}
-    <div class="empty-state">暂无类别，请在下方添加</div>
+    <div class="empty-state">{{ tr('暂无类别，请在下方添加', 'No categories yet — add one below') }}</div>
     {% endif %}
 
     <!-- Inline add form -->
     <form method="POST" action="{{ url_for('category_new') }}">
       <div class="add-form-row">
         <div class="form-group">
-          <label>类别编号</label>
-          <input type="text" name="code" style="width:90px;" placeholder="如 RSV">
+          <label>{{ tr('类别编号', 'Category code') }}</label>
+          <input type="text" name="code" style="width:90px;" placeholder="{{ tr('如 RSV', 'e.g. RSV') }}">
         </div>
         <div class="form-group">
-          <label>类别名称 <span style="color:#dc2626;">*</span></label>
-          <input type="text" name="name" required style="width:200px;" placeholder="如 Ball Valves">
+          <label>{{ tr('类别名称', 'Category name') }} <span style="color:#dc2626;">*</span></label>
+          <input type="text" name="name" required style="width:200px;" placeholder="{{ tr('如 Ball Valves', 'e.g. Ball Valves') }}">
         </div>
         <div class="form-group">
-          <label>描述</label>
-          <input type="text" name="description" style="width:260px;" placeholder="简要说明">
+          <label>{{ tr('描述', 'Description') }}</label>
+          <input type="text" name="description" style="width:260px;" placeholder="{{ tr('简要说明', 'Short description') }}">
         </div>
         <div class="form-group" style="padding-top:20px;">
-          <button type="submit" class="btn btn-primary btn-sm">+ 添加类别</button>
+          <button type="submit" class="btn btn-primary btn-sm">{{ tr('+ 添加类别', '+ Add category') }}</button>
         </div>
       </div>
     </form>
@@ -137,12 +137,12 @@
           <span class="insp-chip">
             &#128100; {{ i.inspector_name }}
             <form method="POST" action="{{ url_for('inspector_delete', iid=i.id) }}">
-              <button type="submit" title="移除">&#10005;</button>
+              <button type="submit" title="{{ tr('移除', 'Remove') }}">&#10005;</button>
             </form>
           </span>
           {% endfor %}
         {% else %}
-          <span style="font-size:.82rem; color:#9ca3af;">暂未配置检验员</span>
+          <span style="font-size:.82rem; color:#9ca3af;">{{ tr('暂未配置检验员', 'No inspector assigned') }}</span>
         {% endif %}
       </div>
 
@@ -150,7 +150,7 @@
             style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <select name="inspector_name"
                 style="width:200px; padding:6px 10px; font-size:.82rem; border:1px solid #d0d5dd; border-radius:6px;">
-          <option value="">— 选择检验员 —</option>
+          <option value="">{{ tr('— 选择检验员 —', '— Select inspector —') }}</option>
           {% for emp in all_employees %}
             {% set already = insp_map.get(c.id, []) | map(attribute='inspector_name') | list %}
             {% if emp.name not in already %}
@@ -158,13 +158,13 @@
             {% endif %}
           {% endfor %}
         </select>
-        <button type="submit" class="btn btn-sm btn-primary">添加</button>
+        <button type="submit" class="btn btn-sm btn-primary">{{ tr('添加', 'Add') }}</button>
       </form>
     </div>
     {% endfor %}
   {% else %}
   <div class="card">
-    <div class="empty-state">请先在「产品类别」标签中添加类别</div>
+    <div class="empty-state">{{ tr('请先在「产品类别」标签中添加类别', 'Add categories on the "Categories" tab first') }}</div>
   </div>
   {% endif %}
 
@@ -175,28 +175,28 @@
   <form method="GET" action="{{ url_for('products') }}" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; align-items:flex-end;">
     <input type="hidden" name="tab" value="archive">
     <div>
-      <label style="font-size:.75rem; color:#6b7280; display:block; margin-bottom:2px;"><span class="lt" data-en="Search" data-zh="搜索">Search</span></label>
-      <input type="text" name="q" value="{{ search }}" placeholder="编码 / 名称..."
+      <label style="font-size:.75rem; color:#6b7280; display:block; margin-bottom:2px;">{{ tr('搜索', 'Search') }}</label>
+      <input type="text" name="q" value="{{ search }}" placeholder="{{ tr('编码 / 名称...', 'Code / name...') }}"
              style="width:200px; padding:7px 10px; font-size:.85rem;">
     </div>
     <div>
-      <label style="font-size:.75rem; color:#6b7280; display:block; margin-bottom:2px;"><span class="lt" data-en="Category" data-zh="类别">Category</span></label>
+      <label style="font-size:.75rem; color:#6b7280; display:block; margin-bottom:2px;">{{ tr('类别', 'Category') }}</label>
       <select name="cat_id" style="padding:7px 10px; font-size:.85rem;">
-        <option value="">— <span class="lt" data-en="All Categories" data-zh="全部类别">All Categories</span> —</option>
+        <option value="">— {{ tr('全部类别', 'All Categories') }} —</option>
         {% for c in cats %}
         <option value="{{ c.id }}" {{ 'selected' if cat_id|string == c.id|string }}>{{ c.name }}</option>
         {% endfor %}
       </select>
     </div>
-    <button type="submit" class="btn btn-outline" style="align-self:flex-end;"><span class="lt" data-en="Filter" data-zh="筛选">Filter</span></button>
+    <button type="submit" class="btn btn-outline" style="align-self:flex-end;">{{ tr('筛选', 'Filter') }}</button>
     {% if search or cat_id %}
-    <a href="{{ url_for('products', tab='archive') }}" class="btn btn-outline" style="align-self:flex-end; color:#6b7280;"><span class="lt" data-en="Clear" data-zh="清除">Clear</span></a>
+    <a href="{{ url_for('products', tab='archive') }}" class="btn btn-outline" style="align-self:flex-end; color:#6b7280;">{{ tr('清除', 'Clear') }}</a>
     {% endif %}
     <span style="align-self:flex-end; font-size:.82rem; color:#9ca3af; margin-left:4px;">
-      {{ items|length }} <span class="lt" data-en="items" data-zh="个产品">items</span>
+      {{ items|length }} {{ tr('个产品', 'items') }}
     </span>
     <div style="margin-left:auto; align-self:flex-end;">
-      <a href="{{ url_for('product_new') }}" class="btn btn-primary">+ <span class="lt" data-en="New Product" data-zh="新增产品">New Product</span></a>
+      <a href="{{ url_for('product_new') }}" class="btn btn-primary">+ {{ tr('新增产品', 'New Product') }}</a>
     </div>
   </form>
 
@@ -206,16 +206,16 @@
       <table class="mgmt-table">
         <thead>
           <tr>
-            <th><span class="lt" data-en="Code" data-zh="编码">Code</span></th>
-            <th><span class="lt" data-en="Name" data-zh="名称">Name</span></th>
-            <th><span class="lt" data-en="Category" data-zh="类别">Category</span></th>
-            <th><span class="lt" data-en="Sub Category" data-zh="子类别">Sub Category</span></th>
-            <th><span class="lt" data-en="Supplier" data-zh="供应商">Supplier</span></th>
-            <th style="text-align:center;"><span class="lt" data-en="Crate Qty" data-zh="箱数量">Crate Qty</span></th>
-            <th style="text-align:center;"><span class="lt" data-en="Inspect Pcs" data-zh="检验件数">Inspect Pcs</span></th>
-            <th style="text-align:center;"><span class="lt" data-en="Mins/Pc" data-zh="分钟/件">Mins/Pc</span></th>
-            <th><span class="lt" data-en="Notes" data-zh="备注">Notes</span></th>
-            <th><span class="lt" data-en="Actions" data-zh="操作">Actions</span></th>
+            <th>{{ tr('编码', 'Code') }}</th>
+            <th>{{ tr('名称', 'Name') }}</th>
+            <th>{{ tr('类别', 'Category') }}</th>
+            <th>{{ tr('子类别', 'Sub Category') }}</th>
+            <th>{{ tr('供应商', 'Supplier') }}</th>
+            <th style="text-align:center;">{{ tr('箱数量', 'Crate Qty') }}</th>
+            <th style="text-align:center;">{{ tr('检验件数', 'Inspect Pcs') }}</th>
+            <th style="text-align:center;">{{ tr('分钟/件', 'Mins/Pc') }}</th>
+            <th>{{ tr('备注', 'Notes') }}</th>
+            <th>{{ tr('操作', 'Actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -238,10 +238,10 @@
             <td style="color:#6b7280; font-size:.82rem; max-width:180px;">{{ p.description or '—' }}</td>
             <td>
               <div class="action-btns">
-                <a href="{{ url_for('product_edit', pid=p.id) }}" class="btn btn-sm btn-edit"><span class="lt" data-en="Edit" data-zh="编辑">Edit</span></a>
+                <a href="{{ url_for('product_edit', pid=p.id) }}" class="btn btn-sm btn-edit">{{ tr('编辑', 'Edit') }}</a>
                 <form method="POST" action="{{ url_for('product_delete', pid=p.id) }}"
-                      onsubmit="return confirm('确认删除「{{ p.name }}」？')">
-                  <button type="submit" class="btn btn-sm btn-del"><span class="lt" data-en="Del" data-zh="删除">Del</span></button>
+                      onsubmit="return confirm(this.dataset.confirm)" data-confirm="{{ tr('确认删除「' ~ p.name ~ '」？', 'Delete "' ~ p.name ~ '"?') }}">
+                  <button type="submit" class="btn btn-sm btn-del">{{ tr('删除', 'Del') }}</button>
                 </form>
               </div>
             </td>
@@ -252,7 +252,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <span class="lt" data-en="No products found" data-zh="暂无产品">No products found</span>
+      {{ tr('暂无产品', 'No products found') }}
     </div>
     {% endif %}
   </div>

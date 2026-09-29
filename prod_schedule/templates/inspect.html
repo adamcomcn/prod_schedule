@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Inspection — {{ job.get('Order Number', '') }}{% endblock %}
+{% block title %}{{ tr('检验', 'Inspection') }} — {{ job.get('Order Number', '') }}{% endblock %}
 
 {% block extra_style %}
 .inspect-layout { display:grid; grid-template-columns:1fr 360px; gap:20px; align-items:start; }
@@ -17,6 +17,11 @@
                  border-bottom:2px solid #e8eaee; }
 .row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+@media(max-width:600px){
+  .row2, .row3 { grid-template-columns:1fr; gap:0; }
+  .result-group { flex-direction:column; gap:8px; }
+  .job-header { padding:12px 16px; }
+}
 
 .result-group { display:flex; gap:12px; }
 .result-btn { flex:1; padding:12px; border:2px solid #d0d5dd; border-radius:8px;
@@ -84,9 +89,9 @@ input[name=result] { display:none; }
 
 {% block content %}
 <div class="job-header">
-  <a href="{{ url_for('index') }}" class="back-btn">&#8592; Back to Schedule</a>
+  <a href="{{ url_for('index') }}" class="back-btn">&#8592; {{ tr('返回排期', 'Back to Schedule') }}</a>
   <div>
-    <h2>Inspection — {{ job.get('Order Number', '') }}</h2>
+    <h2>{{ tr('检验', 'Inspection') }} — {{ job.get('Order Number', '') }}</h2>
     <div class="meta">
       {{ job.get('region', '') }} &nbsp;|&nbsp;
       {{ job.get('Item Code', '') }} &nbsp;|&nbsp;
@@ -103,15 +108,15 @@ input[name=result] { display:none; }
               align-items:center; gap:14px; flex-wrap:wrap;">
     <div style="flex:1; min-width:200px;">
       <div style="font-weight:600; color:#1e40af; font-size:.9rem;">
-        &#128203; Matched form template: {{ matched_tpl.name }}
+        &#128203; {{ tr('匹配的检验模板：', 'Matched form template:') }} {{ matched_tpl.name }}
       </div>
       <div style="font-size:.78rem; color:#3b82f6; margin-top:2px;">
-        Click to use the digital checklist — no Excel needed
+        {{ tr('点击使用电子检验表，无需 Excel', 'Click to use the digital checklist — no Excel needed') }}
       </div>
     </div>
     <a href="{{ url_for('inspect_checklist', job_key=job.job_key, tpl=matched_tpl.id) }}"
        class="btn btn-primary" style="white-space:nowrap;">
-      &#9654; Use Form Template
+      &#9654; {{ tr('使用检验模板', 'Use Form Template') }}
     </a>
   </div>
   {% endif %}
@@ -121,7 +126,7 @@ input[name=result] { display:none; }
     <!-- LEFT: form -->
     <div>
       <div class="card">
-        <div class="section-title">&#128203; New Inspection Report</div>
+        <div class="section-title">&#128203; {{ tr('新建检验报告', 'New Inspection Report') }}</div>
         <form method="POST"
               action="{{ url_for('submit_inspection', job_key=job.job_key) }}"
               enctype="multipart/form-data"
@@ -138,7 +143,7 @@ input[name=result] { display:none; }
           <!-- Inspector & Date -->
           <div class="row2">
             <div class="form-group">
-              <label>Inspector Name *
+              <label>{{ tr('检验员', 'Inspector Name') }} *
                 {% if matched_category %}
                 <span style="font-weight:400; color:#6b7280; font-size:.75rem; margin-left:4px;">
                   — {{ matched_category }}
@@ -148,21 +153,21 @@ input[name=result] { display:none; }
               {% if auto_inspectors|length == 1 %}
                 <input type="text" name="inspector_name" required value="{{ auto_inspectors[0] }}"
                        style="background:#f0fdf4; border-color:#86efac;">
-                <div style="font-size:.75rem; color:#059669; margin-top:3px;">&#10003; 已根据产品类别自动分配</div>
+                <div style="font-size:.75rem; color:#059669; margin-top:3px;">&#10003; {{ tr('已根据产品类别自动分配', 'Auto-assigned from product category') }}</div>
               {% elif auto_inspectors|length > 1 %}
                 <select name="inspector_name" required style="background:#f0fdf4; border-color:#86efac;">
                   {% for n in auto_inspectors %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
                 </select>
-                <div style="font-size:.75rem; color:#059669; margin-top:3px;">&#10003; 共 {{ auto_inspectors|length }} 名检验员，请选择</div>
+                <div style="font-size:.75rem; color:#059669; margin-top:3px;">&#10003; {{ tr('共 ' ~ auto_inspectors|length ~ ' 名检验员，请选择', auto_inspectors|length ~ ' inspectors — choose one') }}</div>
               {% else %}
-                <input type="text" name="inspector_name" required placeholder="Full name">
+                <input type="text" name="inspector_name" required placeholder="{{ tr('姓名', 'Full name') }}" value="{{ g.username }}">
                 {% if matched_category %}
-                <div style="font-size:.75rem; color:#f59e0b; margin-top:3px;">&#9888; 该产品类别暂未配置检验员</div>
+                <div style="font-size:.75rem; color:#f59e0b; margin-top:3px;">&#9888; {{ tr('该产品类别暂未配置检验员', 'No inspector configured for this category') }}</div>
                 {% endif %}
               {% endif %}
             </div>
             <div class="form-group">
-              <label>Inspection Date *</label>
+              <label>{{ tr('检验日期', 'Inspection Date') }} *</label>
               <input type="date" name="inspection_date" required value="{{ now_date }}">
             </div>
           </div>
@@ -170,16 +175,16 @@ input[name=result] { display:none; }
           <!-- Quantities -->
           <div class="row3">
             <div class="form-group">
-              <label>Quantity Ordered</label>
+              <label>{{ tr('订单数量', 'Quantity Ordered') }}</label>
               <input type="number" name="quantity_ordered_display"
                      value="{{ job.get('Quantity', '') }}" readonly style="background:#f9fafb">
             </div>
             <div class="form-group">
-              <label>Quantity Inspected *</label>
+              <label>{{ tr('抽检数量', 'Quantity Inspected') }} *</label>
               <input type="number" name="quantity_inspected" required placeholder="0" min="0">
             </div>
             <div class="form-group">
-              <label>Quantity Passed</label>
+              <label>{{ tr('合格数量', 'Quantity Passed') }}</label>
               <input type="number" name="quantity_passed" placeholder="0" min="0">
             </div>
           </div>
@@ -188,9 +193,9 @@ input[name=result] { display:none; }
           {% if evidence_reqs %}
           <div style="margin-bottom:6px;">
             <div class="section-title" style="margin-top:16px;">
-              &#128196; Required Evidence
+              &#128196; {{ tr('所需证据', 'Required Evidence') }}
               <span style="font-size:.75rem; font-weight:400; color:#6b7280; margin-left:8px;">
-                Upload files and mark Pass / Fail for each item
+                {{ tr('逐项上传文件并标记合格/不合格', 'Upload files and mark Pass / Fail for each item') }}
               </span>
             </div>
 
@@ -198,13 +203,13 @@ input[name=result] { display:none; }
             <div class="ev-card">
               <div class="ev-header" style="background:{{ ev.bg }}; color:{{ ev.color }};">
                 <span>{{ ev.icon }} {{ ev.label }}</span>
-                <span class="ev-required-badge">Required</span>
+                <span class="ev-required-badge">{{ tr('必需', 'Required') }}</span>
               </div>
               <div class="ev-body">
 
                 <!-- Guidance -->
                 <details class="ev-guidance">
-                  <summary>Inspector Guidance</summary>
+                  <summary>{{ tr('检验指引', 'Inspector Guidance') }}</summary>
                   <div style="margin-top:8px; padding-top:8px; border-top:1px solid #e2e8f0;">
                     {{ ev.guidance }}
                   </div>
@@ -217,7 +222,7 @@ input[name=result] { display:none; }
                      ondragover="evDragOver(event,'{{ ev.type }}')"
                      ondragleave="evDragLeave(event,'{{ ev.type }}')"
                      ondrop="evDrop(event,'{{ ev.type }}')">
-                  <div>&#128193; <strong>Click to upload</strong> or drag &amp; drop</div>
+                  <div>&#128193; <strong>{{ tr('点击拍照或选择文件', 'Tap to take a photo or choose files') }}</strong></div>
                   <div style="margin-top:4px; font-size:.72rem; color:#9ca3af;">
                     {{ ev.accepts }}
                   </div>
@@ -235,17 +240,17 @@ input[name=result] { display:none; }
                        id="ev-result-{{ ev.type }}">
                 <div class="ev-result-row">
                   <button type="button" class="ev-result-btn"
-                          onclick="evSetResult('{{ ev.type }}','Pass',this)">&#9989; Pass</button>
+                          onclick="evSetResult('{{ ev.type }}','Pass',this)">&#9989; {{ tr('合格', 'Pass') }}</button>
                   <button type="button" class="ev-result-btn"
-                          onclick="evSetResult('{{ ev.type }}','Fail',this)">&#10060; Fail</button>
+                          onclick="evSetResult('{{ ev.type }}','Fail',this)">&#10060; {{ tr('不合格', 'Fail') }}</button>
                   <button type="button" class="ev-result-btn"
-                          onclick="evSetResult('{{ ev.type }}','N/A',this)">— N/A</button>
+                          onclick="evSetResult('{{ ev.type }}','N/A',this)">— {{ tr('不适用', 'N/A') }}</button>
                 </div>
 
                 <!-- Notes -->
                 <textarea name="ev_notes_{{ ev.type }}" rows="1"
                           style="margin-top:8px; font-size:.8rem;"
-                          placeholder="Notes for {{ ev.label }}…"></textarea>
+                          placeholder="{{ tr('备注：', 'Notes for') }} {{ ev.label }}…"></textarea>
               </div>
             </div>
             {% endfor %}
@@ -254,23 +259,23 @@ input[name=result] { display:none; }
 
           <!-- Overall Inspection Result -->
           <div class="form-group">
-            <label>Overall Inspection Result *</label>
+            <label>{{ tr('总体检验结果', 'Overall Inspection Result') }} *</label>
             <input type="hidden" name="result" id="result-input" required>
             <div class="result-group">
               <button type="button" class="result-btn" data-val="Pass"
-                      onclick="setResult('Pass', this)">&#9989; Pass</button>
+                      onclick="setResult('Pass', this)">&#9989; {{ tr('合格', 'Pass') }}</button>
               <button type="button" class="result-btn" data-val="Fail"
-                      onclick="setResult('Fail', this)">&#10060; Fail</button>
+                      onclick="setResult('Fail', this)">&#10060; {{ tr('不合格', 'Fail') }}</button>
               <button type="button" class="result-btn" data-val="Partial Pass"
-                      onclick="setResult('Partial Pass', this)">&#9888; Partial Pass</button>
+                      onclick="setResult('Partial Pass', this)">&#9888; {{ tr('部分合格', 'Partial Pass') }}</button>
             </div>
           </div>
 
           <!-- Defect codes -->
           <div class="form-group">
-            <label>Defects Found
+            <label>{{ tr('发现的缺陷', 'Defects Found') }}
               <span style="font-size:.75rem; font-weight:400; color:#6b7280; margin-left:6px;">
-                Select all applicable
+                {{ tr('可多选', 'Select all applicable') }}
               </span>
             </label>
             {% if defect_groups %}
@@ -282,7 +287,7 @@ input[name=result] { display:none; }
                                 list-style:none; display:flex; justify-content:space-between;
                                 align-items:center; user-select:none;">
                   {{ cat_name }}
-                  <span style="font-size:.72rem; color:#9ca3af; font-weight:400;">{{ codes|length }} codes</span>
+                  <span style="font-size:.72rem; color:#9ca3af; font-weight:400;">{{ tr(codes|length ~ ' 项', codes|length ~ ' codes') }}</span>
                 </summary>
                 <div style="padding:10px 14px; display:grid;
                             grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:4px;">
@@ -294,9 +299,9 @@ input[name=result] { display:none; }
                     <input type="checkbox" name="defect_codes" value="{{ dc.code }}"
                            style="margin-top:2px; flex-shrink:0;">
                     <span>
-                      <strong style="color:#1a3a5c;">{{ dc.code }}</strong>&nbsp;{{ dc.name }}
+                      <strong style="color:#1a3a5c;">{{ dc.code }}</strong>&nbsp;{{ dc.name_cn if current_lang() == 'zh' and dc.name_cn else dc.name }}
                       {% if dc.name_cn %}
-                      <span style="color:#9ca3af; font-size:.73rem; display:block;">{{ dc.name_cn }}</span>
+                      <span style="color:#9ca3af; font-size:.73rem; display:block;">{{ dc.name if current_lang() == 'zh' else dc.name_cn }}</span>
                       {% endif %}
                     </span>
                   </label>
@@ -307,43 +312,43 @@ input[name=result] { display:none; }
             </div>
             {% endif %}
             <textarea name="defects" rows="2" style="margin-top:8px;"
-                      placeholder="Additional defect notes…"></textarea>
+                      placeholder="{{ tr('其他缺陷说明…', 'Additional defect notes…') }}"></textarea>
           </div>
 
           <!-- Packing / Marking -->
           <div class="row2">
             <div class="form-group">
-              <label>Crate / Packing Condition</label>
+              <label>{{ tr('包装 / 木箱状况', 'Crate / Packing Condition') }}</label>
               <select name="packing_condition">
-                <option value="">— Select —</option>
-                <option>Good</option>
-                <option>Minor damage</option>
-                <option>Significant damage</option>
+                <option value="">— {{ tr('请选择', 'Select') }} —</option>
+                <option value="Good">{{ tr('良好', 'Good') }}</option>
+                <option value="Minor damage">{{ tr('轻微损坏', 'Minor damage') }}</option>
+                <option value="Significant damage">{{ tr('严重损坏', 'Significant damage') }}</option>
               </select>
             </div>
             <div class="form-group">
-              <label>Marking / Labelling</label>
+              <label>{{ tr('标识 / 标签', 'Marking / Labelling') }}</label>
               <select name="marking">
-                <option value="">— Select —</option>
-                <option>Correct</option>
-                <option>Incorrect</option>
-                <option>Missing</option>
+                <option value="">— {{ tr('请选择', 'Select') }} —</option>
+                <option value="Correct">{{ tr('正确', 'Correct') }}</option>
+                <option value="Incorrect">{{ tr('错误', 'Incorrect') }}</option>
+                <option value="Missing">{{ tr('缺失', 'Missing') }}</option>
               </select>
             </div>
           </div>
 
           <!-- Notes -->
           <div class="form-group">
-            <label>Additional Notes</label>
+            <label>{{ tr('其他备注', 'Additional Notes') }}</label>
             <textarea name="notes" rows="3"
-                      placeholder="Additional observations, recommendations, or follow-up actions…"></textarea>
+                      placeholder="{{ tr('其他观察、建议或后续跟进…', 'Additional observations, recommendations, or follow-up actions…') }}"></textarea>
           </div>
 
           <div style="display:flex; gap:10px; margin-top:8px;">
             <button type="submit" class="btn btn-success" style="flex:1">
-              &#10003; Submit Inspection Report
+              &#10003; {{ tr('提交检验报告', 'Submit Inspection Report') }}
             </button>
-            <button type="reset" class="btn btn-outline" onclick="clearAll()">Clear</button>
+            <button type="reset" class="btn btn-outline" onclick="clearAll()">{{ tr('清空', 'Clear') }}</button>
           </div>
         </form>
       </div>
@@ -352,24 +357,24 @@ input[name=result] { display:none; }
     <!-- RIGHT: job info + past inspections -->
     <div>
       <div class="card">
-        <div class="section-title">&#128230; Job Details</div>
+        <div class="section-title">&#128230; {{ tr('订单信息', 'Job Details') }}</div>
         <table class="info-table">
-          <tr><td>Order Number</td>   <td><strong>{{ job.get('Order Number', '—') }}</strong></td></tr>
-          <tr><td>PO Number</td>      <td>{{ job.get('Daemco Purchase Order', '—') }}</td></tr>
-          <tr><td>Order Date</td>     <td>{{ job.get('Order Date', '—') }}</td></tr>
-          <tr><td>Supplier</td>       <td>{{ job.get('Supplier', '—') }}</td></tr>
-          <tr><td>Item Code</td>      <td>{{ job.get('Item Code', '—') }}</td></tr>
-          <tr><td>Description</td>    <td style="white-space:normal">{{ job.get('Item Description', '—') }}</td></tr>
-          <tr><td>Quantity</td>       <td>{{ job.get('Quantity', '—') }}</td></tr>
-          <tr><td>Est. Completion</td><td>{{ job.get('Estimated Completion Date', '—') }}</td></tr>
-          <tr><td>Must Ship</td>      <td>{{ job.get('Must Ship Date', '—') }}</td></tr>
-          <tr><td>Region</td>         <td>{{ job.get('region', '—') }}</td></tr>
+          <tr><td>{{ tr('订单号', 'Order Number') }}</td>   <td><strong>{{ job.get('Order Number', '—') }}</strong></td></tr>
+          <tr><td>{{ tr('采购单号', 'PO Number') }}</td>      <td>{{ job.get('Daemco Purchase Order', '—') }}</td></tr>
+          <tr><td>{{ tr('下单日期', 'Order Date') }}</td>     <td>{{ job.get('Order Date', '—') }}</td></tr>
+          <tr><td>{{ tr('供应商', 'Supplier') }}</td>       <td>{{ job.get('Supplier') or job.get('Foundry') or '—' }}</td></tr>
+          <tr><td>{{ tr('物料编码', 'Item Code') }}</td>      <td>{{ job.get('Item Code', '—') }}</td></tr>
+          <tr><td>{{ tr('描述', 'Description') }}</td>    <td style="white-space:normal">{{ job.get('Item Description', '—') }}</td></tr>
+          <tr><td>{{ tr('数量', 'Quantity') }}</td>       <td>{{ job.get('Quantity', '—') }}</td></tr>
+          <tr><td>{{ tr('预计完成', 'Est. Completion') }}</td><td>{{ job.get('Estimated Completion Date', '—') }}</td></tr>
+          <tr><td>{{ tr('最迟出货', 'Must Ship') }}</td>      <td>{{ job.get('Must Ship Date', '—') }}</td></tr>
+          <tr><td>{{ tr('区域', 'Region') }}</td>         <td>{{ job.get('region', '—') }}</td></tr>
         </table>
 
         {% if evidence_reqs %}
         <div style="margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0;">
           <div style="font-size:.75rem; font-weight:600; color:#6b7280; margin-bottom:6px;">
-            REQUIRED EVIDENCE
+            {{ tr('所需证据', 'REQUIRED EVIDENCE') }}
           </div>
           {% for ev in evidence_reqs %}
           <div style="display:flex; align-items:center; gap:8px; padding:4px 0;
@@ -384,22 +389,23 @@ input[name=result] { display:none; }
 
       {% if past_inspections %}
       <div class="card">
-        <div class="section-title">&#128196; Past Inspections ({{ past_inspections|length }})</div>
+        <div class="section-title">&#128196; {{ tr('历史检验', 'Past Inspections') }} ({{ past_inspections|length }})</div>
         {% for p in past_inspections|reverse %}
         {% set pidx = (past_inspections|length - loop.index) %}
         <div class="past-item">
           <div class="past-item-header">
             {% if p.result == 'Pass' %}
-              <span class="badge badge-new">&#9989; Pass</span>
+              <span class="badge badge-new">&#9989; {{ tr('合格', 'Pass') }}</span>
             {% elif p.result == 'Fail' %}
-              <span class="badge" style="background:#fee2e2;color:#991b1b">&#10060; Fail</span>
+              <span class="badge" style="background:#fee2e2;color:#991b1b">&#10060; {{ tr('不合格', 'Fail') }}</span>
             {% else %}
-              <span class="badge badge-ongoing">&#9888; {{ p.result }}</span>
+              <span class="badge badge-partially_shipped">&#9888; {{ p.result|status_label }}</span>
             {% endif %}
             <span>{{ p.inspector_name }}</span>
             <span style="color:#9ca3af; margin-left:auto">{{ p.inspection_date }}</span>
           </div>
-          <div>Inspected: {{ p.quantity_inspected }} / {{ p.quantity_ordered }} ordered</div>
+          <div>{{ tr('抽检 ' ~ p.quantity_inspected ~ ' / 订单 ' ~ p.quantity_ordered, 'Inspected: ' ~ p.quantity_inspected ~ ' / ' ~ p.quantity_ordered ~ ' ordered') }}{% if p.quantity_passed %} · {{ tr('合格 ', 'passed ') }}{{ p.quantity_passed }}{% endif %}</div>
+          {% if p.packing_condition or p.marking %}<div>{{ tr('包装', 'Packing') }}: {{ p.packing_condition or '—' }} · {{ tr('标识', 'Marking') }}: {{ p.marking or '—' }}</div>{% endif %}
 
           {# Evidence results #}
           {% if p.get('evidence') %}
@@ -410,7 +416,7 @@ input[name=result] { display:none; }
               {% if etype in ['brt','checklist','material','daq','xrf','vtrust','spark'] %}
               {{ {'brt':'📋','checklist':'✅','material':'🔬','daq':'📊','xrf':'⚗️','vtrust':'🎥','spark':'⚡'}.get(etype,'📎') }}
               {% endif %}
-              {{ etype|upper }}{% if res %}: {{ res }}{% endif %}
+              {{ etype|upper }}{% if res %}: {{ res|status_label }}{% endif %}
               {% if edata.get('files') %}
               <span style="opacity:.6; font-size:.68rem;">({{ edata.files|length }}f)</span>
               {% endif %}
@@ -454,7 +460,7 @@ input[name=result] { display:none; }
           <div style="margin-top:4px; color:#dc2626; font-size:.8rem;">{{ p.defects }}</div>
           {% endif %}
           {% if p.notes %}
-          <div style="margin-top:4px; color:#374151">Notes: {{ p.notes }}</div>
+          <div style="margin-top:4px; color:#374151">{{ tr('备注', 'Notes') }}: {{ p.notes }}</div>
           {% endif %}
         </div>
         {% endfor %}
@@ -464,9 +470,9 @@ input[name=result] { display:none; }
       {% if not google_configured %}
       <div class="card" style="border:1px solid #fcd34d; background:#fffbeb;">
         <div style="font-size:.85rem; color:#92400e;">
-          <strong>&#9888; Google not configured</strong><br>
-          Inspections are saved locally only.
-          <a href="{{ url_for('settings') }}">Configure Google Drive</a> to sync file uploads.
+          <strong>&#9888; {{ tr('未配置 Google', 'Google not configured') }}</strong><br>
+          {{ tr('检验记录仅保存在本系统。', 'Inspections are saved locally only.') }}
+          {% if g.is_admin %}<a href="{{ url_for('settings') }}">{{ tr('配置 Google Drive', 'Configure Google Drive') }}</a>{% endif %}
         </div>
       </div>
       {% endif %}
@@ -564,7 +570,7 @@ function escapeHtml(text) {
 document.getElementById('inspect-form').addEventListener('submit', function (e) {
   if (!document.getElementById('result-input').value) {
     e.preventDefault();
-    alert('请选择总体检验结果（Pass / Fail / Partial Pass）\nPlease choose an overall result.');
+    alert({{ tr('请选择总体检验结果（合格 / 不合格 / 部分合格）', 'Please choose an overall result (Pass / Fail / Partial Pass).')|tojson }});
     return;
   }
   const maxBytes = parseInt(this.dataset.maxBytes || '0', 10);
@@ -574,13 +580,12 @@ document.getElementById('inspect-form').addEventListener('submit', function (e) 
   });
   if (maxBytes && total > maxBytes) {
     e.preventDefault();
-    alert('附件总大小 ' + (total/1048576).toFixed(1) + ' MB，超过上限 ' +
-          (maxBytes/1048576).toFixed(0) + ' MB，请压缩或分次提交。\n' +
-          'Attachments exceed the upload limit.');
+    alert({{ tr('附件总大小超过上限，请压缩或分次提交。', 'Attachments exceed the upload limit. Compress them or submit in parts.')|tojson }} +
+          ' (' + (total/1048576).toFixed(1) + ' / ' + (maxBytes/1048576).toFixed(0) + ' MB)');
     return;
   }
   const btn = this.querySelector('button[type=submit]');
-  if (btn) { btn.disabled = true; btn.textContent = '提交中… Submitting…'; }
+  if (btn) { btn.disabled = true; btn.textContent = {{ tr('提交中…', 'Submitting…')|tojson }}; }
 });
 </script>
 {% endblock %}

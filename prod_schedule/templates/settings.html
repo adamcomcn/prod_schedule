@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Settings{% endblock %}
+{% block title %}{{ tr('设置', 'Settings') }}{% endblock %}
 
 {% block extra_style %}
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -17,147 +17,140 @@
               margin-right: 6px; }
 .dot-green { background: #10b981; }
 .dot-red   { background: #ef4444; }
+.module-row { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #f1f5f9;
+              font-size:.9rem; font-weight:500; margin:0; cursor:pointer; }
+.module-row input { width:18px; height:18px; }
+.loc-grid { display:grid; grid-template-columns:2fr 1fr 1fr 80px; gap:8px; align-items:flex-end; }
+@media (max-width: 600px) { .loc-grid { grid-template-columns:1fr 1fr; } }
+.small-label { font-size:.78rem; font-weight:500; color:#6b7280; display:block; margin-bottom:3px; }
 {% endblock %}
 
 {% block content %}
 <div class="page">
   <div style="max-width: 900px; margin: 0 auto;">
 
+    <!-- Optional modules -->
+    <div class="card">
+      <div class="card-title">&#129513; {{ tr('功能模块', 'Modules') }}</div>
+      <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">
+        {{ tr('试用阶段可先关闭暂不使用的模块。关闭后菜单中隐藏、页面无法访问，数据保留，随时可重新开启。',
+              'Turn off modules you are not using yet. Disabled modules are hidden and cannot be opened; their data is kept and they can be re-enabled at any time.') }}
+      </p>
+      <form method="POST" action="{{ url_for('settings_modules') }}">
+        {% for name, info in modules.items() %}
+        <label class="module-row">
+          <input type="checkbox" name="module_{{ name }}" value="1" {% if module_enabled(name) %}checked{% endif %}>
+          {{ info.zh if current_lang() == 'zh' else info.en }}
+        </label>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary" style="margin-top:12px;">{{ tr('保存模块设置', 'Save modules') }}</button>
+      </form>
+    </div>
+
     <div class="settings-grid">
       <!-- Google config form -->
       <div class="card">
-        <div class="card-title">&#9881; Google Integration</div>
+        <div class="card-title">&#9881; {{ tr('常规与 Google 集成', 'General & Google Integration') }}</div>
 
-        <div style="margin-bottom: 14px; font-size: .85rem;">
+        <div style="margin-bottom: 14px; font-size: .85rem; line-height:1.8;">
           <span class="status-dot {{ 'dot-green' if credentials_exist else 'dot-red' }}"></span>
-          Service account environment variable: <strong>{{ 'Configured' if credentials_exist else 'Not configured' }}</strong>
-          &nbsp;&nbsp;
+          {{ tr('服务账号环境变量', 'Service account environment variable') }}: <strong>{{ tr('已配置', 'Configured') if credentials_exist else tr('未配置', 'Not configured') }}</strong><br>
           <span class="status-dot {{ 'dot-green' if config.sheet_id else 'dot-red' }}"></span>
-          Google Sheet: <strong>{{ 'Configured' if config.sheet_id else 'Not set' }}</strong>
-          &nbsp;&nbsp;
+          Google Sheet: <strong>{{ tr('已配置', 'Configured') if config.sheet_id else tr('未设置', 'Not set') }}</strong><br>
           <span class="status-dot {{ 'dot-green' if config.drive_folder_id else 'dot-red' }}"></span>
-          Drive Folder: <strong>{{ 'Configured' if config.drive_folder_id else 'Not set' }}</strong>
+          Drive {{ tr('文件夹', 'Folder') }}: <strong>{{ tr('已配置', 'Configured') if config.drive_folder_id else tr('未设置', 'Not set') }}</strong>
         </div>
 
         <form method="POST">
           <div class="form-group">
-            <label>Google Sheets ID</label>
-            <input type="text" name="sheet_id" value="{{ config.sheet_id }}"
-                   placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
-            <div style="font-size:.78rem; color:#6b7280; margin-top:4px;">
-              Found in the spreadsheet URL: /spreadsheets/d/<strong>SHEET_ID</strong>/edit
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Google Drive Folder ID</label>
-            <input type="text" name="drive_folder_id" value="{{ config.drive_folder_id }}"
-                   placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j">
-            <div style="font-size:.78rem; color:#6b7280; margin-top:4px;">
-              Found in the folder URL: /drive/folders/<strong>FOLDER_ID</strong>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Valve Item Code Prefixes (V-Trust required)</label>
+            <label>{{ tr('阀门物料编码前缀（需要 V-Trust）', 'Valve Item Code Prefixes (V-Trust required)') }}</label>
             <input type="text" name="valve_prefixes"
                    value="{{ config.get('valve_prefixes', ['RSV'])|join(', ') }}"
-                   placeholder="e.g. RSV, BFV, BV">
+                   placeholder="RSV, BFV, BV">
             <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
-              Comma-separated prefixes. Any item whose code starts with one of these,
-              or whose description contains "valve", will require V-Trust inspection.
+              {{ tr('用逗号分隔。物料编码以这些前缀开头、或描述含 "valve" 的产品需要 V-Trust 检验。',
+                    'Comma-separated. Items whose code starts with one of these, or whose description contains "valve", require V-Trust inspection.') }}
             </div>
           </div>
 
-          <button type="submit" class="btn btn-primary">Save Settings</button>
+          <div class="form-group">
+            <label>Google Sheets ID</label>
+            <input type="text" name="sheet_id" value="{{ config.sheet_id }}"
+                   placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
+            <div style="font-size:.78rem; color:#6b7280; margin-top:4px;">
+              {{ tr('表格网址中的这一段', 'Found in the spreadsheet URL') }}: /spreadsheets/d/<strong>SHEET_ID</strong>/edit
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Google Drive {{ tr('文件夹 ID', 'Folder ID') }}</label>
+            <input type="text" name="drive_folder_id" value="{{ config.drive_folder_id }}"
+                   placeholder="1a2b3c4d5e6f7g8h9i0j">
+            <div style="font-size:.78rem; color:#6b7280; margin-top:4px;">
+              {{ tr('文件夹网址中的这一段', 'Found in the folder URL') }}: /drive/folders/<strong>FOLDER_ID</strong>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary">{{ tr('保存设置', 'Save Settings') }}</button>
         </form>
       </div>
 
       <!-- Setup guide -->
       <div class="card">
-        <div class="card-title">&#128218; Setup Guide</div>
+        <div class="card-title">&#128218; {{ tr('Google 配置指引', 'Google Setup Guide') }}</div>
+        <p style="font-size:.8rem; color:#92400e; background:#fffbeb; border-radius:6px; padding:8px 10px; margin-bottom:12px;">
+          {{ tr('注意：Google 服务在中国大陆无法直接访问。附件始终保存在本系统中，Google 同步仅供总部使用。',
+                'Note: Google services are blocked in mainland China. Attachments are always stored in this system; Google sync is for HQ only.') }}
+        </p>
         <ol class="steps">
-          <li>
-            <div>
-              Go to <strong>console.cloud.google.com</strong> and create a new project
-              (e.g. "Production Schedule").
-            </div>
-          </li>
-          <li>
-            <div>
-              Enable these two APIs:<br>
-              &bull; <strong>Google Sheets API</strong><br>
-              &bull; <strong>Google Drive API</strong>
-            </div>
-          </li>
-          <li>
-            <div>
-              Go to <strong>IAM &amp; Admin &rarr; Service Accounts</strong>,
-              create a service account, and download the JSON key. Store it in Railway
-              as <span class="code">GOOGLE_SERVICE_ACCOUNT_JSON_B64</span>.
-            </div>
-          </li>
-          <li>
-            <div>
-              Create a Google Sheet. Add a tab called
-              <span class="code">Inspections</span>.
-              Share the sheet with the service account email
-              (e.g. <span class="code">my-sa@project.iam.gserviceaccount.com</span>)
-              as <strong>Editor</strong>.
-            </div>
-          </li>
-          <li>
-            <div>
-              Create a Google Drive folder for inspection attachments.
-              Share it with the same service account email as <strong>Editor</strong>.
-              Paste the folder ID above.
-            </div>
-          </li>
-          <li>
-            <div>
-              In the Inspections sheet, add these headers in row 1:<br>
+          <li><div>{{ tr('在 console.cloud.google.com 创建项目。', 'Create a project at console.cloud.google.com.') }}</div></li>
+          <li><div>{{ tr('启用 Google Sheets API 和 Google Drive API。', 'Enable the Google Sheets API and Google Drive API.') }}</div></li>
+          <li><div>{{ tr('在 IAM & Admin → Service Accounts 创建服务账号并下载 JSON 密钥，在 Railway 中保存为', 'In IAM & Admin → Service Accounts create a service account, download the JSON key and store it in Railway as') }}
+            <span class="code">GOOGLE_SERVICE_ACCOUNT_JSON_B64</span>.</div></li>
+          <li><div>{{ tr('新建 Google 表格，添加名为 Inspections 的工作表，并以“编辑者”身份共享给服务账号邮箱。', 'Create a Google Sheet with a tab called Inspections and share it with the service account email as Editor.') }}</div></li>
+          <li><div>{{ tr('新建用于存放附件的 Drive 文件夹，同样共享给服务账号，并把文件夹 ID 填到左侧。', 'Create a Drive folder for attachments, share it with the same service account, and paste its ID on the left.') }}</div></li>
+          <li><div>{{ tr('在 Inspections 表第 1 行添加表头：', 'Add these headers in row 1 of the Inspections sheet:') }}<br>
               <span class="code">Job Key, Region, Order #, Item Code,
               Description, Supplier, Qty Ordered, Inspector,
-              Date, Qty Inspected, Result, Defects, Notes, Files, Submitted At</span>
-            </div>
-          </li>
+              Date, Qty Inspected, Result, Defects, Notes, Files, Submitted At</span></div></li>
         </ol>
       </div>
     </div>
 
     <!-- Email notification config -->
     <div class="card" style="margin-top:0;">
-      <div class="card-title">&#128231; 邮件通知设置</div>
+      <div class="card-title">&#128231; {{ tr('邮件通知', 'E-mail notifications') }}</div>
       <p style="font-size:.85rem; color:#6b7280; margin-bottom:16px;">
-        每次上传新排期后，系统自动向
-        <a href="{{ url_for('employees') }}">员工档案</a>
-        中在职员工发送新任务通知邮件。
+        {{ tr('每次上传新排期后，系统会向员工档案中有邮箱的在职员工发送新任务通知。',
+              'After each new schedule upload, active employees with an e-mail address receive a new-task notification.') }}
       </p>
-        <div style="font-size:.82rem; margin-bottom:14px;">
-          <span style="display:inline-block; width:8px; height:8px; border-radius:50; margin-right:6px;
-                       background:{{ '#10b981' if smtp_configured else '#ef4444' }};border-radius:50%;"></span>
-          邮件通知：<strong>{{ '已配置' if smtp_configured else '未配置' }}</strong>
-        </div>
-        <p style="font-size:.82rem;color:#6b7280;">在 Railway 中配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_PASSWORD 和 SMTP_FROM。密码不会保存到应用配置文件。</p>
+      <div style="font-size:.82rem; margin-bottom:14px;">
+        <span class="status-dot {{ 'dot-green' if smtp_configured else 'dot-red' }}"></span>
+        {{ tr('邮件通知', 'E-mail') }}: <strong>{{ tr('已配置', 'Configured') if smtp_configured else tr('未配置', 'Not configured') }}</strong>
+      </div>
+      <p style="font-size:.82rem;color:#6b7280;">{{ tr('在 Railway 中配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_PASSWORD 和 SMTP_FROM。密码不会保存到应用配置文件。',
+        'Set SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD and SMTP_FROM in Railway. The password is never stored in the app config.') }}</p>
     </div>
 
-    <!-- 打卡地点管理 -->
+    {% if module_enabled('hr') %}
+    <!-- Check-in locations (HR module) -->
     <div class="card" style="margin-top:0;">
-      <div class="card-title">&#128205; 打卡地点管理（GPS 验证）</div>
+      <div class="card-title">&#128205; {{ tr('打卡地点管理（GPS 验证）', 'Check-in locations (GPS)') }}</div>
       <p style="font-size:.85rem; color:#6b7280; margin-bottom:14px;">
-        配置允许打卡的办公/厂区坐标。员工打卡时系统自动获取 GPS，距离超出半径则拒绝打卡。<br>
-        <strong>不配置任何地点则关闭验证</strong>（向后兼容）。
+        {{ tr('配置允许打卡的办公/厂区坐标。员工打卡时系统自动获取 GPS，距离超出半径则拒绝打卡。不配置任何地点则关闭验证。',
+              'Locations where check-in is allowed. Check-ins further than the radius are refused. With no locations, GPS checking is off.') }}
       </p>
 
       {% set locs = config.get('office_locations', []) %}
       {% if locs %}
+      <div style="overflow-x:auto;">
       <table style="width:100%; font-size:.83rem; border-collapse:collapse; margin-bottom:14px;">
         <thead>
           <tr style="background:#f8fafc;">
-            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">名称</th>
-            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">纬度</th>
-            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">经度</th>
-            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">半径(米)</th>
+            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">{{ tr('名称', 'Name') }}</th>
+            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">{{ tr('纬度', 'Latitude') }}</th>
+            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">{{ tr('经度', 'Longitude') }}</th>
+            <th style="padding:7px 10px; text-align:left; border-bottom:1px solid #e2e8f0;">{{ tr('半径(米)', 'Radius (m)') }}</th>
             <th style="padding:7px 10px; border-bottom:1px solid #e2e8f0;"></th>
           </tr>
         </thead>
@@ -170,61 +163,58 @@
             <td style="padding:7px 10px;">{{ loc.radius }}</td>
             <td style="padding:7px 10px;">
               <form method="POST" action="{{ url_for('office_location_delete', idx=i) }}"
-                    onsubmit="return confirm('删除地点「{{ loc.name }}」？')">
-                <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;">删除</button>
+                    onsubmit="return confirm({{ tr('删除地点「' ~ loc.name ~ '」？', 'Delete location "' ~ loc.name ~ '"?')|tojson|forceescape }})">
+                <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;">{{ tr('删除', 'Delete') }}</button>
               </form>
             </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
+      </div>
       {% else %}
-      <p style="font-size:.82rem; color:#9ca3af; margin-bottom:14px;">暂未配置打卡地点，GPS 验证已关闭</p>
+      <p style="font-size:.82rem; color:#9ca3af; margin-bottom:14px;">{{ tr('暂未配置打卡地点，GPS 验证已关闭', 'No locations configured — GPS checking is off') }}</p>
       {% endif %}
 
-      <!-- 添加新地点 -->
       <form method="POST" action="{{ url_for('office_location_add') }}">
-        <div style="display:grid; grid-template-columns:2fr 1fr 1fr 80px; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="loc-grid">
           <div>
-            <label style="font-size:.78rem; font-weight:500; color:#6b7280; display:block; margin-bottom:3px;">地点名称 *</label>
-            <input type="text" name="loc_name" placeholder="如：总部办公室" id="locName"
-                   style="width:100%; padding:7px 10px; font-size:.83rem; border:1px solid #d0d5dd; border-radius:6px;">
+            <label class="small-label">{{ tr('地点名称', 'Location name') }} *</label>
+            <input type="text" name="loc_name" placeholder="{{ tr('如：总部办公室', 'e.g. Head office') }}" id="locName">
           </div>
           <div>
-            <label style="font-size:.78rem; font-weight:500; color:#6b7280; display:block; margin-bottom:3px;">纬度 *</label>
-            <input type="text" name="lat" id="locLat" placeholder="23.1291"
-                   style="width:100%; padding:7px 10px; font-size:.83rem; border:1px solid #d0d5dd; border-radius:6px; font-family:monospace;">
+            <label class="small-label">{{ tr('纬度', 'Latitude') }} *</label>
+            <input type="text" name="lat" id="locLat" placeholder="23.1291" style="font-family:monospace;">
           </div>
           <div>
-            <label style="font-size:.78rem; font-weight:500; color:#6b7280; display:block; margin-bottom:3px;">经度 *</label>
-            <input type="text" name="lng" id="locLng" placeholder="113.2644"
-                   style="width:100%; padding:7px 10px; font-size:.83rem; border:1px solid #d0d5dd; border-radius:6px; font-family:monospace;">
+            <label class="small-label">{{ tr('经度', 'Longitude') }} *</label>
+            <input type="text" name="lng" id="locLng" placeholder="113.2644" style="font-family:monospace;">
           </div>
           <div>
-            <label style="font-size:.78rem; font-weight:500; color:#6b7280; display:block; margin-bottom:3px;">半径(米)</label>
-            <input type="number" name="radius" value="500" min="50" max="5000"
-                   style="width:100%; padding:7px 10px; font-size:.83rem; border:1px solid #d0d5dd; border-radius:6px;">
+            <label class="small-label">{{ tr('半径(米)', 'Radius (m)') }}</label>
+            <input type="number" name="radius" value="500" min="50" max="5000">
           </div>
         </div>
-        <div style="display:flex; gap:8px; margin-top:10px; align-items:center;">
-          <button type="submit" class="btn btn-primary btn-sm">添加地点</button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="fillMyLocation()">&#128205; 使用当前位置</button>
+        <div style="display:flex; gap:8px; margin-top:10px; align-items:center; flex-wrap:wrap;">
+          <button type="submit" class="btn btn-primary btn-sm">{{ tr('添加地点', 'Add location') }}</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="fillMyLocation()">&#128205; {{ tr('使用当前位置', 'Use my location') }}</button>
           <span id="gpsSettingStatus" style="font-size:.78rem; color:#6b7280;"></span>
         </div>
       </form>
     </div>
+    {% endif %}
 
     <!-- Excel password config -->
     <div class="card">
-      <div class="card-title">&#128196; Excel Settings</div>
+      <div class="card-title">&#128196; {{ tr('Excel 设置', 'Excel Settings') }}</div>
       <div style="font-size: .875rem;">
         <p style="margin-bottom:8px;">
-          Excel password environment variable:
-          <strong>{{ 'Configured' if excel_password_configured else 'Not configured' }}</strong>.
+          {{ tr('Excel 密码环境变量', 'Excel password environment variable') }}:
+          <strong>{{ tr('已配置', 'Configured') if excel_password_configured else tr('未配置', 'Not configured') }}</strong>
         </p>
         <p style="color:#6b7280;">
-          If encrypted schedules are used, set or rotate <span class="code">EXCEL_PASSWORD</span>
-          in Railway. Never place it in code or HTML.
+          {{ tr('如果供应商发来的排期是加密文件，请在 Railway 中设置或更换', 'If encrypted schedules are used, set or rotate') }}
+          <span class="code">EXCEL_PASSWORD</span>{{ tr('，不要写在代码或网页中。', ' in Railway. Never place it in code or HTML.') }}
         </p>
       </div>
     </div>
@@ -233,18 +223,25 @@
 </div>
 
 <script>
+var GPS_TEXT = {{ {
+  'locating': tr('正在获取位置...', 'Getting location...'),
+  'unsupported': tr('浏览器不支持定位', 'Location is not supported by this browser'),
+  'filled': tr('已填入（精度 ±', 'Filled in (accuracy ±'),
+  'metres': tr(' 米）', ' m)'),
+  'failed': tr('定位失败，请手动输入经纬度', 'Could not get location — enter coordinates manually'),
+}|tojson }};
 function fillMyLocation() {
   var s = document.getElementById('gpsSettingStatus');
-  s.textContent = '正在获取位置...';
-  if (!navigator.geolocation) { s.textContent = '浏览器不支持定位'; return; }
+  s.textContent = GPS_TEXT.locating;
+  if (!navigator.geolocation) { s.textContent = GPS_TEXT.unsupported; return; }
   navigator.geolocation.getCurrentPosition(function(pos) {
     document.getElementById('locLat').value = pos.coords.latitude.toFixed(6);
     document.getElementById('locLng').value = pos.coords.longitude.toFixed(6);
     s.style.color = '#059669';
-    s.textContent = '已填入（精度 ±' + Math.round(pos.coords.accuracy) + ' 米）';
+    s.textContent = GPS_TEXT.filled + Math.round(pos.coords.accuracy) + GPS_TEXT.metres;
   }, function() {
     s.style.color = '#dc2626';
-    s.textContent = '定位失败，请手动输入经纬度';
+    s.textContent = GPS_TEXT.failed;
   });
 }
 </script>

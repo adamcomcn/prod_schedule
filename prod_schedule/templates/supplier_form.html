@@ -7,7 +7,7 @@
 
   <div style="margin-bottom:16px;">
     <a href="{{ url_for('suppliers') }}" style="font-size:.85rem; color:#6b7280;">
-      &#8592; 返回供应商列表
+      &#8592; {{ tr('返回供应商列表', 'Back to suppliers') }}
     </a>
   </div>
 
@@ -18,35 +18,35 @@
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 20px;">
 
         <div class="form-group" style="grid-column:1/-1;">
-          <label>供应商名称 <span style="color:#dc2626;">*</span></label>
+          <label>{{ tr('供应商名称', 'Supplier name') }} <span style="color:#dc2626;">*</span></label>
           <input type="text" name="name" required
                  value="{{ supplier.name if supplier else '' }}"
-                 placeholder="e.g. Reliable Valve Co.">
+                 placeholder="{{ tr('如 Reliable Valve Co.', 'e.g. Reliable Valve Co.') }}">
         </div>
 
         <div class="form-group">
-          <label>联系人</label>
+          <label>{{ tr('联系人', 'Contact') }}</label>
           <input type="text" name="contact_person"
                  value="{{ supplier.contact_person if supplier else '' }}"
-                 placeholder="姓名">
+                 placeholder="{{ tr('姓名', 'Name') }}">
         </div>
 
         <div class="form-group">
-          <label>电话</label>
+          <label>{{ tr('电话', 'Phone') }}</label>
           <input type="text" name="phone"
                  value="{{ supplier.phone if supplier else '' }}"
                  placeholder="+86 ...">
         </div>
 
         <div class="form-group">
-          <label>邮箱</label>
+          <label>{{ tr('邮箱', 'E-mail') }}</label>
           <input type="text" name="email"
                  value="{{ supplier.email if supplier else '' }}"
                  placeholder="example@supplier.com">
         </div>
 
         <div class="form-group">
-          <label>国家/地区</label>
+          <label>{{ tr('国家/地区', 'Country / region') }}</label>
           <select name="country">
             {% for c in ['China','Australia','New Zealand','Fiji','Other'] %}
             <option value="{{ c }}" {{ 'selected' if supplier and supplier.country == c else '' }}>
@@ -57,23 +57,23 @@
         </div>
 
         <div class="form-group" style="grid-column:1/-1;">
-          <label>地址</label>
+          <label>{{ tr('地址', 'Address') }}</label>
           <input type="text" name="address"
                  value="{{ supplier.address if supplier else '' }}"
-                 placeholder="工厂/公司地址">
+                 placeholder="{{ tr('工厂/公司地址', 'Factory / company address') }}">
         </div>
 
         <div class="form-group" style="grid-column:1/-1;">
-          <label>备注</label>
+          <label>{{ tr('备注', 'Notes') }}</label>
           <textarea name="notes" rows="3"
-                    placeholder="其他说明，如认证信息、付款条件等">{{ supplier.notes if supplier else '' }}</textarea>
+                    placeholder="{{ tr('其他说明，如认证信息、付款条件等', 'Other notes, e.g. certifications, payment terms') }}">{{ supplier.notes if supplier else '' }}</textarea>
         </div>
 
       </div>
 
       <div style="display:flex; gap:10px; margin-top:4px;">
-        <button type="submit" class="btn btn-primary">保存</button>
-        <a href="{{ url_for('suppliers') }}" class="btn btn-outline">取消</a>
+        <button type="submit" class="btn btn-primary">{{ tr('保存', 'Save') }}</button>
+        <a href="{{ url_for('suppliers') }}" class="btn btn-outline">{{ tr('取消', 'Cancel') }}</a>
       </div>
     </form>
   </div>

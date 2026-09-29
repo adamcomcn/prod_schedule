@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Production Schedule{% endblock %}
+{% block title %}{{ tr('生产排期', 'Production Schedule') }}{% endblock %}
 
 {% block extra_style %}
 .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -88,48 +88,48 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 <div class="page" style="padding-bottom:0; padding-top: 16px;">
   {% if g.is_admin and has_pending_upload() %}
   <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
-    &#9888; <span class="lt" data-en="An uploaded schedule is waiting for confirmation." data-zh="有一份已上传的排期等待确认。">有一份已上传的排期等待确认。</span>
+    &#9888; {{ tr('有一份已上传的排期等待确认。', 'An uploaded schedule is waiting for confirmation.') }}
     <a href="{{ url_for('upload_preview') }}" class="btn btn-sm btn-primary" style="margin-left:8px;">
-      <span class="lt" data-en="Review" data-zh="去确认">去确认</span></a>
+      {{ tr('去确认', 'Review') }}</a>
   </div>
   {% endif %}
   <div class="toolbar">
     {% if g.is_admin %}
     <form method="POST" action="{{ url_for('upload_excel') }}" enctype="multipart/form-data"
           class="upload-form">
-      <label class="file-upload-area" title="Upload new Excel schedule">
+      <label class="file-upload-area" title="{{ tr('上传新的排期 Excel', 'Upload new Excel schedule') }}">
         <input type="file" name="file" accept=".xlsx" style="display:none"
-               onchange="this.closest('form').querySelector('.file-name').textContent = this.files[0]?.name || 'No file'; this.closest('form').querySelector('.auto-submit-btn').click()">
-        &#128196; Choose Excel file
+               onchange="this.closest('form').querySelector('.file-name').textContent = this.files[0]?.name || ''; this.closest('form').querySelector('.auto-submit-btn').click()">
+        &#128196; {{ tr('选择排期 Excel 文件', 'Choose Excel file') }}
       </label>
-      <span class="file-name upload-info">No file chosen</span>
-      <button class="auto-submit-btn btn btn-primary" type="submit" style="display:none">Upload</button>
+      <span class="file-name upload-info">{{ tr('未选择文件', 'No file chosen') }}</span>
+      <button class="auto-submit-btn btn btn-primary" type="submit" style="display:none">{{ tr('上传', 'Upload') }}</button>
     </form>
     {% endif %}
     {% if upload_date %}
-      <span class="upload-info">Last uploaded: <strong>{{ upload_date }}</strong></span>
+      <span class="upload-info">{{ tr('最近上传：', 'Last uploaded:') }} <strong>{{ upload_date }}</strong></span>
     {% endif %}
     <a href="{{ url_for('export_comparison_excel') }}" class="btn btn-outline btn-sm">
-      Export comparison Excel
+      {{ tr('导出对比 Excel', 'Export comparison Excel') }}
     </a>
     {% if g.is_admin and not google_configured %}
       <a href="{{ url_for('settings') }}" class="btn btn-outline btn-sm">
-        &#9888; Configure Google Sheets/Drive
+        &#9888; {{ tr('配置 Google Sheets/Drive', 'Configure Google Sheets/Drive') }}
       </a>
     {% endif %}
     <form method="GET" action="{{ url_for('index') }}" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
       <input type="hidden" name="sheet" value="{{ selected_sheet }}">
       <input type="hidden" name="status" value="{{ status_filter }}">
-      <input type="text" name="q" value="{{ search }}" placeholder="Search selected region..." class="search-box">
+      <input type="text" name="q" value="{{ search }}" placeholder="{{ tr('在当前区域搜索…', 'Search selected region...') }}" class="search-box">
       <select name="view" style="width:auto;">
-        <option value="active" {% if view == 'active' %}selected{% endif %}>Active</option>
-        <option value="shipped" {% if view == 'shipped' %}selected{% endif %}>Shipped</option>
-        <option value="all" {% if view == 'all' %}selected{% endif %}>All</option>
+        <option value="active" {% if view == 'active' %}selected{% endif %}>{{ tr('进行中', 'Active') }}</option>
+        <option value="shipped" {% if view == 'shipped' %}selected{% endif %}>{{ tr('已出货', 'Shipped') }}</option>
+        <option value="all" {% if view == 'all' %}selected{% endif %}>{{ tr('全部', 'All') }}</option>
       </select>
       <select name="per_page" style="width:auto;">
-        {% for size in [50, 100, 200] %}<option value="{{ size }}" {% if per_page == size %}selected{% endif %}>{{ size }} per page</option>{% endfor %}
+        {% for size in [50, 100, 200] %}<option value="{{ size }}" {% if per_page == size %}selected{% endif %}>{{ tr('每页 ' ~ size ~ ' 条', size ~ ' per page') }}</option>{% endfor %}
       </select>
-      <button class="btn btn-outline btn-sm" type="submit">Apply</button>
+      <button class="btn btn-outline btn-sm" type="submit">{{ tr('筛选', 'Apply') }}</button>
     </form>
   </div>
 </div>
@@ -138,32 +138,32 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 <div class="typo-panel" id="typoPanel">
   <div class="typo-panel-header" onclick="toggleTypoPanel()">
     <span>&#9888;</span>
-    <span>{{ typo_flags|length }} possible typo{{ 's' if typo_flags|length != 1 }} detected &mdash; review before actioning</span>
+    <span>{{ tr('发现 ' ~ typo_flags|length ~ ' 处疑似笔误，请核实', typo_flags|length ~ ' possible typo' ~ ('s' if typo_flags|length != 1 else '') ~ ' detected — review before actioning') }}</span>
     <span class="chevron open" id="typoChevron">&#9660;</span>
   </div>
   <div class="typo-list" id="typoList">
     {% for t in typo_flags %}
     <div class="typo-item">
       <div class="typo-item-header">
-        &#9888; [{{ t.sheet }}] &mdash; {{ t.reason }} ({{ t.score }}% similar)
+        &#9888; [{{ t.sheet }}] &mdash; {{ tr('物料编码可能有笔误', t.reason) if t.field == 'item_code' else tr('订单号可能有笔误', t.reason) }} ({{ tr('相似度', 'similar') }} {{ t.score }}%)
       </div>
       <div class="typo-compare">
         <div class="typo-col">
-          <label>This week (flagged as NEW)</label>
-          <div>Order: <strong>{{ t.curr_order }}</strong></div>
-          <div>Item:&nbsp;&nbsp;<strong>{{ t.curr_item }}</strong></div>
+          <label>{{ tr('本周（标为新增）', 'This week (flagged as NEW)') }}</label>
+          <div>{{ tr('订单', 'Order') }}: <strong>{{ t.curr_order }}</strong></div>
+          <div>{{ tr('物料', 'Item') }}:&nbsp;&nbsp;<strong>{{ t.curr_item }}</strong></div>
         </div>
         <div class="typo-col">
-          <label>Last week (showing as SHIPPED)</label>
-          <div>Order: <strong>{{ t.prev_order }}</strong></div>
-          <div>Item:&nbsp;&nbsp;<strong>{{ t.prev_item }}</strong></div>
+          <label>{{ tr('上周（显示为已出货）', 'Last week (showing as SHIPPED)') }}</label>
+          <div>{{ tr('订单', 'Order') }}: <strong>{{ t.prev_order }}</strong></div>
+          <div>{{ tr('物料', 'Item') }}:&nbsp;&nbsp;<strong>{{ t.prev_item }}</strong></div>
         </div>
       </div>
       <div style="margin-top:8px; font-size:.78rem; color:#6b7280;">
-        If this is a typo in the supplier's file, ask them to correct it.
-        If it is genuinely a new job, no action needed.
-        <a href="{{ url_for('inspect_form', job_key=t.curr_key) }}" target="_blank"
-           style="margin-left:8px;">Open inspection &rarr;</a>
+        {{ tr('如果是供应商文件笔误，请让供应商更正；如果确实是新订单，无需处理。',
+              "If this is a typo in the supplier's file, ask them to correct it. If it is genuinely a new job, no action needed.") }}
+        <a href="{{ url_for('inspect_form', job_key=t.curr_key) }}"
+           style="margin-left:8px;">{{ tr('打开检验', 'Open inspection') }} &rarr;</a>
       </div>
     </div>
     {% endfor %}
@@ -185,24 +185,24 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
   <div class="table-toolbar">
     <div class="legend">
       <a class="legend-item {% if status_filter == 'new' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='new', per_page=per_page) }}"><span class="badge badge-new">NEW</span> New this week</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='new', per_page=per_page) }}"><span class="badge badge-new">{{ tr('新增', 'NEW') }}</span> {{ tr('本周新增', 'New this week') }}</a>
       <a class="legend-item {% if status_filter == 'not_shipped' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='not_shipped', per_page=per_page) }}"><span class="badge badge-not_shipped">NOT SHIPPED</span> Still waiting</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='not_shipped', per_page=per_page) }}"><span class="badge badge-not_shipped">{{ tr('未出货', 'NOT SHIPPED') }}</span> {{ tr('仍在排产', 'Still waiting') }}</a>
       <a class="legend-item {% if status_filter == 'partially_shipped' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='partially_shipped', per_page=per_page) }}"><span class="badge badge-partially_shipped">PARTIAL</span> Qty reduced</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='partially_shipped', per_page=per_page) }}"><span class="badge badge-partially_shipped">{{ tr('部分出货', 'PARTIAL') }}</span> {{ tr('数量减少', 'Qty reduced') }}</a>
       <a class="legend-item {% if status_filter == 'shipped' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='shipped', per_page=per_page) }}"><span class="badge badge-shipped">SHIPPED</span> Gone from schedule</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='shipped', per_page=per_page) }}"><span class="badge badge-shipped">{{ tr('已出货', 'SHIPPED') }}</span> {{ tr('已从排期消失', 'Gone from schedule') }}</a>
       <a class="legend-item {% if status_filter == 'vtrust' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='vtrust', per_page=per_page) }}"><span class="badge" style="background:#ffedd5;color:#9a3412;border:1px solid #f97316">V-Trust</span> Valve — no V-Trust</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='vtrust', per_page=per_page) }}"><span class="badge" style="background:#ffedd5;color:#9a3412;border:1px solid #f97316">V-Trust</span> {{ tr('阀门缺 V-Trust', 'Valve — no V-Trust') }}</a>
       <a class="legend-item {% if status_filter == 'no_qa_brt' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='no_qa_brt', per_page=per_page) }}"><span class="badge" style="background:#dc2626;color:#fff">&#9888; No QA BRT</span> Missing report</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='no_qa_brt', per_page=per_page) }}"><span class="badge" style="background:#dc2626;color:#fff">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span> {{ tr('缺检验报告', 'Missing report') }}</a>
       {% if status_filter %}
       <a class="legend-item"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', per_page=per_page) }}">Clear filter</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', per_page=per_page) }}">{{ tr('清除筛选', 'Clear filter') }}</a>
       {% endif %}
     </div>
     <span class="row-count" id="count-{{ si }}">
-      {{ total_results }} result{{ '' if total_results == 1 else 's' }}
+      {{ tr('共 ' ~ total_results ~ ' 条', total_results ~ ' result' ~ ('' if total_results == 1 else 's')) }}
     </span>
   </div>
 
@@ -211,15 +211,15 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     <table id="table-{{ si }}">
       <thead>
         <tr>
-          <th style="min-width:90px">Status</th>
+          <th style="min-width:90px">{{ tr('状态', 'Status') }}</th>
           {% for h in rows[0] %}
           <th onclick="sortTable({{ si }}, {{ loop.index0 + 1 }})">
-            {{ h }}<span class="sort-icon">&#x21C5;</span>
+            {{ h|header_label }}<span class="sort-icon">&#x21C5;</span>
           </th>
           {% endfor %}
-          <th style="min-width:130px">Inspection Status</th>
+          <th style="min-width:130px">{{ tr('检验状态', 'Inspection Status') }}</th>
           <th style="min-width:120px">V-Trust</th>
-          <th style="min-width:100px">Report</th>
+          <th style="min-width:100px">{{ tr('报告', 'Report') }}</th>
         </tr>
       </thead>
       <tbody id="tbody-{{ si }}">
@@ -251,58 +251,58 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
         <tr class="row-{{ status }}{% if qa_warn %} row-qa-warn{% endif %}{% if vtrust_warn %} row-vtrust-warn{% endif %}" data-key="{{ job_key }}">
           <td>
             {% if status == 'new' %}
-              <span class="badge badge-new">NEW</span>
+              <span class="badge badge-new">{{ tr('新增', 'NEW') }}</span>
             {% elif status == 'not_shipped' %}
-              <span class="badge badge-not_shipped">NOT SHIPPED</span>
+              <span class="badge badge-not_shipped">{{ tr('未出货', 'NOT SHIPPED') }}</span>
             {% elif status == 'partially_shipped' %}
-              <span class="badge badge-partially_shipped">PARTIAL</span>
+              <span class="badge badge-partially_shipped">{{ tr('部分出货', 'PARTIAL') }}</span>
             {% elif status == 'typo' %}
-              <span class="badge badge-typo">&#9888; TYPO?</span>
+              <span class="badge badge-typo">&#9888; {{ tr('疑似笔误', 'TYPO?') }}</span>
             {% endif %}
-            {% if qa_warn %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; No QA BRT</span>{% endif %}
+            {% if qa_warn %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>{% endif %}
           </td>
           {% for cell in row %}
-          <td>{{ cell }}</td>
+          <td>{{ cell|status_label if headers[loop.index0] == 'Current Status' else cell }}</td>
           {% endfor %}
           <td class="inspect-col">
             {% if insp %}
               {% set last = insp[-1] %}
               {% set result = last.result|lower %}
               {% if result == 'pass' %}
-                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; Pass</span>
+                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; {{ tr('合格', 'Pass') }}</span>
               {% elif result == 'fail' %}
-                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; Fail</span>
+                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; {{ tr('不合格', 'Fail') }}</span>
               {% else %}
-                <span class="badge badge-partially_shipped">~ {{ last.result }}</span>
+                <span class="badge badge-partially_shipped">~ {{ last.result|status_label }}</span>
               {% endif %}
               {% if insp|length > 1 %}
-                <span style="font-size:.72rem;color:#6b7280;display:block;margin-top:2px">{{ insp|length }} reports</span>
+                <span style="font-size:.72rem;color:#6b7280;display:block;margin-top:2px">{{ tr(insp|length ~ ' 份报告', insp|length ~ ' reports') }}</span>
               {% endif %}
               <span style="font-size:.72rem;color:#9ca3af;display:block">{{ last.inspection_date }}</span>
             {% else %}
-              <span class="badge badge-shipped">Pending</span>
+              <span class="badge badge-shipped">{{ tr('待检验', 'Pending') }}</span>
             {% endif %}
           </td>
           <td class="inspect-col">
             {% if is_v %}
               {% if vtrust_val|lower == 'pass' %}
-                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; Pass</span>
+                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; {{ tr('合格', 'Pass') }}</span>
               {% elif vtrust_val|lower == 'fail' %}
-                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; Fail</span>
+                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; {{ tr('不合格', 'Fail') }}</span>
               {% elif vtrust_val %}
-                <span class="badge badge-partially_shipped">~ {{ vtrust_val }}</span>
+                <span class="badge badge-partially_shipped">~ {{ vtrust_val|status_label }}</span>
               {% else %}
-                <span class="badge" style="background:#ffedd5;color:#9a3412">Pending</span>
+                <span class="badge" style="background:#ffedd5;color:#9a3412">{{ tr('待检验', 'Pending') }}</span>
               {% endif %}
             {% else %}
-              <span style="color:#9ca3af;font-size:.75rem">N/A</span>
+              <span style="color:#9ca3af;font-size:.75rem">{{ tr('不适用', 'N/A') }}</span>
             {% endif %}
           </td>
           <td class="inspect-col">
             {% if ns.order %}
             <a href="{{ url_for('inspect_form', job_key=job_key) }}"
-               class="btn btn-sm {% if insp %}btn-outline{% else %}btn-success{% endif %}" target="_blank">
-              &#128203; {% if insp %}View{% else %}Inspect{% endif %}
+               class="btn btn-sm {% if insp %}btn-outline{% else %}btn-success{% endif %}">
+              &#128203; {% if insp %}{{ tr('查看', 'View') }}{% else %}{{ tr('检验', 'Inspect') }}{% endif %}
             </a>
             {% endif %}
           </td>
@@ -312,8 +312,8 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
         {# ── shipped rows from previous week ── #}
         {% if shipped_rows.get(sheet_name) %}
         <tr class="shipped-divider">
-          <td colspan="{{ rows[0]|length + 2 }}">
-            &#9989; Shipped this week &mdash; {{ shipped_rows[sheet_name]|length }} job(s) no longer on schedule
+          <td colspan="{{ rows[0]|length + 4 }}">
+            &#9989; {{ tr('本周已出货 — ' ~ shipped_rows[sheet_name]|length ~ ' 个订单已不在排期中', 'Shipped this week — ' ~ shipped_rows[sheet_name]|length ~ ' job(s) no longer on schedule') }}
           </td>
         </tr>
         {% for row in shipped_rows[sheet_name] %}
@@ -332,8 +332,8 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% set qa_warn2 = qa_val2 not in ['yes', 'y'] %}
         <tr class="row-shipped{% if qa_warn2 %} row-qa-warn{% endif %}{% if vtrust_warn2 %} row-vtrust-warn{% endif %}" data-key="{{ shipped_key }}">
           <td>
-            <span class="badge badge-shipped">SHIPPED</span>
-            {% if qa_warn2 %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; No QA BRT</span>{% endif %}
+            <span class="badge badge-shipped">{{ tr('已出货', 'SHIPPED') }}</span>
+            {% if qa_warn2 %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>{% endif %}
           </td>
           {% for i in range(headers|length) %}
           <td>{{ row[i] if i < row|length else '' }}</td>
@@ -343,40 +343,40 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
               {% set last2 = insp2[-1] %}
               {% set result2 = last2.result|lower %}
               {% if result2 == 'pass' %}
-                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; Pass</span>
+                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; {{ tr('合格', 'Pass') }}</span>
               {% elif result2 == 'fail' %}
-                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; Fail</span>
+                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; {{ tr('不合格', 'Fail') }}</span>
               {% else %}
-                <span class="badge badge-partially_shipped">~ {{ last2.result }}</span>
+                <span class="badge badge-partially_shipped">~ {{ last2.result|status_label }}</span>
               {% endif %}
               {% if insp2|length > 1 %}
-                <span style="font-size:.72rem;color:#6b7280;display:block;margin-top:2px">{{ insp2|length }} reports</span>
+                <span style="font-size:.72rem;color:#6b7280;display:block;margin-top:2px">{{ tr(insp2|length ~ ' 份报告', insp2|length ~ ' reports') }}</span>
               {% endif %}
               <span style="font-size:.72rem;color:#9ca3af;display:block">{{ last2.inspection_date }}</span>
             {% else %}
-              <span class="badge badge-shipped">Pending</span>
+              <span class="badge badge-shipped">{{ tr('待检验', 'Pending') }}</span>
             {% endif %}
           </td>
           <td class="inspect-col">
             {% if is_v2 %}
               {% if vtrust_val2|lower == 'pass' %}
-                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; Pass</span>
+                <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; {{ tr('合格', 'Pass') }}</span>
               {% elif vtrust_val2|lower == 'fail' %}
-                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; Fail</span>
+                <span class="badge" style="background:#fee2e2;color:#991b1b">&#10007; {{ tr('不合格', 'Fail') }}</span>
               {% elif vtrust_val2 %}
-                <span class="badge badge-partially_shipped">~ {{ vtrust_val2 }}</span>
+                <span class="badge badge-partially_shipped">~ {{ vtrust_val2|status_label }}</span>
               {% else %}
-                <span class="badge" style="background:#ffedd5;color:#9a3412">Pending</span>
+                <span class="badge" style="background:#ffedd5;color:#9a3412">{{ tr('待检验', 'Pending') }}</span>
               {% endif %}
             {% else %}
-              <span style="color:#9ca3af;font-size:.75rem">N/A</span>
+              <span style="color:#9ca3af;font-size:.75rem">{{ tr('不适用', 'N/A') }}</span>
             {% endif %}
           </td>
           <td class="inspect-col">
             {% if ns2.order %}
             <a href="{{ url_for('inspect_form', job_key=shipped_key) }}"
-               class="btn btn-sm {% if insp2 %}btn-outline{% else %}btn-success{% endif %}" target="_blank">
-              &#128203; {% if insp2 %}View{% else %}Inspect{% endif %}
+               class="btn btn-sm {% if insp2 %}btn-outline{% else %}btn-success{% endif %}">
+              &#128203; {% if insp2 %}{{ tr('查看', 'View') }}{% else %}{{ tr('检验', 'Inspect') }}{% endif %}
             </a>
             {% endif %}
           </td>
@@ -388,13 +388,13 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
   </div>
   {% if total_pages > 1 %}
   <div style="display:flex;justify-content:center;align-items:center;gap:12px;padding:16px;background:#fff;">
-    {% if page > 1 %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, status=status_filter, per_page=per_page, page=page-1) }}">Previous</a>{% endif %}
-    <span style="font-size:.82rem;color:#6b7280;">Page {{ page }} of {{ total_pages }}</span>
-    {% if page < total_pages %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, status=status_filter, per_page=per_page, page=page+1) }}">Next</a>{% endif %}
+    {% if page > 1 %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, status=status_filter, per_page=per_page, page=page-1) }}">{{ tr('上一页', 'Previous') }}</a>{% endif %}
+    <span style="font-size:.82rem;color:#6b7280;">{{ tr('第 ' ~ page ~ ' / ' ~ total_pages ~ ' 页', 'Page ' ~ page ~ ' of ' ~ total_pages) }}</span>
+    {% if page < total_pages %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, status=status_filter, per_page=per_page, page=page+1) }}">{{ tr('下一页', 'Next') }}</a>{% endif %}
   </div>
   {% endif %}
   {% else %}
-  <div class="no-data">No data in this sheet</div>
+  <div class="no-data">{{ tr('此 sheet 暂无数据', 'No data in this sheet') }}</div>
   {% endif %}
 </div>
 {% endfor %}
@@ -402,8 +402,8 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 {% else %}
 <div class="card" style="margin: 24px; text-align: center; padding: 60px;">
   <div style="font-size: 3rem; margin-bottom: 16px;">&#128196;</div>
-  <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px;">No schedule loaded yet</div>
-  <div style="color: #6b7280; margin-bottom: 20px;">Upload the weekly Excel file above to get started.</div>
+  <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px;">{{ tr('尚未上传排期', 'No schedule loaded yet') }}</div>
+  <div style="color: #6b7280; margin-bottom: 20px;">{{ tr('请在上方上传每周的排期 Excel 文件。', 'Upload the weekly Excel file above to get started.') }}</div>
 </div>
 {% endif %}
 
@@ -413,27 +413,27 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 
   {# KPI bar #}
   <div style="display:flex; gap:16px; padding: 12px 24px; flex-wrap:wrap; align-items:center;">
-    <div style="font-size:.85rem; font-weight:700; color:#1a3a5c;">&#9888; Fully Shipped Missing QA BRT Reports</div>
+    <div style="font-size:.85rem; font-weight:700; color:#1a3a5c;">&#9888; {{ tr('已全部出货但缺 QA BRT 报告', 'Fully Shipped Missing QA BRT Reports') }}</div>
     <div style="display:flex; gap:10px; flex-wrap:wrap;">
       <span style="background:#fee2e2; color:#991b1b; border-radius:20px; padding:4px 14px; font-size:.78rem; font-weight:600;">
-        {{ outstanding_jobs|length }} 未完成
+        {{ tr(outstanding_jobs|length ~ ' 未完成', outstanding_jobs|length ~ ' open') }}
       </span>
       {% if kpi_overdue %}
       <span style="background:#fef3c7; color:#92400e; border-radius:20px; padding:4px 14px; font-size:.78rem; font-weight:600;">
-        &#9888; {{ kpi_overdue }} 已逾期
+        &#9888; {{ tr(kpi_overdue ~ ' 已逾期', kpi_overdue ~ ' overdue') }}
       </span>
       {% endif %}
       {% if kpi_total %}
       {% set pct = ((kpi_done / kpi_total) * 100)|round|int %}
       <span style="background:#d1fae5; color:#065f46; border-radius:20px; padding:4px 14px; font-size:.78rem; font-weight:600;">
-        &#10003; 完成率 {{ pct }}% ({{ kpi_done }}/{{ kpi_total }})
+        &#10003; {{ tr('完成率', 'Done') }} {{ pct }}% ({{ kpi_done }}/{{ kpi_total }})
       </span>
       {% endif %}
     </div>
     <button onclick="toggleOutstanding()" id="outBtn"
             style="margin-left:auto; background:none; border:1px solid #d0d5dd; border-radius:6px;
                    padding:4px 12px; font-size:.78rem; cursor:pointer; color:#6b7280;">
-      收起 &#9650;
+      {{ tr('收起', 'Collapse') }} &#9650;
     </button>
   </div>
 
@@ -442,22 +442,22 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
   <div style="margin-bottom:16px;">
     <div style="background:#1a3a5c; color:#fff; font-size:.75rem; font-weight:700;
                 text-transform:uppercase; letter-spacing:.06em; padding:6px 24px;">
-      {{ sheet_name }} — {{ jobs|length }} 条待处理
+      {{ sheet_name }} — {{ tr(jobs|length ~ ' 条待处理', jobs|length ~ ' open') }}
     </div>
     <div style="overflow-x:auto; background:#fff;">
       <table style="border-collapse:collapse; width:100%; font-size:.78rem;">
         <thead>
           <tr style="background:#fff7ed;">
-            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Status</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">逾期</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Order #</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Item Code</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Description</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Supplier</th>
-            <th style="padding:8px 12px; text-align:center; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Qty</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Est. Completion</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Must Ship</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">Shipped Week</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('状态', 'Status') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('逾期', 'Overdue') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('订单号', 'Order #') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('物料编码', 'Item Code') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('描述', 'Description') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('供应商', 'Supplier') }}</th>
+            <th style="padding:8px 12px; text-align:center; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('数量', 'Qty') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('预计完成', 'Est. Completion') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('最迟出货', 'Must Ship') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('出货周', 'Shipped Week') }}</th>
             <th style="padding:8px 12px; border-bottom:2px solid #fed7aa;"></th>
           </tr>
         </thead>
@@ -468,12 +468,12 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           <tr style="border-bottom:1px solid #f1f5f9;
                      {{ 'background:#fff7ed;' if overdue else '' }}">
             <td style="padding:7px 12px; white-space:nowrap;">
-              <span class="badge badge-shipped">SHIPPED</span>
-              <span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; No QA BRT</span>
+              <span class="badge badge-shipped">{{ tr('已出货', 'SHIPPED') }}</span>
+              <span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>
             </td>
             <td style="padding:7px 12px; text-align:center;">
               {% if overdue %}
-              <span style="color:#dc2626; font-weight:700; font-size:.8rem;">&#9888; 逾期</span>
+              <span style="color:#dc2626; font-weight:700; font-size:.8rem;">&#9888; {{ tr('逾期', 'Overdue') }}</span>
               {% else %}
               <span style="color:#9ca3af; font-size:.75rem;">—</span>
               {% endif %}
@@ -495,14 +495,14 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
                 {% if insp_result == 'pass' %}
                   <span style="background:#d1fae5;color:#065f46;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10003; {{ insp[-1].inspection_date }}</span>
                 {% else %}
-                  <span style="background:#fef3c7;color:#92400e;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">~ {{ insp_result }}</span>
+                  <span style="background:#fef3c7;color:#92400e;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">~ {{ insp[-1].result|status_label }}</span>
                 {% endif %}
                 <br>
               {% endif %}
               <a href="{{ url_for('inspect_form', job_key=job.job_key) }}"
                  class="btn btn-sm {% if insp %}btn-outline{% else %}btn-success{% endif %}"
-                 target="_blank" style="margin-top:4px; font-size:.72rem; padding:3px 10px;">
-                &#128203; {% if insp %}查看{% else %}开始检验{% endif %}
+                 style="margin-top:4px; font-size:.72rem; padding:3px 10px;">
+                &#128203; {% if insp %}{{ tr('查看', 'View') }}{% else %}{{ tr('开始检验', 'Inspect') }}{% endif %}
               </a>
             </td>
           </tr>
@@ -523,27 +523,27 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
   <div style="border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
     <div onclick="toggleHistory()" style="display:flex; align-items:center; gap:10px;
          padding:12px 18px; background:#f8fafc; cursor:pointer; user-select:none;">
-      <span style="font-size:.85rem; font-weight:700; color:#1a3a5c;">&#9989; Fully Shipped / QA BRT History</span>
+      <span style="font-size:.85rem; font-weight:700; color:#1a3a5c;">&#9989; {{ tr('已出货 / QA BRT 历史', 'Fully Shipped / QA BRT History') }}</span>
       <span style="background:#d1fae5; color:#065f46; border-radius:20px;
                    padding:2px 10px; font-size:.75rem; font-weight:600;">
-        {{ completed_jobs|length }} 条
+        {{ tr(completed_jobs|length ~ ' 条', completed_jobs|length ~ ' jobs') }}
       </span>
-      <span id="histChevron" style="margin-left:auto; color:#6b7280; font-size:.8rem;">&#9660; 展开</span>
+      <span id="histChevron" style="margin-left:auto; color:#6b7280; font-size:.8rem;">&#9660; {{ tr('展开', 'Expand') }}</span>
     </div>
     <div id="historyBody" style="display:none; overflow-x:auto;">
       <table style="border-collapse:collapse; width:100%; font-size:.78rem;">
         <thead>
           <tr style="background:#f0fdf4;">
-            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Region</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Order #</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Item Code</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Description</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Supplier</th>
-            <th style="padding:8px 12px; text-align:center; border-bottom:1px solid #bbf7d0; color:#065f46;">Qty</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Est. Completion</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">Shipped Week</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">完成时间</th>
-            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">检验结果</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">{{ tr('区域', 'Region') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">{{ tr('订单号', 'Order #') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">{{ tr('物料编码', 'Item Code') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">{{ tr('描述', 'Description') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">{{ tr('供应商', 'Supplier') }}</th>
+            <th style="padding:8px 12px; text-align:center; border-bottom:1px solid #bbf7d0; color:#065f46;">{{ tr('数量', 'Qty') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">{{ tr('预计完成', 'Est. Completion') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">{{ tr('出货周', 'Shipped Week') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">{{ tr('完成时间', 'Completed') }}</th>
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #bbf7d0; white-space:nowrap; color:#065f46;">{{ tr('检验结果', 'Result') }}</th>
             <th style="padding:8px 12px; border-bottom:1px solid #bbf7d0;"></th>
           </tr>
         </thead>
@@ -566,11 +566,11 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
             <td style="padding:7px 12px; white-space:nowrap;">
               {% if last_insp %}
                 {% if last_insp.result|lower == 'pass' %}
-                  <span style="background:#d1fae5;color:#065f46;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10003; Pass</span>
+                  <span style="background:#d1fae5;color:#065f46;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10003; {{ tr('合格', 'Pass') }}</span>
                 {% elif last_insp.result|lower == 'fail' %}
-                  <span style="background:#fee2e2;color:#991b1b;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10007; Fail</span>
+                  <span style="background:#fee2e2;color:#991b1b;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10007; {{ tr('不合格', 'Fail') }}</span>
                 {% else %}
-                  <span style="background:#f3f4f6;color:#374151;border-radius:12px;padding:2px 8px;font-size:.72rem;">{{ last_insp.result }}</span>
+                  <span style="background:#f3f4f6;color:#374151;border-radius:12px;padding:2px 8px;font-size:.72rem;">{{ last_insp.result|status_label }}</span>
                 {% endif %}
                 <span style="font-size:.7rem; color:#9ca3af; margin-left:4px;">{{ last_insp.inspector_name }}</span>
               {% else %}
@@ -579,9 +579,9 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
             </td>
             <td style="padding:7px 12px;">
               <a href="{{ url_for('inspect_form', job_key=job.job_key) }}"
-                 class="btn btn-sm btn-outline" target="_blank"
+                 class="btn btn-sm btn-outline"
                  style="font-size:.72rem; padding:3px 10px;">
-                &#128203; 查看
+                &#128203; {{ tr('查看', 'View') }}
               </a>
             </td>
           </tr>
@@ -594,6 +594,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 {% endif %}
 
 <script>
+const I18N = {collapse: {{ tr('收起', 'Collapse')|tojson }}, expand: {{ tr('展开', 'Expand')|tojson }}};
 function fitTableWraps() {
   document.querySelectorAll('.table-wrap').forEach(function(wrap) {
     var top = wrap.getBoundingClientRect().top;
@@ -609,7 +610,7 @@ function toggleHistory() {
   if (!body) return;
   var hidden = body.style.display === 'none';
   body.style.display = hidden ? '' : 'none';
-  chev.innerHTML = hidden ? '&#9650; 收起' : '&#9660; 展开';
+  chev.innerHTML = hidden ? '&#9650; ' + I18N.collapse : '&#9660; ' + I18N.expand;
 }
 
 function toggleOutstanding() {
@@ -618,7 +619,7 @@ function toggleOutstanding() {
   if (!body) return;
   var hidden = body.style.display === 'none';
   body.style.display = hidden ? '' : 'none';
-  btn.innerHTML = hidden ? '收起 &#9650;' : '展开 &#9660;';
+  btn.innerHTML = hidden ? I18N.collapse + ' &#9650;' : I18N.expand + ' &#9660;';
 }
 
 function toggleTypoPanel() {

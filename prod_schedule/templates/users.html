@@ -1,49 +1,61 @@
 {% extends "base.html" %}
-{% block title %}User Accounts{% endblock %}
+{% block title %}{{ tr('账号管理', 'User Accounts') }}{% endblock %}
+{% block extra_style %}
+.user-create-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; align-items:end; }
+.user-table { width:100%; border-collapse:collapse; font-size:.85rem; }
+.user-table th { text-align:left; padding:8px; background:#f8fafc; border-bottom:1px solid #e2e8f0; white-space:nowrap; }
+.user-table td { padding:8px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.user-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.user-actions input[type=password] { width:170px; }
+{% endblock %}
 {% block content %}
 <div class="page">
   <div class="card">
-    <div class="card-title">Create user account</div>
+    <div class="card-title">{{ tr('新建账号', 'Create user account') }}</div>
     <form method="POST" action="{{ url_for('user_create') }}">
-      <div style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:12px;align-items:end;">
-        <div><label>Username</label><input type="text" name="username" required></div>
-        <div><label>Temporary password</label><input type="password" name="password" minlength="12" required></div>
-        <div><label>Role</label><select name="role"><option value="inspector">Inspector</option><option value="admin">Admin</option></select></div>
-        <div><label>Employee link</label><select name="employee_id"><option value="">None</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+      <div class="user-create-grid">
+        <div><label>{{ tr('用户名', 'Username') }}</label><input type="text" name="username" required></div>
+        <div><label>{{ tr('临时密码（至少 12 位）', 'Temporary password (12+ characters)') }}</label><input type="password" name="password" minlength="12" required autocomplete="new-password"></div>
+        <div><label>{{ tr('角色', 'Role') }}</label><select name="role"><option value="inspector">{{ tr('检验员', 'Inspector') }}</option><option value="admin">{{ tr('管理员', 'Admin') }}</option></select></div>
+        <div><label>{{ tr('关联员工', 'Employee link') }}</label><select name="employee_id"><option value="">{{ tr('无', 'None') }}</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
       </div>
-      <button class="btn btn-primary" type="submit" style="margin-top:14px;">Create account</button>
+      <button class="btn btn-primary" type="submit" style="margin-top:14px;">{{ tr('创建账号', 'Create account') }}</button>
     </form>
   </div>
 
   <div class="card">
-    <div class="card-title">User accounts</div>
-    <table style="width:100%;border-collapse:collapse;">
-      <thead><tr><th>Username</th><th>Role</th><th>Employee</th><th>Status</th><th>Actions</th></tr></thead>
+    <div class="card-title">{{ tr('账号列表', 'User accounts') }}</div>
+    <div style="overflow-x:auto;">
+    <table class="user-table">
+      <thead><tr><th>{{ tr('用户名', 'Username') }}</th><th colspan="2">{{ tr('角色 / 关联员工', 'Role / Employee') }}</th><th>{{ tr('状态', 'Status') }}</th><th>{{ tr('操作', 'Actions') }}</th></tr></thead>
       <tbody>
       {% for user in users %}
         <tr>
-          <td style="padding:8px;">{{ user.username }}</td>
+          <td>{{ user.username }}</td>
           <td colspan="2">
-            <form method="POST" action="{{ url_for('user_update', uid=user.id) }}" style="display:flex;gap:6px;">
-              <select name="role" style="width:auto;"><option value="inspector" {% if user.role == 'inspector' %}selected{% endif %}>Inspector</option><option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Admin</option></select>
-              <select name="employee_id" style="width:auto;"><option value="">None</option>{% for e in employees %}<option value="{{ e.id }}" {% if user.employee_id == e.id %}selected{% endif %}>{{ e.name }}</option>{% endfor %}</select>
-              <button class="btn btn-outline btn-sm" type="submit">Update</button>
+            <form method="POST" action="{{ url_for('user_update', uid=user.id) }}" style="display:flex;gap:6px;flex-wrap:wrap;">
+              <select name="role" style="width:auto;"><option value="inspector" {% if user.role == 'inspector' %}selected{% endif %}>{{ tr('检验员', 'Inspector') }}</option><option value="admin" {% if user.role == 'admin' %}selected{% endif %}>{{ tr('管理员', 'Admin') }}</option></select>
+              <select name="employee_id" style="width:auto;"><option value="">{{ tr('无', 'None') }}</option>{% for e in employees %}<option value="{{ e.id }}" {% if user.employee_id == e.id %}selected{% endif %}>{{ e.name }}</option>{% endfor %}</select>
+              <button class="btn btn-outline btn-sm" type="submit">{{ tr('保存', 'Update') }}</button>
             </form>
           </td>
-          <td>{{ 'Active' if user.active else 'Disabled' }}</td>
-          <td style="display:flex;gap:8px;padding:8px;">
+          <td>{{ tr('启用', 'Active') if user.active else tr('已停用', 'Disabled') }}</td>
+          <td>
+            <div class="user-actions">
             <form method="POST" action="{{ url_for('user_toggle', uid=user.id) }}">
-              <button class="btn btn-outline btn-sm" type="submit">{{ 'Disable' if user.active else 'Enable' }}</button>
+              <button class="btn btn-outline btn-sm" type="submit">{{ tr('停用', 'Disable') if user.active else tr('启用', 'Enable') }}</button>
             </form>
             <form method="POST" action="{{ url_for('user_reset_password', uid=user.id) }}" style="display:flex;gap:6px;">
-              <input type="password" name="password" minlength="12" placeholder="New password" required>
-              <button class="btn btn-outline btn-sm" type="submit">Reset</button>
+              <input type="password" name="password" minlength="12" placeholder="{{ tr('新密码', 'New password') }}" required autocomplete="new-password">
+              <button class="btn btn-outline btn-sm" type="submit">{{ tr('重置密码', 'Reset') }}</button>
             </form>
+            </div>
           </td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
 </div>
 {% endblock %}

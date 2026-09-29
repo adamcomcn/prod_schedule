@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}供应商档案{% endblock %}
+{% block title %}{{ tr('供应商档案', 'Suppliers') }}{% endblock %}
 
 {% block extra_style %}
 .mgmt-table { width:100%; border-collapse:collapse; font-size:.875rem; }
@@ -21,14 +21,14 @@
 <div style="max-width:1100px; margin:0 auto;">
 
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;"><span class="lt" data-en="Supplier Directory" data-zh="供应商档案">Supplier Directory</span></h1>
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">{{ tr('供应商档案', 'Supplier Directory') }}</h1>
     <div style="display:flex; gap:8px;">
       <form method="POST" action="{{ url_for('suppliers_import') }}">
-        <button type="submit" class="btn btn-outline" title="从当周排期提取供应商代码自动建档">
-          &#8659; <span class="lt" data-en="Import from Schedule" data-zh="从排期导入">Import from Schedule</span>
+        <button type="submit" class="btn btn-outline" title="{{ tr('从当周排期提取供应商代码自动建档', 'Create suppliers from the current schedule') }}">
+          &#8659; {{ tr('从排期导入', 'Import from Schedule') }}
         </button>
       </form>
-      <a href="{{ url_for('supplier_new') }}" class="btn btn-primary">+ <span class="lt" data-en="New Supplier" data-zh="新增供应商">New Supplier</span></a>
+      <a href="{{ url_for('supplier_new') }}" class="btn btn-primary">+ {{ tr('新增供应商', 'New Supplier') }}</a>
     </div>
   </div>
 
@@ -38,14 +38,14 @@
       <table class="mgmt-table">
         <thead>
           <tr>
-            <th><span class="lt" data-en="Supplier Name" data-zh="供应商名称">Supplier Name</span></th>
-            <th><span class="lt" data-en="Contact" data-zh="联系人">Contact</span></th>
-            <th><span class="lt" data-en="Phone" data-zh="电话">Phone</span></th>
-            <th><span class="lt" data-en="Email" data-zh="邮箱">Email</span></th>
-            <th><span class="lt" data-en="Address" data-zh="地址">Address</span></th>
-            <th><span class="lt" data-en="Country" data-zh="国家/地区">Country</span></th>
-            <th><span class="lt" data-en="Notes" data-zh="备注">Notes</span></th>
-            <th><span class="lt" data-en="Actions" data-zh="操作">Actions</span></th>
+            <th>{{ tr('供应商名称', 'Supplier Name') }}</th>
+            <th>{{ tr('联系人', 'Contact') }}</th>
+            <th>{{ tr('电话', 'Phone') }}</th>
+            <th>{{ tr('邮箱', 'Email') }}</th>
+            <th>{{ tr('地址', 'Address') }}</th>
+            <th>{{ tr('国家/地区', 'Country') }}</th>
+            <th>{{ tr('备注', 'Notes') }}</th>
+            <th>{{ tr('操作', 'Actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -60,10 +60,10 @@
             <td style="max-width:160px; color:#6b7280; font-size:.82rem;">{{ s.notes or '—' }}</td>
             <td>
               <div class="action-btns">
-                <a href="{{ url_for('supplier_edit', sid=s.id) }}" class="btn btn-sm btn-edit">编辑</a>
+                <a href="{{ url_for('supplier_edit', sid=s.id) }}" class="btn btn-sm btn-edit">{{ tr('编辑', 'Edit') }}</a>
                 <form method="POST" action="{{ url_for('supplier_delete', sid=s.id) }}"
-                      onsubmit="return confirm('确认删除「{{ s.name }}」？')">
-                  <button type="submit" class="btn btn-sm btn-del">删除</button>
+                      onsubmit="return confirm(this.dataset.confirm)" data-confirm="{{ tr('确认删除「' ~ s.name ~ '」？', 'Delete "' ~ s.name ~ '"?') }}">
+                  <button type="submit" class="btn btn-sm btn-del">{{ tr('删除', 'Delete') }}</button>
                 </form>
               </div>
             </td>
@@ -74,8 +74,8 @@
     </div>
     {% else %}
     <div class="empty-state">
-      暂无供应商数据<br>
-      <a href="{{ url_for('supplier_new') }}" style="margin-top:8px; display:inline-block;">点击新增供应商</a>
+      {{ tr('暂无供应商数据', 'No suppliers yet') }}<br>
+      <a href="{{ url_for('supplier_new') }}" style="margin-top:8px; display:inline-block;">{{ tr('点击新增供应商', 'Add a supplier') }}</a>
     </div>
     {% endif %}
   </div>

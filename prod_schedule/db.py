@@ -768,6 +768,11 @@ def init_db():
         except Exception:
             pass
 
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT ''")
+        except Exception:
+            pass
+
         # Defect codes
         existing_dc = {r[0] for r in conn.execute('SELECT code FROM defect_codes').fetchall()}
         for row in _DEFECT_SEEDS:

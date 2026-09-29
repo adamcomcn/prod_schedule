@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ 'zh-CN' if current_lang() == 'zh' else 'en' }}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Production Schedule{% endblock %}</title>
+<title>{% block title %}{{ tr('生产排期', 'Production Schedule') }}{% endblock %}</title>
 <style>
 /* ── reset & base ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -22,6 +22,22 @@ a:hover { text-decoration: underline; }
             transition: color .15s, background .15s; white-space: nowrap; }
 .nav-link:hover, .nav-link.active { color: #fff; background: rgba(255,255,255,.1);
                                      text-decoration: none; }
+.nav-links { display: flex; align-items: center; }
+.nav-user { display: flex; align-items: center; margin-left: 8px; }
+.nav-toggle { display: none; background: none; border: 0; color: #fff; font-size: 1.5rem;
+              cursor: pointer; padding: 0 4px; }
+@media (max-width: 900px) {
+  .nav { padding: 0 16px; overflow: visible; position: relative; }
+  .nav-toggle { display: block; }
+  .nav-links { display: none; position: absolute; top: 56px; left: 0; right: 0; z-index: 50;
+               flex-direction: column; align-items: stretch; background: #1a3a5c;
+               box-shadow: 0 6px 16px rgba(0,0,0,.25); padding-bottom: 8px; }
+  body.nav-open .nav-links { display: flex; }
+  .nav-link { height: 46px; padding: 0 20px; font-size: .95rem; }
+  .nav-user { padding: 10px 20px 4px; margin-left: 0; }
+  .alerts { padding: 0 16px; }
+  .page { padding: 16px; }
+}
 
 /* ── language toggle ── */
 .lang-btn { background: rgba(255,255,255,.12); color: #fff;
@@ -29,7 +45,7 @@ a:hover { text-decoration: underline; }
             padding: 4px 12px; font-size: .8rem; font-weight: 700;
             cursor: pointer; margin-left: 8px; white-space: nowrap;
             transition: background .15s; letter-spacing: .05em; }
-.lang-btn:hover { background: rgba(255,255,255,.22); }
+.lang-btn:hover { background: rgba(255,255,255,.22); text-decoration: none; }
 
 /* ── alerts ── */
 .alerts { padding: 0 24px; }
@@ -38,6 +54,7 @@ a:hover { text-decoration: underline; }
 .alert-success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
 .alert-error   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 .alert-warning { background: #fffbeb; color: #92400e; border: 1px solid #fcd34d; }
+.alert-info    { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
 
 /* ── page wrapper ── */
 .page { padding: 20px 24px; }
@@ -90,57 +107,49 @@ textarea { resize: vertical; min-height: 80px; }
     <img src="{{ url_for('static', filename='daemco_logo.png') }}" alt="Daemco"
          style="height:26px;filter:brightness(0) invert(1);flex-shrink:0;">
     <span style="color:rgba(255,255,255,.45);font-size:.68rem;font-weight:400;
-                 border-left:1px solid rgba(255,255,255,.2);padding-left:10px;white-space:nowrap;"
-          class="lt" data-en="Production Schedule" data-zh="生产排期">Production Schedule</span>
+                 border-left:1px solid rgba(255,255,255,.2);padding-left:10px;white-space:nowrap;">{{ tr('生产排期', 'Production Schedule') }}</span>
   </a>
-  <a href="{{ url_for('dashboard') }}"
-     class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
-    <span class="lt" data-en="Dashboard" data-zh="仪表板">Dashboard</span></a>
-  <a href="{{ url_for('index') }}"
-     class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">
-    <span class="lt" data-en="Schedule" data-zh="排期">Schedule</span></a>
-  <a href="{{ url_for('tasks') }}"
-     class="nav-link {% if request.endpoint in ['tasks'] %}active{% endif %}">
-    <span class="lt" data-en="Tasks" data-zh="任务">Tasks</span></a>
-  <a href="{{ url_for('orders') }}"
-     class="nav-link {% if request.endpoint in ['orders','order_new','order_edit'] %}active{% endif %}">
-    <span class="lt" data-en="Orders" data-zh="订单">Orders</span></a>
-  {% if g.is_admin %}<a href="{{ url_for('employees') }}"
-     class="nav-link {% if request.endpoint in ['employees','employee_new','employee_edit'] %}active{% endif %}">
-    <span class="lt" data-en="Employees" data-zh="员工">Employees</span></a>{% endif %}
-  <a href="{{ url_for('regions') }}"
-     class="nav-link {% if request.endpoint == 'regions' %}active{% endif %}">
-    <span class="lt" data-en="Regions" data-zh="区域">Regions</span></a>
-  <a href="{{ url_for('hr_portal') }}"
-     class="nav-link {% if request.endpoint and request.endpoint.startswith('hr') or request.endpoint in ['leave_new','leave_approve','leave_reject','expense_new','expense_approve','expense_reject'] %}active{% endif %}">
-    <span class="lt" data-en="HR" data-zh="人事">HR</span></a>
-  <a href="{{ url_for('suppliers') }}"
-     class="nav-link {% if request.endpoint in ['suppliers','supplier_new','supplier_edit'] %}active{% endif %}">
-    <span class="lt" data-en="Suppliers" data-zh="供应商">Suppliers</span></a>
-  <a href="{{ url_for('products') }}"
-     class="nav-link {% if request.endpoint in ['products','product_new','product_edit'] %}active{% endif %}">
-    <span class="lt" data-en="Products" data-zh="产品">Products</span></a>
-  <a href="{{ url_for('knowledge') }}"
-     class="nav-link {% if request.endpoint in ['knowledge','kb_article','kb_article_new','kb_article_edit'] %}active{% endif %}">
-    <span class="lt" data-en="Knowledge" data-zh="知识库">Knowledge</span></a>
-  <a href="{{ url_for('training') }}"
-     class="nav-link {% if request.endpoint in ['training','training_plan','exam_take'] %}active{% endif %}">
-    <span class="lt" data-en="Training" data-zh="培训">Training</span></a>
-  <a href="{{ url_for('form_templates_page') }}"
-     class="nav-link {% if request.endpoint in ['form_templates_page','inspect_checklist'] %}active{% endif %}">
-    <span class="lt" data-en="Forms" data-zh="检验模板">Forms</span></a>
-  {% if g.is_admin %}<a href="{{ url_for('settings') }}"
-     class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}">
-    <span class="lt" data-en="Settings" data-zh="设置">Settings</span></a>
-  <a href="{{ url_for('users_admin') }}"
-     class="nav-link {% if request.endpoint and request.endpoint.startswith('user') %}active{% endif %}">
-    <span class="lt" data-en="Users" data-zh="账号">Users</span></a>{% endif %}
-  <button id="lang-btn" class="lang-btn" onclick="toggleLang()">中文</button>
-  <span style="color:rgba(255,255,255,.5);font-size:.8rem;margin-left:12px;white-space:nowrap;">{{ g.username }}</span>
-  <form method="POST" action="{{ url_for('logout') }}" style="margin-left:10px;">
-    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" style="border:0;background:none;color:rgba(255,255,255,.6);font-size:.8rem;cursor:pointer;white-space:nowrap;">退出</button>
-  </form>
+  <button type="button" class="nav-toggle" aria-label="{{ tr('菜单', 'Menu') }}"
+          onclick="document.body.classList.toggle('nav-open')">&#9776;</button>
+  <div class="nav-links">
+  {% set ep = request.endpoint or '' %}
+  {% macro navlink(endpoint, zh, en, active) %}
+    <a href="{{ url_for(endpoint) }}" class="nav-link {% if active %}active{% endif %}">{{ tr(zh, en) }}</a>
+  {% endmacro %}
+  {{ navlink('dashboard', '仪表板', 'Dashboard', ep == 'dashboard') }}
+  {{ navlink('index', '排期', 'Schedule', ep in ['index', 'upload_preview']) }}
+  {{ navlink('tasks', '检验任务', 'Tasks', ep == 'tasks') }}
+  {{ navlink('form_templates_page', '检验模板', 'Forms', ep in ['form_templates_page', 'inspect_checklist']) }}
+  {{ navlink('orders', '订单', 'Orders', ep in ['orders', 'order_new', 'order_edit']) }}
+  {{ navlink('suppliers', '供应商', 'Suppliers', ep in ['suppliers', 'supplier_new', 'supplier_edit']) }}
+  {{ navlink('products', '产品', 'Products', ep in ['products', 'product_new', 'product_edit']) }}
+  {% if g.is_admin %}
+  {{ navlink('regions', '区域', 'Regions', ep == 'regions') }}
+  {{ navlink('employees', '员工', 'Employees', ep in ['employees', 'employee_new', 'employee_edit']) }}
+  {% endif %}
+  {% if module_enabled('hr') %}
+  {{ navlink('hr_portal', '人事', 'HR', ep.startswith('hr') or ep.startswith('leave_') or ep.startswith('expense_')) }}
+  {% endif %}
+  {% if module_enabled('knowledge') %}
+  {{ navlink('knowledge', '知识库', 'Knowledge', ep.startswith('kb_') or ep == 'knowledge') }}
+  {% endif %}
+  {% if module_enabled('training') %}
+  {{ navlink('training', '培训', 'Training', ep in ['training', 'training_plan', 'exam_take']) }}
+  {% endif %}
+  {% if g.is_admin %}
+  {{ navlink('settings', '设置', 'Settings', ep == 'settings') }}
+  {{ navlink('users_admin', '账号', 'Users', ep.startswith('user')) }}
+  {% endif %}
+  <div class="nav-user">
+    <a class="lang-btn" href="{{ url_for('set_language', code='en' if current_lang() == 'zh' else 'zh', next=request.full_path.rstrip('?')) }}"
+       title="{{ tr('Switch to English', '切换到中文') }}">{{ 'EN' if current_lang() == 'zh' else '中文' }}</a>
+    <span style="color:rgba(255,255,255,.5);font-size:.8rem;margin-left:12px;white-space:nowrap;">{{ g.username }}</span>
+    <form method="POST" action="{{ url_for('logout') }}" style="margin-left:10px;">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" style="border:0;background:none;color:rgba(255,255,255,.6);font-size:.8rem;cursor:pointer;white-space:nowrap;">{{ tr('退出', 'Log out') }}</button>
+    </form>
+  </div>
+  </div>
 </nav>
 
 <div class="alerts">
@@ -165,31 +174,6 @@ document.querySelectorAll('form[method="POST"], form[method="post"]').forEach(fu
   }
 });
 
-// ── i18n language switcher ────────────────────────────────────────────────────
-(function () {
-  var LANG = localStorage.getItem('lang') || 'en';
-
-  function applyLang(l) {
-    LANG = l;
-    localStorage.setItem('lang', l);
-    document.documentElement.lang = l;
-    document.querySelectorAll('.lt').forEach(function (el) {
-      var txt = el.getAttribute('data-' + l);
-      if (txt !== null) el.textContent = txt;
-    });
-    var btn = document.getElementById('lang-btn');
-    if (btn) btn.textContent = l === 'en' ? '中文' : 'EN';
-  }
-
-  window.toggleLang = function () { applyLang(LANG === 'en' ? 'zh' : 'en'); };
-
-  // Apply saved preference on every page load
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () { applyLang(LANG); });
-  } else {
-    applyLang(LANG);
-  }
-})();
 </script>
 {% block scripts %}{% endblock %}
 </body>

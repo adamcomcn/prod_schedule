@@ -77,7 +77,8 @@ LOGIN_MAX_FAILURES = 5
 _login_failures = defaultdict(deque)
 
 ADMIN_ENDPOINTS = {
-    'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings', 'office_location_add',
+    'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings',
+    'settings_modules', 'office_location_add',
     'office_location_delete', 'supplier_new', 'supplier_edit', 'suppliers_import',
     'supplier_delete', 'category_new', 'category_delete', 'inspector_add',
     'inspector_delete', 'product_new', 'product_edit', 'product_delete',
@@ -144,7 +145,94 @@ def _record_login_failure(client_id):
     _login_failures[client_id].append(time.monotonic())
 
 def _safe_next_url(value):
-    return value if value and value.startswith('/') and not value.startswith('//') else None
+    if not value or not value.startswith('/') or value.startswith('//') or '\\' in value:
+        return None
+    return value
+
+# ── Language (Chinese default, English for HQ) ───────────────────────────────
+LANGUAGES = ('zh', 'en')
+DEFAULT_LANGUAGE = 'zh'
+
+def _lang_from_cookie():
+    lang = request.cookies.get('lang', '')
+    return lang if lang in LANGUAGES else DEFAULT_LANGUAGE
+
+def current_lang():
+    try:
+        return g.get('lang') or DEFAULT_LANGUAGE
+    except RuntimeError:  # outside a request (scripts, e-mail jobs)
+        return DEFAULT_LANGUAGE
+
+def tr(zh, en):
+    """Pick the Chinese or English text for the current user."""
+    return en if current_lang() == 'en' else zh
+
+app.jinja_env.globals['tr'] = tr
+app.jinja_env.globals['current_lang'] = current_lang
+
+_STATUS_LABELS = {
+    'Pending': '待检验', 'In Progress': '进行中', 'Completed': '已完成', 'On Hold': '暂停',
+    'Pass': '合格', 'Fail': '不合格', 'Partial Pass': '部分合格', 'N/A': '不适用',
+    'new': '新增', 'not_shipped': '未出货', 'partially_shipped': '部分出货',
+    'shipped': '已出货', 'typo': '疑似笔误',
+    'Ready to Ship': '待出货', 'In Production': '生产中', 'Shipped': '已出货',
+    'Casting arrived': '铸件已到', 'Raw Castings': '毛坯铸件', 'Conditional Pass': '有条件合格',
+    'Approved': '已批准', 'Rejected': '已拒绝',
+}
+_STATUS_LABELS_EN = {
+    'new': 'New', 'not_shipped': 'Not shipped', 'partially_shipped': 'Partially shipped',
+    'shipped': 'Shipped', 'typo': 'Possible typo',
+}
+
+def status_label(value):
+    """Display label for stored status values (stored values stay English)."""
+    text = '' if value is None else str(value)
+    if current_lang() == 'en':
+        return _STATUS_LABELS_EN.get(text, text)
+    return _STATUS_LABELS.get(text, text)
+
+app.jinja_env.filters['status_label'] = status_label
+
+# Chinese labels for the supplier workbook's column headers.
+_HEADER_LABELS_ZH = {
+    'order number': '订单号', 'daemco purchase order': '采购单号 (PO)',
+    'purchase order': '采购单号 (PO)', 'order date': '下单日期',
+    'item code': '物料编码', 'item description': '物料描述', 'quantity': '数量',
+    'estimated completion date': '预计完成日', 'actual completion date': '实际完成日',
+    'must ship date': '最迟出货日', 'crate qty': '箱数', 'qa brts sent?': 'QA BRT 已发送?',
+    'current status': '当前状态', 'pieces per crate': '每箱件数', 'full crates': '整箱数',
+    'casting arrived date': '铸件到货日', 'foundry': '铸造厂', 'supplier': '供应商',
+    'unit weight (kg)': '单重 (kg)', 'total weight (kg)': '总重 (kg)',
+    'gross weight (kg)': '毛重 (kg)',
+}
+
+def header_label(header):
+    text = '' if header is None else str(header)
+    if current_lang() == 'en':
+        return text
+    return _HEADER_LABELS_ZH.get(text.lower(), text)
+
+app.jinja_env.filters['header_label'] = header_label
+
+# ── Optional modules (hidden during the pilot, can be enabled in Settings) ──
+MODULES = {
+    'hr':        {'zh': '人事（考勤/请假/报销）', 'en': 'HR (attendance / leave / expenses)',
+                  'paths': ('/hr',)},
+    'training':  {'zh': '培训与考试', 'en': 'Training & exams', 'paths': ('/training',)},
+    'knowledge': {'zh': '知识库', 'en': 'Knowledge base', 'paths': ('/knowledge',)},
+}
+
+def module_enabled(name):
+    return bool(load_config().get('modules', {}).get(name, False))
+
+def _disabled_module_for_path(path):
+    for name, info in MODULES.items():
+        if any(path == p or path.startswith(p + '/') for p in info['paths']):
+            if not module_enabled(name):
+                return name
+    return None
+
+app.jinja_env.globals['module_enabled'] = module_enabled
 
 def _requested_employee_id(form):
     if g.role == 'admin':
@@ -229,14 +317,102 @@ def is_valve(item_description, item_code, config=None):
 # ── Evidence requirement system ───────────────────────────────────────────────
 
 EVIDENCE_META = {
-    'brt':      {'label': 'BRT (Batch Release Test)',      'icon': '📋', 'color': '#1e40af', 'bg': '#dbeafe', 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png'},
-    'checklist':{'label': 'Inspection Checklist',           'icon': '✅', 'color': '#065f46', 'bg': '#d1fae5', 'accepts': '.pdf,.jpg,.jpeg,.png'},
-    'material': {'label': 'Material Report',                'icon': '🔬', 'color': '#92400e', 'bg': '#fef3c7', 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png'},
-    'daq':      {'label': 'DAQ Data (Pressure Test)',       'icon': '📊', 'color': '#5b21b6', 'bg': '#ede9fe', 'accepts': '.pdf,.xlsx,.xls,.csv'},
-    'vtrust':   {'label': 'V-Trust Pressure Test Video',    'icon': '🎥', 'color': '#9a3412', 'bg': '#fff7ed', 'accepts': '.mp4,.mov,.avi,.mkv'},
-    'spark':    {'label': 'Spark / Holiday Test Video',     'icon': '⚡', 'color': '#991b1b', 'bg': '#fee2e2', 'accepts': '.mp4,.mov,.avi,.mkv'},
-    'xrf':      {'label': 'XRF Report (Material Composition)', 'icon': '⚗️', 'color': '#065f46', 'bg': '#d1fae5', 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png'},
+    'brt':      {'label': 'BRT (Batch Release Test)', 'label_zh': 'BRT 批次放行报告',
+                 'icon': '📋', 'color': '#1e40af', 'bg': '#dbeafe',
+                 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.heic,image/*'},
+    'checklist':{'label': 'Inspection Checklist', 'label_zh': '检验清单',
+                 'icon': '✅', 'color': '#065f46', 'bg': '#d1fae5',
+                 'accepts': '.pdf,.jpg,.jpeg,.png,.heic,image/*'},
+    'material': {'label': 'Material Report', 'label_zh': '材质报告',
+                 'icon': '🔬', 'color': '#92400e', 'bg': '#fef3c7',
+                 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.heic,image/*'},
+    'daq':      {'label': 'DAQ Data (Pressure Test)', 'label_zh': 'DAQ 压力测试数据',
+                 'icon': '📊', 'color': '#5b21b6', 'bg': '#ede9fe',
+                 'accepts': '.pdf,.xlsx,.xls,.csv'},
+    'vtrust':   {'label': 'V-Trust Pressure Test Video', 'label_zh': 'V-Trust 压力测试视频',
+                 'icon': '🎥', 'color': '#9a3412', 'bg': '#fff7ed',
+                 'accepts': '.mp4,.mov,.avi,.mkv,video/*'},
+    'spark':    {'label': 'Spark / Holiday Test Video', 'label_zh': '电火花测试视频',
+                 'icon': '⚡', 'color': '#991b1b', 'bg': '#fee2e2',
+                 'accepts': '.mp4,.mov,.avi,.mkv,video/*'},
+    'xrf':      {'label': 'XRF Report (Material Composition)', 'label_zh': 'XRF 材质成分报告',
+                 'icon': '⚗️', 'color': '#065f46', 'bg': '#d1fae5',
+                 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.heic,image/*'},
 }
+
+# Chinese version of each guidance line (lines are combined per product).
+GUIDANCE_ZH = {
+    'Inspection checklist must be signed and dated by inspector.':
+        '检验清单须由检验员签名并注明日期。',
+    'Check Material sheet: chemical and mechanical properties within limits':
+        '检查材质表：化学成分和力学性能在限值内',
+    'Check Material sheet: chemical and mechanical properties within limits (Spec 500-7)':
+        '检查材质表：化学成分和力学性能在限值内（Spec 500-7）',
+    'Check Checking Report: C1–C7 & A1–A9 must be OK (refer to SPEC sheet)':
+        '检查检验报告：C1–C7 和 A1–A9 必须全部 OK（参照 SPEC 表）',
+    'Note: DN375 has no DAQ — verify pressure test via Cells Z–AG and V-Trust video only':
+        '注意：DN375 没有 DAQ，只通过 Z–AG 单元格和 V-Trust 视频核对压力测试',
+    'Check DAQ section (Cells AB–BH):':
+        '检查 DAQ 部分（AB–BH 单元格）：',
+    '  • T1 Average [AL] (Gate test 1) ≥ 1.76 MPa':
+        '  • T1 平均值 [AL]（闸板测试 1）≥ 1.76 MPa',
+    '  • T2 Average [AW] (Gate test 2) ≥ 1.76 MPa':
+        '  • T2 平均值 [AW]（闸板测试 2）≥ 1.76 MPa',
+    '  • T3 Average [BH] (Body test)   ≥ 2.40 MPa':
+        '  • T3 平均值 [BH]（阀体测试）≥ 2.40 MPa',
+    'Upload pressure test machine exported data (Excel or PDF).':
+        '上传压力测试机导出的数据（Excel 或 PDF）。',
+    'Verify: T1 Average ≥ 1.76 MPa, T2 Average ≥ 1.76 MPa, T3 Average ≥ 2.40 MPa':
+        '核对：T1 平均值 ≥ 1.76 MPa，T2 平均值 ≥ 1.76 MPa，T3 平均值 ≥ 2.40 MPa',
+    'Upload V-Trust pressure test video(s) (MP4 / MOV).':
+        '上传 V-Trust 压力测试视频（MP4 / MOV）。',
+    'Ensure all videos are received and show acceptable test results.':
+        '确认所有视频已收到，且测试结果合格。',
+    '电火花 Holiday / Spark test video required for DN200 and above.':
+        'DN200 及以上需要电火花（Holiday / Spark）测试视频。',
+    'Ensure all spark test videos are received (MP4 / MOV).':
+        '确认所有电火花测试视频已收到（MP4 / MOV）。',
+    'Check 316 SS.jpg — confirm material is 316 stainless steel':
+        '检查 316 SS.jpg — 确认材质为 316 不锈钢',
+    'Check Assembly Report — all criteria acceptable':
+        '检查装配报告 — 所有项目合格',
+    'Check Bolt 316.jpg — confirm bolt material is 316 SS':
+        '检查 Bolt 316.jpg — 确认螺栓材质为 316 不锈钢',
+    'Check Dimension Report — compare to Daemco design drawings':
+        '检查尺寸报告 — 与 Daemco 设计图纸比对',
+    'For GAL variant: ensure bolts are Steel (Q235B) material':
+        'GAL 型号：确认螺栓为钢制（Q235B）',
+    'Check Assembly Folder — all checkboxes acceptable':
+        '检查装配文件夹 — 所有勾选项合格',
+    'Check Dimension Report — compare to Daemco REPAIR CLAMP 2023.11.7 drawing':
+        '检查尺寸报告 — 与 Daemco REPAIR CLAMP 2023.11.7 图纸比对',
+    'Check Material Folder — verify 316 stainless steel':
+        '检查材质文件夹 — 确认为 316 不锈钢',
+    'Upload XRF Excel / PDF report.':
+        '上传 XRF 报告（Excel / PDF）。',
+    'Verify material is 316 stainless steel. Confirm Pass or Fail.':
+        '确认材质为 316 不锈钢，并标记合格或不合格。',
+    'Review BRT document for acceptability.':
+        '审核 BRT 文件是否合格。',
+    'Check material report: chemical and mechanical properties within limits.':
+        '检查材质报告：化学成分和力学性能在限值内。',
+    'Check DPL Fitting — Casting Inspection Report: all criteria acceptable':
+        '检查 DPL 管件铸件检验报告：所有项目合格',
+    'Check DPL Fitting — Final Inspection Report: all criteria acceptable':
+        '检查 DPL 管件最终检验报告：所有项目合格',
+    'Check material report: chemical and mechanical properties within limits.':
+        '检查材质报告：化学成分和力学性能在限值内。',
+    'For CI/DI products: compare to Dandong Foundry acceptable limits':
+        '灰铁/球铁产品：与丹东铸造厂的合格限值比对',
+    'for cast iron / ductile iron (chemical composition & mechanical properties).':
+        '（灰铁/球铁的化学成分和力学性能）。',
+}
+
+def localize_evidence(meta, guidance):
+    if current_lang() == 'en':
+        return meta['label'], guidance
+    lines = [GUIDANCE_ZH.get(line, line) for line in guidance.split('\n')]
+    return meta.get('label_zh') or meta['label'], '\n'.join(lines)
 
 def extract_dn(item_code):
     """Return DN size (int) from an RSV item code, or None if not parseable."""
@@ -266,7 +442,8 @@ def get_evidence_requirements(item_code, category_name=''):
 
     def ev(etype, guidance):
         m = EVIDENCE_META[etype]
-        return {**m, 'type': etype, 'guidance': guidance}
+        label, text = localize_evidence(m, guidance)
+        return {**m, 'type': etype, 'label': label, 'guidance': text}
 
     reqs = []
 
@@ -1371,18 +1548,20 @@ def _upload_block_reason(data):
     """Return an error message if this parsed schedule must not be applied."""
     previous_data = load_json(PREVIOUS_FILE, {})
     if previous_data and data == previous_data:
-        return ('Upload blocked: this file matches the saved previous-week '
-                'schedule. Uploading it would reverse NEW/SHIPPED statuses and '
-                'corrupt the current comparison.')
+        return tr('已阻止上传：该文件与已保存的上周排期相同，上传会颠倒新增/已出货状态，破坏当前对比。',
+                  'Upload blocked: this file matches the saved previous-week '
+                  'schedule. Uploading it would reverse NEW/SHIPPED statuses and '
+                  'corrupt the current comparison.')
     with db_conn() as conn:
         prior_upload = conn.execute(
             'SELECT upload_date FROM schedule_uploads WHERE fingerprint=?',
             (schedule_fingerprint(data),)
         ).fetchone()
     if prior_upload:
-        label = prior_upload['upload_date'] or 'an earlier upload'
-        return (f'Upload blocked: this schedule was already uploaded ({label}). '
-                'Only upload the latest weekly schedule.')
+        label = prior_upload['upload_date'] or tr('更早的一次上传', 'an earlier upload')
+        return tr(f'已阻止上传：该排期之前已上传过（{label}）。请只上传最新一周的排期。',
+                  f'Upload blocked: this schedule was already uploaded ({label}). '
+                  'Only upload the latest weekly schedule.')
     return None
 
 
@@ -1462,22 +1641,22 @@ def schedule_diff_summary(current, new):
         }
         summary['sheets'].append(info)
         if sheet not in current:
-            summary['warnings'].append(f'新 sheet「{sheet}」/ New sheet "{sheet}"')
+            summary['warnings'].append(tr(f'新 sheet「{sheet}」', f'New sheet "{sheet}"'))
         if sheet not in new and info['shipped']:
-            summary['warnings'].append(
-                f'sheet「{sheet}」在新文件中不存在，其中 {info["shipped"]} 行将全部视为已出货 / '
-                f'Sheet "{sheet}" is missing: all its rows would be treated as shipped')
+            summary['warnings'].append(tr(
+                f'sheet「{sheet}」在新文件中不存在，其中 {info["shipped"]} 行将全部视为已出货',
+                f'Sheet "{sheet}" is missing: all its rows would be treated as shipped'))
         lower = [str(h).lower() for h in new_headers]
         if new_sheet_rows and len(new_sheet_rows) > 1 and 'item code' not in lower:
-            summary['warnings'].append(
-                f'sheet「{sheet}」缺少 Item Code 列 / Sheet "{sheet}" has no Item Code column')
+            summary['warnings'].append(tr(
+                f'sheet「{sheet}」缺少 Item Code 列', f'Sheet "{sheet}" has no Item Code column'))
         if info['previous_rows'] >= 10 and info['rows'] >= 10 \
                 and info['shipped'] >= 0.8 * info['previous_rows'] \
                 and info['new'] >= 0.8 * info['rows']:
-            summary['warnings'].append(
-                f'sheet「{sheet}」几乎所有行都变成"新增+已出货"，可能是列名或单号格式变了 / '
+            summary['warnings'].append(tr(
+                f'sheet「{sheet}」几乎所有行都变成"新增+已出货"，可能是列名或单号格式变了',
                 f'Sheet "{sheet}": almost every row looks new AND shipped – '
-                'a key column was probably renamed')
+                'a key column was probably renamed'))
     return summary
 
 
@@ -1502,12 +1681,12 @@ def _discard_pending_upload():
 @app.route('/upload', methods=['POST'])
 def upload_excel():
     if 'file' not in request.files:
-        flash('No file selected', 'error')
+        flash(tr('请选择文件', 'No file selected'), 'error')
         return redirect(url_for('index'))
 
     f = request.files['file']
     if _upload_extension(f.filename) != '.xlsx':
-        flash('Only .xlsx schedule files are supported', 'error')
+        flash(tr('只支持 .xlsx 格式的排期文件', 'Only .xlsx schedule files are supported'), 'error')
         return redirect(url_for('index'))
 
     try:
@@ -1520,7 +1699,7 @@ def upload_excel():
 
         _discard_pending_upload()
         os.makedirs(HISTORY_DIR, exist_ok=True)
-        raw_name = f"pending-{datetime.now().strftime('%Y%m%d-%H%M%S')}.xlsx"
+        raw_name = f"pending-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.xlsx"
         with open(os.path.join(HISTORY_DIR, raw_name), 'wb') as out:
             out.write(file_bytes)
         save_json(PENDING_UPLOAD_FILE, {
@@ -1539,7 +1718,7 @@ def upload_excel():
         logger.error('Upload failed:\n%s', tb)
         _last_error['tb'] = tb
         _last_error['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        flash('Unable to read the uploaded schedule. Check the file format and encryption password.', 'error')
+        flash(tr('无法读取上传的排期，请检查文件格式和加密密码。', 'Unable to read the uploaded schedule. Check the file format and encryption password.'), 'error')
         return redirect(url_for('index'))
 
     return redirect(url_for('upload_preview'))
@@ -1549,7 +1728,7 @@ def upload_excel():
 def upload_preview():
     pending = load_json(PENDING_UPLOAD_FILE, {})
     if not pending.get('data'):
-        flash('没有待确认的排期上传 / No schedule upload is waiting for confirmation', 'warning')
+        flash(tr('没有待确认的排期上传', 'No schedule upload is waiting for confirmation'), 'warning')
         return redirect(url_for('index'))
     summary = schedule_diff_summary(load_json(CURRENT_FILE, {}), pending['data'])
     return render_template('upload_preview.html', pending=pending, summary=summary,
@@ -1559,7 +1738,7 @@ def upload_preview():
 @app.route('/upload/cancel', methods=['POST'])
 def upload_cancel():
     _discard_pending_upload()
-    flash('已取消本次上传，网站数据未改变 / Upload cancelled – nothing was changed', 'info')
+    flash(tr('已取消本次上传，网站数据未改变', 'Upload cancelled – nothing was changed'), 'info')
     return redirect(url_for('index'))
 
 
@@ -1568,7 +1747,7 @@ def upload_confirm():
     pending = load_json(PENDING_UPLOAD_FILE, {})
     data = pending.get('data')
     if not data:
-        flash('没有待确认的排期上传 / No schedule upload is waiting for confirmation', 'warning')
+        flash(tr('没有待确认的排期上传', 'No schedule upload is waiting for confirmation'), 'warning')
         return redirect(url_for('index'))
     blocked = _upload_block_reason(data)
     if blocked:
@@ -1585,7 +1764,7 @@ def upload_confirm():
         logger.error('Applying schedule failed:\n%s', tb)
         _last_error['tb'] = tb
         _last_error['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        flash('应用排期时出错，请联系管理员 / Applying the schedule failed', 'error')
+        flash(tr('应用排期时出错，请联系管理员', 'Applying the schedule failed'), 'error')
         return redirect(url_for('index'))
     if os.path.exists(PENDING_UPLOAD_FILE):
         os.remove(PENDING_UPLOAD_FILE)
@@ -1595,7 +1774,7 @@ def upload_confirm():
 def _archive_upload(pending):
     """Keep every applied upload: the original workbook plus the schedule it
     replaced, so any week can be inspected or restored later."""
-    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     folder = os.path.join(HISTORY_DIR, stamp)
     os.makedirs(folder, exist_ok=True)
     raw = pending.get('raw_file')
@@ -1638,11 +1817,12 @@ def _apply_schedule(data, baseline=False):
         removed = [h for h in prev_hdrs if h not in curr_hdrs]
         if added or removed:
             parts = []
-            if added:   parts.append('新增列: ' + ', '.join(f'「{h}」' for h in added))
-            if removed: parts.append('移除列: ' + ', '.join(f'「{h}」' for h in removed))
-            header_warnings.append(f'[{sheet}] ' + '；'.join(parts))
+            if added:   parts.append(tr('新增列: ', 'Added: ') + ', '.join(f'"{h}"' for h in added))
+            if removed: parts.append(tr('移除列: ', 'Removed: ') + ', '.join(f'"{h}"' for h in removed))
+            header_warnings.append(f'[{sheet}] ' + '; '.join(parts))
     if header_warnings:
-        flash('⚠ 列结构与上周不同（Shipped 行已自动对齐，请核实列名变更是否符合预期）：'
+        flash(tr('⚠ 列结构与上次不同，请核实列名变更是否符合预期：',
+                 '⚠ Columns changed since the last upload — please check: ')
               + ' | '.join(header_warnings), 'warning')
 
     config = load_config()
@@ -1680,10 +1860,9 @@ def _apply_schedule(data, baseline=False):
             _, pending_shipped = persist_fully_shipped_jobs(
                 previous, current_data, newly_shipped, config.get('upload_date', ''))
             if pending_shipped:
-                flash(
-                    f'{pending_shipped} 个已全部出货的订单缺少 QA BRT 检验报告 / '
-                    f'{pending_shipped} fully shipped job(s) require a QA BRT '
-                    'inspection report.', 'warning')
+                flash(tr(f'{pending_shipped} 个已全部出货的订单缺少 QA BRT 检验报告',
+                         f'{pending_shipped} fully shipped job(s) require a QA BRT inspection report'),
+                      'warning')
         new_tasks_created = []
         tasks_updated = 0
         seen_this_upload = set()
@@ -1741,17 +1920,18 @@ def _apply_schedule(data, baseline=False):
                         existing_keys.add(jk)
 
         updated_note = f'，{tasks_updated} 个任务日期/数量已同步' if tasks_updated else ''
+        updated_note_en = f', {tasks_updated} task(s) updated' if tasks_updated else ''
         if new_tasks_created and not baseline:
             ok, msg = _send_task_email(new_tasks_created)
             if ok:
-                flash(f'排期已更新，{len(new_tasks_created)} 个新任务已创建{updated_note}，{msg}', 'success')
+                flash(tr(f'排期已更新，{len(new_tasks_created)} 个新任务已创建{updated_note}，{msg}', f'Schedule updated: {len(new_tasks_created)} new task(s){updated_note_en}. {msg}'), 'success')
             else:
-                flash(f'排期已更新，{len(new_tasks_created)} 个新任务已创建{updated_note}。邮件通知：{msg}', 'warning')
+                flash(tr(f'排期已更新，{len(new_tasks_created)} 个新任务已创建{updated_note}。邮件通知：{msg}', f'Schedule updated: {len(new_tasks_created)} new task(s){updated_note_en}. E-mail: {msg}'), 'warning')
         else:
-            flash(f'排期已更新，{len(new_tasks_created)} 个新任务已创建{updated_note} / '
-                  'Schedule updated successfully!', 'success')
+            flash(tr(f'排期已更新，{len(new_tasks_created)} 个新任务已创建{updated_note}',
+                     f'Schedule updated: {len(new_tasks_created)} new task(s){updated_note_en}'), 'success')
     else:
-        flash('Schedule updated successfully!', 'success')
+        flash(tr('排期已更新', 'Schedule updated'), 'success')
 
 
 @app.route('/debug')
@@ -1843,7 +2023,7 @@ def inspect_form(job_key):
                     job_info['job_key'] = job_key
 
     if not job_info:
-        flash('Job not found', 'error')
+        flash(tr('找不到该订单', 'Job not found'), 'error')
         return redirect(url_for('index'))
 
     cache = load_json(INSPECTIONS_CACHE, {})
@@ -1942,18 +2122,18 @@ def submit_inspection(job_key):
     # ── Validate before anything is written ──────────────────────────────
     errors = []
     if form.get('result', '') not in INSPECTION_RESULTS:
-        errors.append('请选择总体检验结果 / Please choose an overall result')
+        errors.append(tr('请选择总体检验结果', 'Please choose an overall result'))
     if not form.get('inspector_name', '').strip():
-        errors.append('请填写检验员 / Inspector name is required')
+        errors.append(tr('请填写检验员', 'Inspector name is required'))
     if not form.get('inspection_date', '').strip():
-        errors.append('请填写检验日期 / Inspection date is required')
+        errors.append(tr('请填写检验日期', 'Inspection date is required'))
     bad_files = [
         f.filename for key in request.files if key.startswith('ev_file_')
         for f in request.files.getlist(key)
         if f.filename and _upload_extension(f.filename) not in EVIDENCE_EXTENSIONS
     ]
     if bad_files:
-        errors.append('不支持的文件类型 / Unsupported file type: ' + ', '.join(bad_files))
+        errors.append(tr('不支持的文件类型：', 'Unsupported file type: ') + ', '.join(bad_files))
     if errors:
         for error in errors:
             flash(error, 'error')
@@ -2064,9 +2244,9 @@ def submit_inspection(job_key):
     ok, msg = append_inspection_to_sheet(inspection_data, all_file_links)
 
     if ok:
-        flash('Inspection saved to Google Sheets!', 'success')
+        flash(tr('检验报告已保存并同步到 Google Sheets', 'Inspection saved to Google Sheets'), 'success')
     else:
-        flash(f'Inspection saved locally. Google Sheets: {msg}', 'warning')
+        flash(tr('检验报告已保存。', 'Inspection saved.') + (tr('（未同步 Google：', ' (Google Sheets not synced: ') + msg + tr('）', ')') if g.is_admin else ''), 'success')
 
     return redirect(url_for('inspect_form', job_key=job_key))
 
@@ -2082,14 +2262,23 @@ def settings():
             config.pop(legacy_secret, None)
         save_json(CONFIG_FILE, config)
 
-        flash('Settings saved!', 'success')
+        flash(tr('设置已保存', 'Settings saved'), 'success')
         return redirect(url_for('settings'))
 
     return render_template('settings.html',
                            config=config,
+                           modules=MODULES,
                            credentials_exist=google_credentials_configured(),
                            smtp_configured=bool(os.environ.get('SMTP_HOST') and os.environ.get('SMTP_USERNAME') and os.environ.get('SMTP_PASSWORD')),
                            excel_password_configured=bool(EXCEL_PASSWORD))
+
+@app.route('/settings/modules', methods=['POST'])
+def settings_modules():
+    config = load_config()
+    config['modules'] = {name: request.form.get(f'module_{name}') == '1' for name in MODULES}
+    save_json(CONFIG_FILE, config)
+    flash(tr('功能模块设置已保存', 'Module settings saved'), 'success')
+    return redirect(url_for('settings'))
 
 @app.route('/settings/office-locations/add', methods=['POST'])
 def office_location_add():
@@ -2100,16 +2289,16 @@ def office_location_add():
         lng = float(f.get('lng', ''))
         radius = int(f.get('radius', 500) or 500)
     except (ValueError, TypeError):
-        flash('经纬度格式错误', 'error')
+        flash(tr('经纬度格式错误', 'Invalid latitude / longitude'), 'error')
         return redirect(url_for('settings'))
     if not name:
-        flash('地点名称不能为空', 'error')
+        flash(tr('地点名称不能为空', 'Location name is required'), 'error')
         return redirect(url_for('settings'))
     config = load_config()
     config.setdefault('office_locations', []).append(
         {'name': name, 'lat': lat, 'lng': lng, 'radius': radius})
     save_json(CONFIG_FILE, config)
-    flash(f'打卡地点「{name}」已添加', 'success')
+    flash(tr(f'打卡地点「{name}」已添加', f'Location "{name}" added'), 'success')
     return redirect(url_for('settings'))
 
 @app.route('/settings/office-locations/<int:idx>/delete', methods=['POST'])
@@ -2119,7 +2308,7 @@ def office_location_delete(idx):
     if 0 <= idx < len(locs):
         removed = locs.pop(idx)
         save_json(CONFIG_FILE, config)
-        flash(f'地点「{removed["name"]}」已删除', 'success')
+        flash(tr(f'地点「{removed["name"]}」已删除', f'Location "{removed["name"]}" deleted'), 'success')
     return redirect(url_for('settings'))
 
 @app.route('/api/inspections/<path:job_key>')
@@ -2148,16 +2337,16 @@ def supplier_new():
                  f.get('phone','').strip(), f.get('email','').strip(),
                  f.get('address','').strip(), f.get('country','China').strip(),
                  f.get('notes','').strip()))
-        flash('供应商已添加', 'success')
+        flash(tr('供应商已添加', 'Supplier added'), 'success')
         return redirect(url_for('suppliers'))
-    return render_template('supplier_form.html', supplier=None, title='新增供应商')
+    return render_template('supplier_form.html', supplier=None, title=tr('新增供应商', 'New supplier'))
 
 @app.route('/suppliers/<int:sid>/edit', methods=['GET', 'POST'])
 def supplier_edit(sid):
     with db_conn() as conn:
         supplier = conn.execute('SELECT * FROM suppliers WHERE id=?', (sid,)).fetchone()
         if not supplier:
-            flash('找不到该供应商', 'error')
+            flash(tr('找不到该供应商', 'Supplier not found'), 'error')
             return redirect(url_for('suppliers'))
         if request.method == 'POST':
             f = request.form
@@ -2168,9 +2357,9 @@ def supplier_edit(sid):
                  f.get('phone','').strip(), f.get('email','').strip(),
                  f.get('address','').strip(), f.get('country','China').strip(),
                  f.get('notes','').strip(), sid))
-            flash('供应商已更新', 'success')
+            flash(tr('供应商已更新', 'Supplier updated'), 'success')
             return redirect(url_for('suppliers'))
-    return render_template('supplier_form.html', supplier=supplier, title='编辑供应商')
+    return render_template('supplier_form.html', supplier=supplier, title=tr('编辑供应商', 'Edit supplier'))
 
 @app.route('/suppliers/import-from-schedule', methods=['POST'])
 def suppliers_import():
@@ -2198,9 +2387,9 @@ def suppliers_import():
                 added += 1
 
     if added:
-        flash(f'从排期导入 {added} 个新供应商 / Imported {added} new suppliers from schedule.', 'success')
+        flash(tr(f'从排期导入 {added} 个新供应商', f'Imported {added} new suppliers from schedule'), 'success')
     else:
-        flash('All suppliers from the schedule are already in the list.', 'warning')
+        flash(tr('排期中的供应商都已在列表中', 'All suppliers from the schedule are already in the list.'), 'warning')
     return redirect(url_for('suppliers'))
 
 
@@ -2208,7 +2397,7 @@ def suppliers_import():
 def supplier_delete(sid):
     with db_conn() as conn:
         conn.execute('DELETE FROM suppliers WHERE id=?', (sid,))
-    flash('供应商已删除', 'success')
+    flash(tr('供应商已删除', 'Supplier deleted'), 'success')
     return redirect(url_for('suppliers'))
 
 
@@ -2263,14 +2452,14 @@ def category_new():
             conn.execute(
                 'INSERT INTO product_categories (code,name,description) VALUES (?,?,?)',
                 (f.get('code','').strip().upper(), name, f.get('description','').strip()))
-        flash(f'类别「{name}」已添加', 'success')
+        flash(tr(f'类别「{name}」已添加', f'Category "{name}" added'), 'success')
     return redirect(url_for('products', tab='categories'))
 
 @app.route('/products/categories/<int:cid>/delete', methods=['POST'])
 def category_delete(cid):
     with db_conn() as conn:
         conn.execute('DELETE FROM product_categories WHERE id=?', (cid,))
-    flash('类别已删除', 'success')
+    flash(tr('类别已删除', 'Category deleted'), 'success')
     return redirect(url_for('products', tab='categories'))
 
 @app.route('/products/categories/<int:cid>/inspector/add', methods=['POST'])
@@ -2281,14 +2470,14 @@ def inspector_add(cid):
             conn.execute(
                 'INSERT INTO category_inspectors (category_id,inspector_name) VALUES (?,?)',
                 (cid, name))
-        flash('检验员已添加', 'success')
+        flash(tr('检验员已添加', 'Inspector added'), 'success')
     return redirect(url_for('products', tab='inspector_map'))
 
 @app.route('/products/categories/inspector/<int:iid>/delete', methods=['POST'])
 def inspector_delete(iid):
     with db_conn() as conn:
         conn.execute('DELETE FROM category_inspectors WHERE id=?', (iid,))
-    flash('检验员已移除', 'success')
+    flash(tr('检验员已移除', 'Inspector removed'), 'success')
     return redirect(url_for('products', tab='inspector_map'))
 
 @app.route('/products/items/new', methods=['GET', 'POST'])
@@ -2312,20 +2501,20 @@ def product_new():
                  int(_num('crate_qty')) if _num('crate_qty') is not None else None,
                  f.get('inspect_pcs','').strip(),
                  _num('inspect_mins')))
-        flash('产品已添加', 'success')
+        flash(tr('产品已添加', 'Product added'), 'success')
         return redirect(url_for('products', tab='archive'))
     with db_conn() as conn:
         cats      = conn.execute('SELECT id,name FROM product_categories ORDER BY name').fetchall()
         sup_opts  = conn.execute('SELECT id,name FROM suppliers ORDER BY name').fetchall()
     return render_template('product_form.html', product=None, cats=cats,
-                           sup_opts=sup_opts, title='新增产品')
+                           sup_opts=sup_opts, title=tr('新增产品', 'New product'))
 
 @app.route('/products/items/<int:pid>/edit', methods=['GET', 'POST'])
 def product_edit(pid):
     with db_conn() as conn:
         product = conn.execute('SELECT * FROM products WHERE id=?', (pid,)).fetchone()
     if not product:
-        flash('找不到该产品', 'error')
+        flash(tr('找不到该产品', 'Product not found'), 'error')
         return redirect(url_for('products', tab='archive'))
     if request.method == 'POST':
         img = request.files.get('image')
@@ -2347,19 +2536,19 @@ def product_edit(pid):
                  int(_num('crate_qty')) if _num('crate_qty') is not None else None,
                  f.get('inspect_pcs','').strip(),
                  _num('inspect_mins'), pid))
-        flash('产品已更新', 'success')
+        flash(tr('产品已更新', 'Product updated'), 'success')
         return redirect(url_for('products', tab='archive'))
     with db_conn() as conn:
         cats     = conn.execute('SELECT id,name FROM product_categories ORDER BY name').fetchall()
         sup_opts = conn.execute('SELECT id,name FROM suppliers ORDER BY name').fetchall()
     return render_template('product_form.html', product=product, cats=cats,
-                           sup_opts=sup_opts, title='编辑产品')
+                           sup_opts=sup_opts, title=tr('编辑产品', 'Edit product'))
 
 @app.route('/products/items/<int:pid>/delete', methods=['POST'])
 def product_delete(pid):
     with db_conn() as conn:
         conn.execute('DELETE FROM products WHERE id=?', (pid,))
-    flash('产品已删除', 'success')
+    flash(tr('产品已删除', 'Product deleted'), 'success')
     return redirect(url_for('products', tab='archive'))
 
 
@@ -2396,20 +2585,20 @@ def order_new():
                  f.get('description','').strip(), f.get('quantity') or 0,
                  f.get('status','Pending'), f.get('order_date','').strip(),
                  f.get('eta','').strip(), f.get('notes','').strip()))
-        flash('订单已添加', 'success')
+        flash(tr('订单已添加', 'Order added'), 'success')
         return redirect(url_for('orders'))
     with db_conn() as conn:
         suppliers = conn.execute('SELECT id,name FROM suppliers ORDER BY name').fetchall()
         cats      = conn.execute('SELECT id,name FROM product_categories ORDER BY name').fetchall()
     return render_template('order_form.html', order=None, suppliers=suppliers,
-                           cats=cats, title='新增订单')
+                           cats=cats, title=tr('新增订单', 'New order'))
 
 @app.route('/orders/<int:oid>/edit', methods=['GET', 'POST'])
 def order_edit(oid):
     with db_conn() as conn:
         order = conn.execute('SELECT * FROM orders WHERE id=?', (oid,)).fetchone()
     if not order:
-        flash('找不到该订单', 'error')
+        flash(tr('找不到该订单', 'Order not found'), 'error')
         return redirect(url_for('orders'))
     if request.method == 'POST':
         f = request.form
@@ -2423,19 +2612,19 @@ def order_edit(oid):
                  f.get('description','').strip(), f.get('quantity') or 0,
                  f.get('status','Pending'), f.get('order_date','').strip(),
                  f.get('eta','').strip(), f.get('notes','').strip(), oid))
-        flash('订单已更新', 'success')
+        flash(tr('订单已更新', 'Order updated'), 'success')
         return redirect(url_for('orders'))
     with db_conn() as conn:
         suppliers = conn.execute('SELECT id,name FROM suppliers ORDER BY name').fetchall()
         cats      = conn.execute('SELECT id,name FROM product_categories ORDER BY name').fetchall()
     return render_template('order_form.html', order=order, suppliers=suppliers,
-                           cats=cats, title='编辑订单')
+                           cats=cats, title=tr('编辑订单', 'Edit order'))
 
 @app.route('/orders/<int:oid>/delete', methods=['POST'])
 def order_delete(oid):
     with db_conn() as conn:
         conn.execute('DELETE FROM orders WHERE id=?', (oid,))
-    flash('订单已删除', 'success')
+    flash(tr('订单已删除', 'Order deleted'), 'success')
     return redirect(url_for('orders'))
 
 @app.route('/static/product_images/<path:filename>')
@@ -2511,19 +2700,19 @@ def employee_new():
                  f.get('phone','').strip(), f.get('department','').strip(),
                  f.get('role','Inspector').strip(), f.get('stationed_at','').strip(),
                  1 if f.get('is_stationed') else 0, 1 if f.get('active') else 0))
-        flash('员工已添加', 'success')
+        flash(tr('员工已添加', 'Employee added'), 'success')
         return redirect(url_for('employees'))
     with db_conn() as conn:
         cats = conn.execute('SELECT id,name FROM product_categories ORDER BY name').fetchall()
     return render_template('employee_form.html', employee=None, work_info=None,
-                           all_employees=[], cats=cats, title='新增员工')
+                           all_employees=[], cats=cats, title=tr('新增员工', 'New employee'))
 
 @app.route('/employees/<int:eid>/edit', methods=['GET', 'POST'])
 def employee_edit(eid):
     with db_conn() as conn:
         emp = conn.execute('SELECT * FROM employees WHERE id=?', (eid,)).fetchone()
     if not emp:
-        flash('找不到该员工', 'error')
+        flash(tr('找不到该员工', 'Employee not found'), 'error')
         return redirect(url_for('employees'))
     if request.method == 'POST':
         f = request.form
@@ -2535,20 +2724,20 @@ def employee_edit(eid):
                  f.get('phone','').strip(), f.get('department','').strip(),
                  f.get('role','Inspector').strip(), f.get('stationed_at','').strip(),
                  1 if f.get('is_stationed') else 0, 1 if f.get('active') else 0, eid))
-        flash('员工信息已更新', 'success')
+        flash(tr('员工信息已更新', 'Employee updated'), 'success')
         return redirect(url_for('employees'))
     with db_conn() as conn:
         work_info = conn.execute('SELECT * FROM employee_work_info WHERE employee_id=?', (eid,)).fetchone()
         all_employees = conn.execute('SELECT id,name FROM employees WHERE active=1 AND id!=? ORDER BY name', (eid,)).fetchall()
         cats = conn.execute('SELECT id,name FROM product_categories ORDER BY name').fetchall()
     return render_template('employee_form.html', employee=emp, work_info=work_info,
-                           all_employees=all_employees, cats=cats, title='编辑员工')
+                           all_employees=all_employees, cats=cats, title=tr('编辑员工', 'Edit employee'))
 
 @app.route('/employees/<int:eid>/delete', methods=['POST'])
 def employee_delete(eid):
     with db_conn() as conn:
         conn.execute('DELETE FROM employees WHERE id=?', (eid,))
-    flash('员工已删除', 'success')
+    flash(tr('员工已删除', 'Employee deleted'), 'success')
     return redirect(url_for('employees'))
 
 
@@ -2695,14 +2884,14 @@ def form_keywords_update(fid):
     kw = request.form.get('keywords', '').strip()
     with db_conn() as conn:
         conn.execute('UPDATE form_templates SET keywords=? WHERE id=?', (kw, fid))
-    flash('关键词已更新', 'success')
+    flash(tr('关键词已更新', 'Keywords updated'), 'success')
     return redirect(url_for('form_templates_page'))
 
 @app.route('/forms/<int:fid>/delete', methods=['POST'])
 def form_template_delete(fid):
     with db_conn() as conn:
         conn.execute('DELETE FROM form_templates WHERE id=?', (fid,))
-    flash('模板已删除', 'success')
+    flash(tr('模板已删除', 'Template deleted'), 'success')
     return redirect(url_for('form_templates_page'))
 
 
@@ -2749,10 +2938,10 @@ def inspect_checklist(job_key):
                             'Quantity': o['quantity'], 'region': o['region'], 'job_key': job_key}
 
     if not job_info:
-        flash('Job not found', 'error'); return redirect(url_for('index'))
+        flash(tr('找不到该订单', 'Job not found'), 'error'); return redirect(url_for('index'))
 
     if not tpl:
-        flash('没有匹配的检验表单', 'error'); return redirect(url_for('inspect_form', job_key=job_key))
+        flash(tr('没有匹配的检验表单', 'No matching inspection form'), 'error'); return redirect(url_for('inspect_form', job_key=job_key))
 
     sections = json.loads(tpl['sections_json'] or '[]')
 
@@ -2785,7 +2974,7 @@ def inspect_checklist(job_key):
                 "UPDATE inspection_tasks SET status=? WHERE job_key=?",
                 ('Completed' if overall == 'Pass' else 'In Progress', job_key))
 
-        flash('检验单已提交', 'success')
+        flash(tr('检验单已提交', 'Checklist submitted'), 'success')
         return redirect(url_for('inspect_checklist', job_key=job_key, tpl=tpl_id))
 
     return render_template('form_checklist.html',
@@ -2833,7 +3022,7 @@ def kb_article(aid):
             'SELECT * FROM questions WHERE article_id=?', (aid,)
         ).fetchall()
     if not article:
-        flash('找不到该文章', 'error'); return redirect(url_for('knowledge'))
+        flash(tr('找不到该文章', 'Article not found'), 'error'); return redirect(url_for('knowledge'))
     images = parse_json_list(article['images'])
     return render_template('kb_article.html', article=article, related_qs=related_qs, images=images)
 
@@ -2848,7 +3037,7 @@ def kb_article_new():
                 'INSERT INTO kb_articles (category_id,title,content,tags) VALUES (?,?,?,?)',
                 (f.get('category_id') or None, f.get('title','').strip(),
                  f.get('content','').strip(), f.get('tags','').strip()))
-        flash('文章已添加', 'success'); return redirect(url_for('knowledge'))
+        flash(tr('文章已添加', 'Article added'), 'success'); return redirect(url_for('knowledge'))
     return render_template('kb_form.html', article=None, cats=cats, title='新增知识库文章')
 
 @app.route('/knowledge/article/<int:aid>/edit', methods=['GET', 'POST'])
@@ -2857,7 +3046,7 @@ def kb_article_edit(aid):
         article = conn.execute('SELECT * FROM kb_articles WHERE id=?', (aid,)).fetchone()
         cats    = conn.execute('SELECT * FROM kb_categories ORDER BY name').fetchall()
     if not article:
-        flash('找不到该文章', 'error'); return redirect(url_for('knowledge'))
+        flash(tr('找不到该文章', 'Article not found'), 'error'); return redirect(url_for('knowledge'))
     if request.method == 'POST':
         f = request.form
         with db_conn() as conn:
@@ -2866,14 +3055,14 @@ def kb_article_edit(aid):
                 'updated_at=datetime("now","localtime") WHERE id=?',
                 (f.get('category_id') or None, f.get('title','').strip(),
                  f.get('content','').strip(), f.get('tags','').strip(), aid))
-        flash('文章已更新', 'success'); return redirect(url_for('kb_article', aid=aid))
+        flash(tr('文章已更新', 'Article updated'), 'success'); return redirect(url_for('kb_article', aid=aid))
     return render_template('kb_form.html', article=article, cats=cats, title='编辑文章')
 
 @app.route('/knowledge/article/<int:aid>/delete', methods=['POST'])
 def kb_article_delete(aid):
     with db_conn() as conn:
         conn.execute('DELETE FROM kb_articles WHERE id=?', (aid,))
-    flash('文章已删除', 'success'); return redirect(url_for('knowledge'))
+    flash(tr('文章已删除', 'Article deleted'), 'success'); return redirect(url_for('knowledge'))
 
 @app.route('/knowledge/categories/new', methods=['POST'])
 def kb_category_new():
@@ -2882,14 +3071,14 @@ def kb_category_new():
         with db_conn() as conn:
             conn.execute('INSERT INTO kb_categories (name,description) VALUES (?,?)',
                          (name, request.form.get('description','').strip()))
-        flash(f'类别「{name}」已添加', 'success')
+        flash(tr(f'类别「{name}」已添加', f'Category "{name}" added'), 'success')
     return redirect(url_for('knowledge'))
 
 @app.route('/knowledge/categories/<int:cid>/delete', methods=['POST'])
 def kb_category_delete(cid):
     with db_conn() as conn:
         conn.execute('DELETE FROM kb_categories WHERE id=?', (cid,))
-    flash('类别已删除', 'success'); return redirect(url_for('knowledge'))
+    flash(tr('类别已删除', 'Category deleted'), 'success'); return redirect(url_for('knowledge'))
 
 
 # ── Training (questions / exams / plans) ──────────────────────────────────────
@@ -2924,13 +3113,13 @@ def question_new():
              f.get('option_b','').strip(), f.get('option_c','').strip(),
              f.get('option_d','').strip(), f.get('answer','A').upper(),
              f.get('explanation','').strip(), f.get('difficulty','Medium')))
-    flash('题目已添加', 'success'); return redirect(url_for('training', tab='questions'))
+    flash(tr('题目已添加', 'Question added'), 'success'); return redirect(url_for('training', tab='questions'))
 
 @app.route('/training/questions/<int:qid>/delete', methods=['POST'])
 def question_delete(qid):
     with db_conn() as conn:
         conn.execute('DELETE FROM questions WHERE id=?', (qid,))
-    flash('题目已删除', 'success'); return redirect(url_for('training', tab='questions'))
+    flash(tr('题目已删除', 'Question deleted'), 'success'); return redirect(url_for('training', tab='questions'))
 
 @app.route('/training/exams/new', methods=['POST'])
 def exam_new():
@@ -2945,13 +3134,13 @@ def exam_new():
         for i, qid in enumerate(q_ids):
             conn.execute('INSERT OR IGNORE INTO exam_questions (exam_id,question_id,order_num) VALUES (?,?,?)',
                          (eid, int(qid), i))
-    flash('试卷已创建', 'success'); return redirect(url_for('training', tab='exams'))
+    flash(tr('试卷已创建', 'Exam created'), 'success'); return redirect(url_for('training', tab='exams'))
 
 @app.route('/training/exams/<int:eid>/delete', methods=['POST'])
 def exam_delete(eid):
     with db_conn() as conn:
         conn.execute('DELETE FROM exams WHERE id=?', (eid,))
-    flash('试卷已删除', 'success'); return redirect(url_for('training', tab='exams'))
+    flash(tr('试卷已删除', 'Exam deleted'), 'success'); return redirect(url_for('training', tab='exams'))
 
 @app.route('/training/plans/new', methods=['POST'])
 def plan_new():
@@ -2967,7 +3156,7 @@ def plan_new():
             conn.execute(
                 'INSERT OR IGNORE INTO training_assignments (plan_id,employee_id) VALUES (?,?)',
                 (pid, int(eid)))
-    flash('培训计划已创建', 'success'); return redirect(url_for('training_plan', pid=pid))
+    flash(tr('培训计划已创建', 'Training plan created'), 'success'); return redirect(url_for('training_plan', pid=pid))
 
 @app.route('/training/plans/<int:pid>')
 def training_plan(pid):
@@ -2976,7 +3165,7 @@ def training_plan(pid):
             'SELECT tp.*, e.title AS exam_title, e.pass_score FROM training_plans tp '
             'LEFT JOIN exams e ON tp.exam_id=e.id WHERE tp.id=?', (pid,)).fetchone()
         if not plan:
-            flash('培训计划不存在', 'error'); return redirect(url_for('training'))
+            flash(tr('培训计划不存在', 'Training plan not found'), 'error'); return redirect(url_for('training'))
         assignments = conn.execute(
             'SELECT ta.*, emp.name AS emp_name, emp.email FROM training_assignments ta '
             'JOIN employees emp ON ta.employee_id=emp.id WHERE ta.plan_id=?', (pid,)).fetchall()
@@ -2999,13 +3188,13 @@ def plan_assign(pid):
         for eid in emp_ids:
             conn.execute('INSERT OR IGNORE INTO training_assignments (plan_id,employee_id) VALUES (?,?)',
                          (pid, int(eid)))
-    flash('分配已更新', 'success'); return redirect(url_for('training_plan', pid=pid))
+    flash(tr('分配已更新', 'Assignments updated'), 'success'); return redirect(url_for('training_plan', pid=pid))
 
 @app.route('/training/plans/<int:pid>/delete', methods=['POST'])
 def plan_delete(pid):
     with db_conn() as conn:
         conn.execute('DELETE FROM training_plans WHERE id=?', (pid,))
-    flash('培训计划已删除', 'success'); return redirect(url_for('training'))
+    flash(tr('培训计划已删除', 'Training plan deleted'), 'success'); return redirect(url_for('training'))
 
 @app.route('/training/plans/<int:pid>/take', methods=['GET', 'POST'])
 def exam_take(pid):
@@ -3014,7 +3203,7 @@ def exam_take(pid):
             'SELECT tp.*, e.title AS exam_title, e.pass_score FROM training_plans tp '
             'LEFT JOIN exams e ON tp.exam_id=e.id WHERE tp.id=?', (pid,)).fetchone()
         if not plan or not plan['exam_id']:
-            flash('该培训计划暂无试卷', 'error'); return redirect(url_for('training'))
+            flash(tr('该培训计划暂无试卷', 'This training plan has no exam'), 'error'); return redirect(url_for('training'))
         questions = conn.execute(
             'SELECT q.* FROM questions q JOIN exam_questions eq ON q.id=eq.question_id '
             'WHERE eq.exam_id=? ORDER BY eq.order_num', (plan['exam_id'],)).fetchall()
@@ -3075,12 +3264,12 @@ def region_new():
     level = int(f.get('level', 1) or 1)
     parent_id = f.get('parent_id') or None
     if not name:
-        flash('名称不能为空', 'error')
+        flash(tr('名称不能为空', 'Name is required'), 'error')
         return redirect(url_for('regions'))
     with db_conn() as conn:
         conn.execute('INSERT INTO regions (name,level,parent_id,code) VALUES (?,?,?,?)',
                      (name, level, parent_id, f.get('code', '').strip()))
-    flash(f'已添加「{name}」', 'success')
+    flash(tr(f'已添加「{name}」', f'Added "{name}"'), 'success')
     return redirect(url_for('regions'))
 
 @app.route('/regions/<int:rid>/edit', methods=['POST'])
@@ -3089,14 +3278,14 @@ def region_edit(rid):
     with db_conn() as conn:
         conn.execute('UPDATE regions SET name=?,code=? WHERE id=?',
                      (f.get('name', '').strip(), f.get('code', '').strip(), rid))
-    flash('已更新', 'success')
+    flash(tr('已更新', 'Updated'), 'success')
     return redirect(url_for('regions'))
 
 @app.route('/regions/<int:rid>/delete', methods=['POST'])
 def region_delete(rid):
     with db_conn() as conn:
         conn.execute('DELETE FROM regions WHERE id=?', (rid,))
-    flash('已删除', 'success')
+    flash(tr('已删除', 'Deleted'), 'success')
     return redirect(url_for('regions'))
 
 
@@ -3207,7 +3396,7 @@ def hr_checkin():
     f = request.form
     emp_id = _requested_employee_id(f)
     if not emp_id:
-        flash('请选择员工', 'error')
+        flash(tr('请选择员工', 'Please choose an employee'), 'error')
         return redirect(url_for('hr_portal', tab='attendance'))
 
     ok, msg, lat, lng, verified = _verify_gps(f.get('lat'), f.get('lng'))
@@ -3233,13 +3422,13 @@ def hr_checkin():
                 '(employee_id,work_date,checkin_time,checkin_location,status,notes,checkin_lat,checkin_lng,gps_verified) '
                 'VALUES (?,?,?,?,?,?,?,?,?)',
                 (emp_id, work_date, checkin_time, location, status, notes, lat, lng, verified))
-            flash('入厂打卡成功', 'success')
+            flash(tr('入厂打卡成功', 'Checked in'), 'success')
         except Exception:
             conn.execute(
                 'UPDATE attendance_records SET checkin_time=?,checkin_location=?,status=?,notes=?,checkin_lat=?,checkin_lng=?,gps_verified=? '
                 'WHERE employee_id=? AND work_date=?',
                 (checkin_time, location, status, notes, lat, lng, verified, emp_id, work_date))
-            flash('入厂记录已更新', 'success')
+            flash(tr('入厂记录已更新', 'Check-in updated'), 'success')
     return redirect(url_for('hr_portal', tab='attendance'))
 
 @app.route('/hr/attendance/checkout', methods=['POST'])
@@ -3247,7 +3436,7 @@ def hr_checkout():
     f = request.form
     emp_id = _requested_employee_id(f)
     if not emp_id:
-        flash('请选择员工', 'error')
+        flash(tr('请选择员工', 'Please choose an employee'), 'error')
         return redirect(url_for('hr_portal', tab='attendance'))
 
     ok, msg, lat, lng, verified = _verify_gps(f.get('lat'), f.get('lng'))
@@ -3271,7 +3460,7 @@ def hr_checkout():
                 'INSERT INTO attendance_records (employee_id,work_date,checkout_time,checkout_location,overtime_mins,checkout_lat,checkout_lng) '
                 'VALUES (?,?,?,?,?,?,?)',
                 (emp_id, work_date, checkout_time, location, overtime_mins, lat, lng))
-    flash('出厂打卡成功', 'success')
+    flash(tr('出厂打卡成功', 'Checked out'), 'success')
     return redirect(url_for('hr_portal', tab='attendance'))
 
 @app.route('/hr/leaves/new', methods=['POST'])
@@ -3279,7 +3468,7 @@ def leave_new():
     f = request.form
     emp_id = _requested_employee_id(f)
     if not emp_id:
-        flash('请选择员工', 'error')
+        flash(tr('请选择员工', 'Please choose an employee'), 'error')
         return redirect(url_for('hr_portal', tab='leave'))
     start, end = f.get('start_date', ''), f.get('end_date', '')
     try:
@@ -3290,7 +3479,7 @@ def leave_new():
         conn.execute(
             'INSERT INTO leave_requests (employee_id,leave_type,start_date,end_date,days,reason) VALUES (?,?,?,?,?,?)',
             (emp_id, f.get('leave_type', 'Annual'), start, end, days, f.get('reason', '').strip()))
-    flash('请假申请已提交', 'success')
+    flash(tr('请假申请已提交', 'Leave request submitted'), 'success')
     return redirect(url_for('hr_portal', tab='leave'))
 
 @app.route('/hr/leaves/<int:lid>/approve', methods=['POST'])
@@ -3298,7 +3487,7 @@ def leave_approve(lid):
     with db_conn() as conn:
         conn.execute("UPDATE leave_requests SET status='Approved',approver_notes=? WHERE id=?",
                      (request.form.get('notes', ''), lid))
-    flash('已批准', 'success')
+    flash(tr('已批准', 'Approved'), 'success')
     return redirect(url_for('hr_portal', tab='leave'))
 
 @app.route('/hr/leaves/<int:lid>/reject', methods=['POST'])
@@ -3306,14 +3495,14 @@ def leave_reject(lid):
     with db_conn() as conn:
         conn.execute("UPDATE leave_requests SET status='Rejected',approver_notes=? WHERE id=?",
                      (request.form.get('notes', ''), lid))
-    flash('已拒绝', 'warning')
+    flash(tr('已拒绝', 'Rejected'), 'warning')
     return redirect(url_for('hr_portal', tab='leave'))
 
 @app.route('/hr/leaves/<int:lid>/delete', methods=['POST'])
 def leave_delete(lid):
     with db_conn() as conn:
         conn.execute('DELETE FROM leave_requests WHERE id=?', (lid,))
-    flash('已删除', 'success')
+    flash(tr('已删除', 'Deleted'), 'success')
     return redirect(url_for('hr_portal', tab='leave'))
 
 @app.route('/hr/expenses/new', methods=['POST'])
@@ -3321,7 +3510,7 @@ def expense_new():
     f = request.form
     emp_id = _requested_employee_id(f)
     if not emp_id:
-        flash('请选择员工', 'error')
+        flash(tr('请选择员工', 'Please choose an employee'), 'error')
         return redirect(url_for('hr_portal', tab='expense'))
     invoice_path = ''
     inv = request.files.get('invoice')
@@ -3332,7 +3521,7 @@ def expense_new():
             'INSERT INTO expense_claims (employee_id,claim_date,claim_type,amount,description,invoice_path) VALUES (?,?,?,?,?,?)',
             (emp_id, f.get('claim_date', ''), f.get('claim_type', 'Transport'),
              float(f.get('amount', 0) or 0), f.get('description', '').strip(), invoice_path))
-    flash('报销申请已提交', 'success')
+    flash(tr('报销申请已提交', 'Expense claim submitted'), 'success')
     return redirect(url_for('hr_portal', tab='expense'))
 
 @app.route('/hr/expenses/<int:eid>/approve', methods=['POST'])
@@ -3340,7 +3529,7 @@ def expense_approve(eid):
     with db_conn() as conn:
         conn.execute("UPDATE expense_claims SET status='Approved',approver_notes=? WHERE id=?",
                      (request.form.get('notes', ''), eid))
-    flash('已批准', 'success')
+    flash(tr('已批准', 'Approved'), 'success')
     return redirect(url_for('hr_portal', tab='expense'))
 
 @app.route('/hr/expenses/<int:eid>/reject', methods=['POST'])
@@ -3348,14 +3537,14 @@ def expense_reject(eid):
     with db_conn() as conn:
         conn.execute("UPDATE expense_claims SET status='Rejected',approver_notes=? WHERE id=?",
                      (request.form.get('notes', ''), eid))
-    flash('已拒绝', 'warning')
+    flash(tr('已拒绝', 'Rejected'), 'warning')
     return redirect(url_for('hr_portal', tab='expense'))
 
 @app.route('/hr/expenses/<int:eid>/delete', methods=['POST'])
 def expense_delete(eid):
     with db_conn() as conn:
         conn.execute('DELETE FROM expense_claims WHERE id=?', (eid,))
-    flash('已删除', 'success')
+    flash(tr('已删除', 'Deleted'), 'success')
     return redirect(url_for('hr_portal', tab='expense'))
 
 @app.route('/hr/expenses/<int:eid>/invoice')
@@ -3367,7 +3556,7 @@ def expense_invoice(eid):
     if row and not g.is_admin and row['employee_id'] != g.employee_id:
         return 'Forbidden', 403
     if not row or not row['invoice_path']:
-        flash('无附件', 'error')
+        flash(tr('无附件', 'No attachment'), 'error')
         return redirect(url_for('hr_portal', tab='expense'))
     return send_from_directory(UPLOAD_DIR, row['invoice_path'])
 
@@ -3387,7 +3576,7 @@ def employee_work_info_save(eid):
                 'INSERT INTO employee_work_info (employee_id,supervisor_id,skill_level,product_categories,travel_status,overtime_notes) VALUES (?,?,?,?,?,?)',
                 (eid, supervisor_id, f.get('skill_level', ''), product_cats,
                  f.get('travel_status', ''), f.get('overtime_notes', '').strip()))
-    flash('工作信息已保存', 'success')
+    flash(tr('工作信息已保存', 'Work info saved'), 'success')
     return redirect(url_for('employee_edit', eid=eid))
 
 
@@ -3481,26 +3670,26 @@ def user_create():
     role = request.form.get('role', 'inspector')
     employee_id = request.form.get('employee_id') or None
     if not username or not username.replace('_', '').replace('-', '').isalnum():
-        flash('用户名只能包含字母、数字、下划线和连字符', 'error')
+        flash(tr('用户名只能包含字母、数字、下划线和连字符', 'Username may only contain letters, digits, underscores and hyphens'), 'error')
     elif len(password) < 12:
-        flash('密码至少需要 12 个字符', 'error')
+        flash(tr('密码至少需要 12 个字符', 'Password must be at least 12 characters'), 'error')
     elif role not in {'admin', 'inspector'}:
-        flash('无效角色', 'error')
+        flash(tr('无效角色', 'Invalid role'), 'error')
     else:
         try:
             with db_conn() as conn:
                 conn.execute(
                     'INSERT INTO users (username,password_hash,role,employee_id) VALUES (?,?,?,?)',
                     (username, generate_password_hash(password), role, employee_id))
-            flash('账号已创建', 'success')
+            flash(tr('账号已创建', 'Account created'), 'success')
         except Exception:
-            flash('用户名已存在或员工关联无效', 'error')
+            flash(tr('用户名已存在或员工关联无效', 'Username already exists or the employee link is invalid'), 'error')
     return redirect(url_for('users_admin'))
 
 @app.route('/admin/users/<int:uid>/toggle', methods=['POST'])
 def user_toggle(uid):
     if uid == g.user_id:
-        flash('不能停用当前登录账号', 'error')
+        flash(tr('不能停用当前登录账号', 'You cannot disable the account you are logged in with'), 'error')
         return redirect(url_for('users_admin'))
     with db_conn() as conn:
         user = conn.execute('SELECT active,role FROM users WHERE id=?', (uid,)).fetchone()
@@ -3510,23 +3699,23 @@ def user_toggle(uid):
                     "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
                 ).fetchone()[0]
                 if active_admins <= 1:
-                    flash('至少需要保留一个启用的管理员', 'error')
+                    flash(tr('至少需要保留一个启用的管理员', 'At least one active admin is required'), 'error')
                     return redirect(url_for('users_admin'))
             conn.execute('UPDATE users SET active=? WHERE id=?', (0 if user['active'] else 1, uid))
-            flash('账号状态已更新', 'success')
+            flash(tr('账号状态已更新', 'Account status updated'), 'success')
     return redirect(url_for('users_admin'))
 
 @app.route('/admin/users/<int:uid>/reset-password', methods=['POST'])
 def user_reset_password(uid):
     password = request.form.get('password', '')
     if len(password) < 12:
-        flash('密码至少需要 12 个字符', 'error')
+        flash(tr('密码至少需要 12 个字符', 'Password must be at least 12 characters'), 'error')
     else:
         with db_conn() as conn:
             conn.execute(
                 'UPDATE users SET password_hash=? WHERE id=?',
                 (generate_password_hash(password), uid))
-        flash('密码已重置', 'success')
+        flash(tr('密码已重置', 'Password reset'), 'success')
     return redirect(url_for('users_admin'))
 
 @app.route('/admin/users/<int:uid>/update', methods=['POST'])
@@ -3534,7 +3723,7 @@ def user_update(uid):
     role = request.form.get('role', 'inspector')
     employee_id = request.form.get('employee_id') or None
     if role not in {'admin', 'inspector'}:
-        flash('无效角色', 'error')
+        flash(tr('无效角色', 'Invalid role'), 'error')
         return redirect(url_for('users_admin'))
     with db_conn() as conn:
         user = conn.execute('SELECT role,active FROM users WHERE id=?', (uid,)).fetchone()
@@ -3543,12 +3732,12 @@ def user_update(uid):
                 "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
             ).fetchone()[0]
             if active_admins <= 1:
-                flash('至少需要保留一个启用的管理员', 'error')
+                flash(tr('至少需要保留一个启用的管理员', 'At least one active admin is required'), 'error')
                 return redirect(url_for('users_admin'))
         conn.execute(
             'UPDATE users SET role=?,employee_id=? WHERE id=?',
             (role, employee_id, uid))
-    flash('账号资料已更新', 'success')
+    flash(tr('账号资料已更新', 'Account updated'), 'success')
     return redirect(url_for('users_admin'))
 
 @app.before_request
@@ -3559,7 +3748,8 @@ def _auth_check():
         if not submitted or not expected or not hmac.compare_digest(submitted, expected):
             return 'Invalid CSRF token', 400
 
-    public = {'healthz', 'login', 'static'}
+    g.lang = _lang_from_cookie()
+    public = {'healthz', 'login', 'static', 'set_language'}
     if request.endpoint in public or request.endpoint is None:
         return None
 
@@ -3568,19 +3758,38 @@ def _auth_check():
         return redirect(url_for('login', next=request.full_path.rstrip('?')))
     with db_conn() as conn:
         user = conn.execute(
-            'SELECT id, username, role, employee_id FROM users WHERE id=? AND active=1',
+            'SELECT id, username, role, employee_id, language FROM users WHERE id=? AND active=1',
             (user_id,)
         ).fetchone()
     if not user:
         session.clear()
         return redirect(url_for('login'))
+    if user['language'] in LANGUAGES:
+        g.lang = user['language']
     g.user_id = user['id']
     g.username = user['username']
     g.role = user['role']
     g.employee_id = user['employee_id']
     g.is_admin = user['role'] == 'admin'
     if request.endpoint in ADMIN_ENDPOINTS and not g.is_admin:
-        return 'Forbidden', 403
+        return tr('无权限访问此页面', 'Forbidden'), 403
+    disabled = _disabled_module_for_path(request.path)
+    if disabled:
+        abort(404)
+
+@app.route('/lang/<code>')
+def set_language(code):
+    """Switch UI language; remembered per account and per browser."""
+    if code not in LANGUAGES:
+        abort(404)
+    user_id = session.get('user_id')
+    if user_id:
+        with db_conn() as conn:
+            conn.execute('UPDATE users SET language=? WHERE id=?', (code, user_id))
+    response = redirect(_safe_next_url(request.args.get('next')) or url_for('index'))
+    response.set_cookie('lang', code, max_age=365 * 24 * 3600, samesite='Lax',
+                        secure=IS_PRODUCTION, httponly=True)
+    return response
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -3592,7 +3801,7 @@ def login():
         # sharing an office IP) cannot lock out the whole team.
         client_id = f"{username.lower()}|{request.remote_addr or 'unknown'}"
         if _login_rate_limited(client_id):
-            flash('登录尝试次数过多，请稍后再试', 'error')
+            flash(tr('登录尝试次数过多，请稍后再试', 'Too many login attempts — please try again later'), 'error')
             return render_template('login.html'), 429
         password = request.form.get('password', '')
         with db_conn() as conn:
@@ -3607,7 +3816,7 @@ def login():
             csrf_token()
             return redirect(_safe_next_url(request.args.get('next')) or url_for('index'))
         _record_login_failure(client_id)
-        flash('用户名或密码错误', 'error')
+        flash(tr('用户名或密码错误', 'Incorrect username or password'), 'error')
     return render_template('login.html')
 
 @app.route('/logout', methods=['POST'])
@@ -3633,8 +3842,8 @@ def security_headers(response):
 @app.errorhandler(413)
 def upload_too_large(_error):
     limit_mb = (app.config.get('MAX_CONTENT_LENGTH') or 0) // (1024 * 1024)
-    return (f'上传文件过大（上限 {limit_mb} MB），请压缩后重试或分次提交。'
-            f' / Upload too large (limit {limit_mb} MB).'), 413
+    return tr(f'上传文件过大（上限 {limit_mb} MB），请压缩后重试或分次提交。',
+              f'Upload too large (limit {limit_mb} MB). Compress the files or submit in parts.'), 413
 
 @app.errorhandler(500)
 def internal_error(_error):

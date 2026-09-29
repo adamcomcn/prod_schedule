@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}员工档案{% endblock %}
+{% block title %}{{ tr('员工档案', 'Employees') }}{% endblock %}
 
 {% block extra_style %}
 .mgmt-table { width:100%; border-collapse:collapse; font-size:.875rem; }
@@ -29,8 +29,8 @@
 <div style="max-width:1100px; margin:0 auto;">
 
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">员工花名册</h1>
-    <a href="{{ url_for('employee_new') }}" class="btn btn-primary">+ 新增员工</a>
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">{{ tr('员工花名册', 'Employee roster') }}</h1>
+    <a href="{{ url_for('employee_new') }}" class="btn btn-primary">{{ tr('+ 新增员工', '+ New employee') }}</a>
   </div>
 
   <div class="card" style="padding:0;">
@@ -39,16 +39,16 @@
     <table class="mgmt-table">
       <thead>
         <tr>
-          <th>姓名</th>
-          <th>性别</th>
-          <th>所属部门</th>
-          <th>手机号</th>
-          <th>职位</th>
-          <th>驻厂状态</th>
-          <th>驻厂地点</th>
-          <th>邮箱</th>
-          <th>状态</th>
-          <th>操作</th>
+          <th>{{ tr('姓名', 'Name') }}</th>
+          <th>{{ tr('性别', 'Gender') }}</th>
+          <th>{{ tr('所属部门', 'Department') }}</th>
+          <th>{{ tr('手机号', 'Mobile') }}</th>
+          <th>{{ tr('职位', 'Position') }}</th>
+          <th>{{ tr('驻厂状态', 'Stationed') }}</th>
+          <th>{{ tr('驻厂地点', 'Stationed at') }}</th>
+          <th>{{ tr('邮箱', 'E-mail') }}</th>
+          <th>{{ tr('状态', 'Status') }}</th>
+          <th>{{ tr('操作', 'Actions') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -61,9 +61,9 @@
           <td>{{ e.role or '—' }}</td>
           <td>
             {% if e.is_stationed %}
-              <span class="stationed-yes">驻厂</span>
+              <span class="stationed-yes">{{ tr('驻厂', 'Stationed') }}</span>
             {% else %}
-              <span class="stationed-no">非驻厂</span>
+              <span class="stationed-no">{{ tr('非驻厂', 'Not stationed') }}</span>
             {% endif %}
           </td>
           <td>{{ e.stationed_at or '—' }}</td>
@@ -71,22 +71,22 @@
             {% if e.email %}
               <a href="mailto:{{ e.email }}" style="font-size:.82rem;">{{ e.email }}</a>
             {% else %}
-              <span style="color:#9ca3af; font-size:.82rem;">未设置</span>
+              <span style="color:#9ca3af; font-size:.82rem;">{{ tr('未设置', 'Not set') }}</span>
             {% endif %}
           </td>
           <td>
             {% if e.active %}
-              <span class="active-dot"></span><span style="font-size:.82rem;color:#059669;">在职</span>
+              <span class="active-dot"></span><span style="font-size:.82rem;color:#059669;">{{ tr('在职', 'Active') }}</span>
             {% else %}
-              <span class="inactive-dot"></span><span style="font-size:.82rem;color:#9ca3af;">停用</span>
+              <span class="inactive-dot"></span><span style="font-size:.82rem;color:#9ca3af;">{{ tr('停用', 'Inactive') }}</span>
             {% endif %}
           </td>
           <td>
             <div class="action-btns">
-              <a href="{{ url_for('employee_edit', eid=e.id) }}" class="btn btn-sm btn-edit">编辑</a>
+              <a href="{{ url_for('employee_edit', eid=e.id) }}" class="btn btn-sm btn-edit">{{ tr('编辑', 'Edit') }}</a>
               <form method="POST" action="{{ url_for('employee_delete', eid=e.id) }}"
-                    onsubmit="return confirm('确认删除员工「{{ e.name }}」？')">
-                <button type="submit" class="btn btn-sm btn-del">删除</button>
+                    onsubmit="return confirm(this.dataset.confirm)" data-confirm="{{ tr('确认删除员工「' ~ e.name ~ '」？', 'Delete employee "' ~ e.name ~ '"?') }}">
+                <button type="submit" class="btn btn-sm btn-del">{{ tr('删除', 'Delete') }}</button>
               </form>
             </div>
           </td>
@@ -97,7 +97,7 @@
     </div>
     {% else %}
     <div style="text-align:center; padding:40px; color:#9ca3af; font-size:.9rem;">
-      暂无员工，请点击「新增员工」添加
+      {{ tr('暂无员工，请点击「新增员工」添加', 'No employees yet — click "New employee" to add one') }}
     </div>
     {% endif %}
   </div>
