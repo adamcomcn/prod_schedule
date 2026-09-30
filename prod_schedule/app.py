@@ -218,6 +218,38 @@ DEFAULT_HIDDEN_COLUMNS = [
 ]
 
 
+# Commercial columns are for admins only: they are removed on the server
+# before schedule data is rendered or exported for inspectors / leads.
+ADMIN_ONLY_COLUMN_WORDS = ('price', 'cost', 'amount', '单价', '价格', '金额')
+
+
+def is_admin_only_column(header):
+    text = str(header or '').lower()
+    return any(word in text for word in ADMIN_ONLY_COLUMN_WORDS)
+
+
+def strip_admin_only_columns(sheets, shipped=None):
+    """Return copies of {sheet: [headers, *rows]} (and {sheet: [rows]} of
+    shipped rows laid out with the same headers) without admin-only columns."""
+    shipped = shipped or {}
+    out_sheets, out_shipped = {}, {}
+    for sheet, rows in sheets.items():
+        if not rows:
+            out_sheets[sheet] = rows
+            continue
+        keep = [i for i, h in enumerate(rows[0]) if not is_admin_only_column(h)]
+
+        def cut(row):
+            return [row[i] if i < len(row) else '' for i in keep]
+
+        out_sheets[sheet] = [cut(r) for r in rows]
+        if sheet in shipped:
+            out_shipped[sheet] = [cut(r) for r in shipped[sheet]]
+    for sheet, rows in shipped.items():
+        out_shipped.setdefault(sheet, rows)
+    return out_sheets, out_shipped
+
+
 def hidden_schedule_columns():
     configured = load_config().get('schedule_hidden_columns')
     columns = DEFAULT_HIDDEN_COLUMNS if configured is None else configured
@@ -1122,6 +1154,9 @@ def index():
         statuses, typo_flags, shipped_rows = compute_changes(previous, current)
     else:
         statuses, typo_flags, shipped_rows = {}, [], {}
+    if not g.is_admin:
+        # Prices never reach inspectors (not even via search).
+        current, shipped_rows = strip_admin_only_columns(current, shipped_rows)
     config = load_config()
     inspections = load_json(INSPECTIONS_CACHE, {})
 
@@ -1271,6 +1306,8 @@ def export_comparison_excel():
     statuses, _, shipped_rows = (
         compute_changes(previous, current)
         if current and previous else ({}, [], {}))
+    if not g.is_admin:
+        current, shipped_rows = strip_admin_only_columns(current, shipped_rows)
 
     workbook = openpyxl.Workbook()
     workbook.remove(workbook.active)

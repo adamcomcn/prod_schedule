@@ -1,4 +1,5 @@
 """Language switching and optional-module tests."""
+import io
 import os
 import sys
 import tempfile
@@ -117,6 +118,40 @@ class I18nAndModuleTests(unittest.TestCase):
         config.pop('schedule_hidden_columns', None)
         app.save_json(app.CONFIG_FILE, config)
         self.assertIn('reliable code', app.hidden_schedule_columns())
+
+    def test_prices_are_admin_only(self):
+        headers = HEADERS + ['Updated Price', 'Total Price']
+        current = {'MELBOURNE': [headers, ['DPL1', 'PO-1', 'RSV0100FL', 'Valve DN100', '5',
+                                           'In Production', '2026-10-20', 'NO', '987.65', '4938.25']]}
+        previous = {'MELBOURNE': current['MELBOURNE'] + [
+            ['DPL0', 'PO-0', 'GONE1', 'Shipped item', '2', 'Ready to Ship', '2026-09-01', 'NO',
+             '111.11', '222.22']]}
+        app.save_json(app.CURRENT_FILE, current)
+        app.save_json(app.PREVIOUS_FILE, previous)
+        with db_conn() as conn:
+            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('price-lead','x','lead')")
+            lead_id = conn.execute("SELECT id FROM users WHERE username='price-lead'").fetchone()[0]
+        lead = app.app.test_client()
+        with lead.session_transaction() as session:
+            session['user_id'] = lead_id
+
+        page = lead.get('/?view=all').get_data(as_text=True)
+        self.assertIn('Valve DN100', page)
+        self.assertIn('Shipped item', page)
+        for secret in ('987.65', '4938.25', '111.11', 'Updated Price', 'Total Price'):
+            self.assertNotIn(secret, page)
+        # Searching by a price must not reveal which row has it.
+        self.assertNotIn('Valve DN100', lead.get('/?q=987.65').get_data(as_text=True))
+
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(lead.get('/export/comparison.xlsx').data), read_only=True)
+        cells = {str(c) for row in wb['MELBOURNE'].iter_rows(values_only=True) for c in row}
+        self.assertNotIn('987.65', cells)
+        self.assertNotIn('Total Price', cells)
+
+        admin_page = self.client.get('/?view=all').get_data(as_text=True)
+        self.assertIn('987.65', admin_page)
+        self.assertIn('111.11', admin_page)
 
     def test_evidence_guidance_is_translated(self):
         self.client.get('/lang/zh')
