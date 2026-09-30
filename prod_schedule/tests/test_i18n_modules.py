@@ -100,6 +100,24 @@ class I18nAndModuleTests(unittest.TestCase):
         self.assertIn('href="/hr"', self.client.get('/').get_data(as_text=True))
         self.assertEqual(self.client.get('/training').status_code, 404)
 
+    def test_schedule_columns_can_be_hidden(self):
+        page = self.client.get('/').get_data(as_text=True)
+        self.assertIn('data-col="estimated completion date"', page)
+        self.assertIn('class="col-picker"', page)
+        self.assertIn('"order date"', page)  # default hidden list reaches the page
+        response = self.client.post('/settings', data={
+            '_csrf_token': 'tok', 'schedule_hidden_columns': 'Order Date,\n  Total   Price ',
+            'valve_prefixes': 'RSV'})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(app.hidden_schedule_columns(), ['order date', 'total price'])
+        self.client.post('/settings', data={'_csrf_token': 'tok', 'schedule_hidden_columns': '',
+                                            'valve_prefixes': 'RSV'})
+        self.assertEqual(app.hidden_schedule_columns(), [])
+        config = app.load_config()
+        config.pop('schedule_hidden_columns', None)
+        app.save_json(app.CONFIG_FILE, config)
+        self.assertIn('reliable code', app.hidden_schedule_columns())
+
     def test_evidence_guidance_is_translated(self):
         self.client.get('/lang/zh')
         page = self.client.get(f'/inspect/{JOB}').get_data(as_text=True)

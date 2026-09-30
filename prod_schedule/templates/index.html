@@ -82,6 +82,18 @@ tbody tr.row-vtrust-warn td { background: #fff7ed !important; }
 tbody tr.row-vtrust-warn { border-left: 3px solid #f97316 !important; }
 tbody tr.row-vtrust-warn:hover td { background: #ffedd5 !important; }
 tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
+
+/* ── column picker ── */
+.col-picker { position: relative; }
+.col-picker > summary { list-style: none; cursor: pointer; }
+.col-picker > summary::-webkit-details-marker { display: none; }
+.col-hidden-count { font-size: .72rem; color: #6b7280; }
+.col-picker-menu { position: absolute; right: 0; top: 36px; z-index: 30; background: #fff;
+                   border: 1px solid #d0d5dd; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
+                   padding: 10px 14px; min-width: 240px; max-height: 60vh; overflow-y: auto; }
+.col-picker-menu label { display: flex; align-items: center; gap: 8px; font-size: .84rem;
+                         font-weight: 400; margin: 0; padding: 5px 0; cursor: pointer; white-space: nowrap; }
+.col-picker-actions { display: flex; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #eef0f3; }
 {% endblock %}
 
 {% block content %}
@@ -204,6 +216,20 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     <span class="row-count" id="count-{{ si }}">
       {{ tr('共 ' ~ total_results ~ ' 条', total_results ~ ' result' ~ ('' if total_results == 1 else 's')) }}
     </span>
+    {% if rows %}
+    <details class="col-picker">
+      <summary class="btn btn-outline btn-sm">&#9776; {{ tr('显示列', 'Columns') }} <span class="col-hidden-count"></span></summary>
+      <div class="col-picker-menu">
+        {% for h in rows[0] %}{% if h %}
+        <label><input type="checkbox" data-col="{{ h|lower }}" onchange="toggleColumn(this)"> {{ h|header_label }}</label>
+        {% endif %}{% endfor %}
+        <div class="col-picker-actions">
+          <button type="button" class="btn btn-sm btn-outline" onclick="showAllColumns()">{{ tr('全部显示', 'Show all') }}</button>
+          <button type="button" class="btn btn-sm btn-outline" onclick="resetColumns()">{{ tr('恢复默认', 'Reset') }}</button>
+        </div>
+      </div>
+    </details>
+    {% endif %}
   </div>
 
   {% if rows|length > 1 or shipped_rows.get(sheet_name) %}
@@ -213,7 +239,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
         <tr>
           <th style="min-width:90px">{{ tr('状态', 'Status') }}</th>
           {% for h in rows[0] %}
-          <th onclick="sortTable({{ si }}, {{ loop.index0 + 1 }})">
+          <th onclick="sortTable({{ si }}, {{ loop.index0 + 1 }})" data-col="{{ h|lower }}">
             {{ h|header_label }}<span class="sort-icon">&#x21C5;</span>
           </th>
           {% endfor %}
@@ -262,7 +288,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
             {% if qa_warn %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>{% endif %}
           </td>
           {% for cell in row %}
-          <td>{{ cell|status_label if headers[loop.index0] == 'Current Status' else cell }}</td>
+          <td data-col="{{ headers[loop.index0]|lower if loop.index0 < headers|length else '' }}">{{ cell|status_label if headers[loop.index0] == 'Current Status' else cell }}</td>
           {% endfor %}
           <td class="inspect-col">
             {% if insp %}
@@ -340,7 +366,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
             {% if qa_warn2 %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>{% endif %}
           </td>
           {% for i in range(headers|length) %}
-          <td>{{ row[i] if i < row|length else '' }}</td>
+          <td data-col="{{ headers[i]|lower }}">{{ row[i] if i < row|length else '' }}</td>
           {% endfor %}
           <td class="inspect-col">
             {% if insp2 %}
@@ -598,7 +624,65 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 {% endif %}
 
 <script>
-const I18N = {collapse: {{ tr('收起', 'Collapse')|tojson }}, expand: {{ tr('展开', 'Expand')|tojson }}};
+const I18N = {collapse: {{ tr('收起', 'Collapse')|tojson }}, expand: {{ tr('展开', 'Expand')|tojson }},
+              hidden: {{ tr('（已隐藏 {n} 列）', '({n} hidden)')|tojson }}};
+
+// ── Column visibility: admin default (Settings) + each viewer's own choice ──
+const DEFAULT_HIDDEN_COLS = {{ hidden_schedule_columns()|tojson }};
+const COL_PREFS_KEY = 'scheduleColumns';
+function colPrefs() {
+  try { return JSON.parse(localStorage.getItem(COL_PREFS_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function saveColPrefs(prefs) {
+  try { localStorage.setItem(COL_PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
+}
+function colHidden(col, prefs) {
+  return Object.prototype.hasOwnProperty.call(prefs, col) ? !prefs[col] : DEFAULT_HIDDEN_COLS.includes(col);
+}
+function applyColumns() {
+  const prefs = colPrefs();
+  const hidden = new Set();
+  document.querySelectorAll('.col-picker input[data-col]').forEach(cb => {
+    const h = colHidden(cb.dataset.col, prefs);
+    cb.checked = !h;
+    if (h) hidden.add(cb.dataset.col);
+  });
+  let css = '';
+  hidden.forEach(c => {
+    const sel = '[data-col="' + CSS.escape(c) + '"]';
+    css += 'th' + sel + ',td' + sel + '{display:none}';
+  });
+  let style = document.getElementById('col-visibility-style');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'col-visibility-style';
+    document.head.appendChild(style);
+  }
+  style.textContent = css;
+  document.querySelectorAll('.col-hidden-count').forEach(el => {
+    el.textContent = hidden.size ? I18N.hidden.replace('{n}', hidden.size) : '';
+  });
+}
+function toggleColumn(cb) {
+  const prefs = colPrefs();
+  prefs[cb.dataset.col] = cb.checked;
+  saveColPrefs(prefs);
+  applyColumns();
+}
+function showAllColumns() {
+  const prefs = colPrefs();
+  document.querySelectorAll('.col-picker input[data-col]').forEach(cb => { prefs[cb.dataset.col] = true; });
+  saveColPrefs(prefs);
+  applyColumns();
+}
+function resetColumns() {
+  try { localStorage.removeItem(COL_PREFS_KEY); } catch (e) {}
+  applyColumns();
+}
+applyColumns();
+document.addEventListener('click', e => {
+  document.querySelectorAll('.col-picker[open]').forEach(d => { if (!d.contains(e.target)) d.removeAttribute('open'); });
+});
 function fitTableWraps() {
   document.querySelectorAll('.table-wrap').forEach(function(wrap) {
     var top = wrap.getBoundingClientRect().top;

@@ -89,6 +89,15 @@
           </div>
 
           <div class="form-group">
+            <label>&#9776; {{ tr('排期表默认隐藏的列', 'Schedule columns hidden by default') }}</label>
+            <textarea name="schedule_hidden_columns" rows="3">{{ hidden_schedule_columns()|join(', ') }}</textarea>
+            <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
+              {{ tr('填写 Excel 表头（英文原名，不区分大小写），用逗号分隔。每个人仍可在排期页面的“显示列”里自己打开或隐藏，设置保存在各自的浏览器。',
+                    'Excel header names (case-insensitive), comma-separated. Everyone can still show or hide columns from the "Columns" menu on the schedule page; that choice is kept in their own browser.') }}
+            </div>
+          </div>
+
+          <div class="form-group">
             <label>{{ tr('阀门物料编码前缀（需要 V-Trust）', 'Valve Item Code Prefixes (V-Trust required)') }}</label>
             <input type="text" name="valve_prefixes"
                    value="{{ config.get('valve_prefixes', ['RSV'])|join(', ') }}"

@@ -203,8 +203,27 @@ _HEADER_LABELS_ZH = {
     'current status': '当前状态', 'pieces per crate': '每箱件数', 'full crates': '整箱数',
     'casting arrived date': '铸件到货日', 'foundry': '铸造厂', 'supplier': '供应商',
     'unit weight (kg)': '单重 (kg)', 'total weight (kg)': '总重 (kg)',
-    'gross weight (kg)': '毛重 (kg)',
+    'gross weight (kg)': '毛重 (kg)', 'reliable code': 'Reliable 编码',
+    'chinese description': '中文描述', 'updated price': '更新单价', 'total price': '总价',
+    'unit price': '单价', 'price': '价格',
 }
+
+# Schedule columns hidden by default (inspectors can show them from the
+# "Columns" menu; admins can change the list in Settings).
+DEFAULT_HIDDEN_COLUMNS = [
+    'order date', 'reliable code', 'pieces per crate', 'full crates',
+    'actual completion date', 'must ship date', 'must ship time',
+    'unit weight (kg)', 'total weight (kg)', 'gross weight (kg)',
+    'updated price', 'total price',
+]
+
+
+def hidden_schedule_columns():
+    configured = load_config().get('schedule_hidden_columns')
+    columns = DEFAULT_HIDDEN_COLUMNS if configured is None else configured
+    return [c.strip().lower() for c in columns if c and c.strip()]
+
+app.jinja_env.globals['hidden_schedule_columns'] = hidden_schedule_columns
 
 def header_label(header):
     text = '' if header is None else str(header)
@@ -2474,6 +2493,10 @@ def settings():
         config['valve_prefixes'] = [p.strip().upper() for p in raw_prefixes.split(',') if p.strip()]
         config['task_notify_emails'] = ', '.join(_email_list(request.form.get('task_notify_emails', '')))
         config['hq_report_emails'] = ', '.join(_email_list(request.form.get('hq_report_emails', '')))
+        if 'schedule_hidden_columns' in request.form:
+            config['schedule_hidden_columns'] = [
+                ' '.join(c.split()).lower()
+                for c in re.split(r'[,\n]', request.form['schedule_hidden_columns']) if c.strip()]
         mode = request.form.get('hq_report_mode', 'all')
         config['hq_report_mode'] = mode if mode in HQ_REPORT_MODES else 'all'
         for legacy_secret in ('smtp_pass', 'smtp_user', 'smtp_host', 'smtp_port'):
