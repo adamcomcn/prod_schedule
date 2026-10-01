@@ -683,16 +683,19 @@ def get_vtrust_status(inspections_list):
 
 app.jinja_env.globals['vtrust_status'] = get_vtrust_status
 
-def qa_brt_missing(row, headers, status):
-    if status not in {'shipped', 'partially_shipped'}:
+def qa_brt_missing(status, reports):
+    """A shipped / partially shipped job without an inspection report in the
+    system. The Excel 'QA BRTs Sent?' cell is not trusted for this."""
+    return status in {'shipped', 'partially_shipped'} and not reports
+
+def qa_excel_mismatch(row, headers, reports):
+    """Excel says QA BRTs were sent (YES) but the system holds no report."""
+    qa_idx = next((i for i, h in enumerate(headers) if 'qa brt' in str(h).lower()), None)
+    if qa_idx is None or qa_idx >= len(row) or reports:
         return False
-    qa_idx = next(
-        (i for i, header in enumerate(headers) if 'qa brt' in str(header).lower()),
-        None)
-    qa_value = (
-        str(row[qa_idx]).strip().lower()
-        if qa_idx is not None and qa_idx < len(row) else '')
-    return qa_value not in {'yes', 'y'}
+    return str(row[qa_idx]).strip().lower() in {'yes', 'y'}
+
+app.jinja_env.globals['qa_excel_mismatch'] = qa_excel_mismatch
 
 def fmt_date(val):
     if val is None:
@@ -1048,9 +1051,6 @@ def persist_fully_shipped_jobs(previous, current, shipped_rows, week_label):
                 continue
             headers = list(source[0])
             headers_lower = [str(header).lower() for header in headers]
-            qa_idx = next(
-                (i for i, header in enumerate(headers_lower) if 'qa brt' in header),
-                None)
 
             def get_col(name, row):
                 try:
@@ -1063,10 +1063,7 @@ def persist_fully_shipped_jobs(previous, current, shipped_rows, week_label):
                 job_key = make_job_key(sheet, row, headers)
                 if not job_key.split('|')[1]:
                     continue
-                qa_value = (
-                    str(row[qa_idx]).strip().lower()
-                    if qa_idx is not None and qa_idx < len(row) else '')
-                has_report = qa_value in {'yes', 'y'} or bool(inspections.get(job_key))
+                has_report = bool(inspections.get(job_key))
                 complete_value = 1 if has_report else 0
                 complete_time = completed_at if has_report else None
 
@@ -1288,7 +1285,7 @@ def index():
                 job_key = make_job_key(selected_sheet, row, headers)
                 status = 'shipped' if kind == 'shipped' else statuses.get(job_key, '')
                 if status_filter == 'no_qa_brt':
-                    return qa_brt_missing(row, headers, status)
+                    return qa_brt_missing(status, inspections.get(job_key, []))
                 if status_filter != 'vtrust':
                     return status == status_filter
                 records = inspections.get(job_key, [])
@@ -1384,7 +1381,7 @@ def export_comparison_excel():
             reports = inspections.get(job_key, [])
             worksheet.append([
                 status_label,
-                'No QA BRT' if qa_brt_missing(row, headers, status) else '',
+                'No QA BRT' if qa_brt_missing(status, reports) else '',
                 reports[-1].get('result', '') if reports else 'Pending',
                 get_vtrust_status(reports),
                 *list(row),
@@ -1505,7 +1502,6 @@ def dashboard():
 
         if rows and len(rows) >= 2:
             headers = rows[0]
-            qa_idx  = next((i for i, h in enumerate(headers) if 'qa brt' in h.lower()), -1)
             seen_jk = set()   # deduplicate split rows – count each order+item once
             for row in rows[1:]:
                 jk = make_job_key(sheet, row, headers)
@@ -1516,9 +1512,8 @@ def dashboard():
                 stats[status] += 1
                 stats['total'] += 1
                 if status in ('partially_shipped',):
-                    if qa_idx >= 0 and qa_idx < len(row):
-                        if str(row[qa_idx]).strip().lower() not in ('yes', 'y'):
-                            stats['qa_violations'] += 1
+                    if not inspections.get(jk):
+                        stats['qa_violations'] += 1
                     if jk in valve_keys:
                         if get_vtrust_status(inspections.get(jk, [])).lower() != 'pass':
                             stats['vtrust_violations'] += 1
@@ -1533,10 +1528,8 @@ def dashboard():
                 continue
             stats['shipped'] += 1
             stats['total']   += 1
-            qa_idx = next((i for i, h in enumerate(ph) if 'qa brt' in h.lower()), -1)
-            if qa_idx >= 0 and qa_idx < len(row):
-                if str(row[qa_idx]).strip().lower() not in ('yes', 'y'):
-                    stats['qa_violations'] += 1
+            if not inspections.get(jk):
+                stats['qa_violations'] += 1
             if jk in valve_keys:
                 if get_vtrust_status(inspections.get(jk, [])).lower() != 'pass':
                     stats['vtrust_violations'] += 1
