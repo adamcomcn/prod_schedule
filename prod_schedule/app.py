@@ -2673,6 +2673,50 @@ def hq_report_wanted(result):
     return mode == 'all' or result in ('Fail', 'Partial Pass')
 
 
+EMAIL_ATTACH_TYPES = {
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.xls': 'application/vnd.ms-excel', '.csv': 'text/csv', '.pdf': 'application/pdf',
+}
+MAX_EMAIL_TOTAL = 15 * 1024 * 1024      # all attachments together (base64 adds a third)
+
+
+def _original_attachments(job_key, index, links, used=0):
+    """Original evidence files of one inspection for the HQ e-mail: spreadsheets
+    and PDFs are attached while the size budget lasts; photos are already in
+    the report and videos are too big, so those are not attached. Returns
+    ({'data': [(name, bytes, mime)], 'names': [...]}, [(name, download_url)])."""
+    with db_conn() as conn:
+        rows = [dict(r) for r in conn.execute(
+            'SELECT id, original_name, saved_name, file_path FROM inspection_attachments '
+            'WHERE job_key=? AND insp_index=? ORDER BY id', (job_key, index)).fetchall()]
+    base = links['pdf'].split('/inspect/')[0]
+    out, names, skipped, taken = [], [], [], set()
+    for r in rows:
+        name = r['original_name'] or r['saved_name'] or 'file'
+        ext = os.path.splitext(name)[1].lower()
+        if ext in ('.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'):
+            continue                                    # photos live inside the PDF
+        url = f"{base}/attachments/{r['id']}"
+        path = r['file_path']
+        if ext not in EMAIL_ATTACH_TYPES or not path or not os.path.exists(path):
+            skipped.append((name, url))
+            continue
+        size = os.path.getsize(path)
+        if used + size > MAX_EMAIL_TOTAL:
+            skipped.append((name, url))
+            continue
+        base_name, n = name, 2
+        while name in taken:                            # same file name twice in one e-mail
+            stem, e = os.path.splitext(base_name)
+            name, n = f'{stem} ({n}){e}', n + 1
+        taken.add(name)
+        with open(path, 'rb') as fh:
+            out.append((name, fh.read(), EMAIL_ATTACH_TYPES[ext]))
+        names.append(name)
+        used += size
+    return {'data': out, 'names': names}, skipped
+
+
 def _send_report_email(log_id, job_key, index, sent_by, links):
     """Build the PDF and e-mail it to HQ; record the outcome in report_emails.
     Runs in a background thread (no request context)."""
@@ -2707,6 +2751,13 @@ def _send_report_email(log_id, job_key, index, sent_by, links):
                 attachments.append((filename, pdf, 'application/pdf'))
             else:
                 lines.append(f"PDF 过大未附上，请在线下载 PDF too large to attach — download: {links['pdf']}")
+            sent_files, skipped_files = _original_attachments(job_key, index, links, used=len(pdf) if attachments else 0)
+            attachments += sent_files['data']
+            if sent_files['names']:
+                lines += ['', '随邮件附上的原始文件 Original files attached:'] + [f"  • {n}" for n in sent_files['names']]
+            if skipped_files:
+                lines += ['', '以下文件未随邮件发送（视频或超过大小限制），请登录系统下载 Not attached (video or too large) — download in the system:']
+                lines += [f"  • {n}: {u}" for n, u in skipped_files]
             lines += ['', '— Daemco QC 系统自动发送 / sent automatically by the Daemco QC system']
             ok, detail = _smtp_send(subject, '\n'.join(lines), recipients, attachments)
             status = 'sent' if ok else 'failed'
