@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app
 from db import db_conn
+from helpers import assign_job
 from werkzeug.security import generate_password_hash
 
 SMTP_ENV = {'SMTP_HOST': 'smtp.example.test', 'SMTP_PORT': '587',
@@ -61,6 +62,7 @@ class HqReportEmailTests(unittest.TestCase):
                 conn.execute('INSERT INTO users (username,password_hash,role) VALUES (?,?,?)',
                              (name, generate_password_hash(name * 6), role))
             self.ids = {r['username']: r['id'] for r in conn.execute('SELECT id, username FROM users')}
+        assign_job(JOB, 'insp')
         schedule = {'MELBOURNE': [HEADERS, ['DPL7', 'PO-7', 'UMC100', 'Coupling', '40']]}
         app.save_json(app.CURRENT_FILE, schedule)
         app.save_json(app.PREVIOUS_FILE, schedule)

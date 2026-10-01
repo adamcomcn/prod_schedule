@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app
 from db import db_conn
+from helpers import assign_job
 from werkzeug.security import generate_password_hash
 
 HEADERS = ['Daemco Purchase Order', 'Item Code', 'Item Description',
@@ -32,6 +33,7 @@ class PilotFixTests(unittest.TestCase):
                 'INSERT INTO users (username,password_hash,role) VALUES (?,?,?)',
                 ('inspector-test', generate_password_hash('inspector-test-password'),
                  'inspector'))
+        assign_job(JOB_KEY, 'inspector-test')
         schedule = {'MELBOURNE': [
             HEADERS, ['PO-1', 'RSV100', 'Valve DN100', 'Supplier A', '10', 'NO']]}
         app.save_json(app.CURRENT_FILE, schedule)

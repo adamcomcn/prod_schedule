@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app
 from db import db_conn
+from helpers import assign_job
 from PIL import Image
 from werkzeug.security import generate_password_hash
 
@@ -37,6 +38,7 @@ class PdfReportTests(unittest.TestCase):
                 'INSERT INTO users (username,password_hash,role) VALUES (?,?,?)',
                 ('pdf-inspector', generate_password_hash('pdf-inspector-pw'), 'inspector'))
             uid = conn.execute("SELECT id FROM users WHERE username='pdf-inspector'").fetchone()[0]
+        assign_job(JOB, 'pdf-inspector')
         schedule = {'MELBOURNE': [HEADERS, ['DPL9', 'PO-9', 'RSV0100FL', '阀门 DN100 Valve', '12',
                                             '2026-10-20', 'NO']]}
         app.save_json(app.CURRENT_FILE, schedule)

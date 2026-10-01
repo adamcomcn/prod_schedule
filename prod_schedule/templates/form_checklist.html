@@ -76,6 +76,12 @@
     </div>
   </div>
 
+  {% if not can_inspect %}
+  <div class="card" style="background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; font-size:.88rem;">
+    &#128274; {{ inspect_block_message }}
+    <div style="color:#3b82f6; font-size:.8rem; margin-top:2px;">{{ tr('可以查看下方的历史检验报告。', 'You can still view the past reports below.') }}</div>
+  </div>
+  {% else %}
   <!-- Submission form -->
   <div class="card">
     <form method="POST">
@@ -91,8 +97,12 @@
         </div>
         <div class="form-group" style="margin-bottom:8px;">
           <label>{{ tr('检验员', 'Inspector Name') }} *</label>
+          {% if g.can_assign %}
           <input type="text" name="inspector" required placeholder="{{ tr('姓名', 'Full name') }}"
-                 value="{{ g.username }}">
+                 value="{{ g.display_name or g.username }}">
+          {% else %}
+          <input type="text" name="inspector" value="{{ g.display_name or g.username }}" readonly style="background:#f9fafb;">
+          {% endif %}
         </div>
         <div class="form-group" style="margin-bottom:8px;">
           <label>{{ tr('检验日期', 'Inspection Date') }} *</label>
@@ -185,6 +195,8 @@
       </div>
     </form>
   </div>
+
+  {% endif %}
 
   <!-- Past responses -->
   {% if past_responses %}

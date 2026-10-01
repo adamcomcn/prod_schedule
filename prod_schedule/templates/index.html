@@ -101,6 +101,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 {% endblock %}
 
 {% block content %}
+{% set my_keys = my_open_job_keys() %}
 <div class="page" style="padding-bottom:0; padding-top: 16px;">
   {% if g.is_admin and has_pending_upload() %}
   <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
@@ -335,10 +336,12 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           </td>
           <td class="inspect-col">
             {% if ns.order %}
+            {% if insp or my_keys is none or job_key in my_keys %}
             <a href="{{ url_for('inspect_form', job_key=job_key) }}"
                class="btn btn-sm {% if insp %}btn-outline{% else %}btn-success{% endif %}">
               &#128203; {% if insp %}{{ tr('查看', 'View') }}{% else %}{{ tr('检验', 'Inspect') }}{% endif %}
             </a>
+            {% endif %}
             {% if insp %}
             <a href="{{ url_for('inspection_report_pdf', job_key=job_key) }}" target="_blank"
                class="btn btn-sm btn-outline" title="{{ tr('最新检验报告 PDF', 'Latest inspection report (PDF)') }}">PDF</a>
@@ -414,10 +417,12 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           </td>
           <td class="inspect-col">
             {% if ns2.order %}
+            {% if insp2 or my_keys is none or shipped_key in my_keys %}
             <a href="{{ url_for('inspect_form', job_key=shipped_key) }}"
                class="btn btn-sm {% if insp2 %}btn-outline{% else %}btn-success{% endif %}">
               &#128203; {% if insp2 %}{{ tr('查看', 'View') }}{% else %}{{ tr('检验', 'Inspect') }}{% endif %}
             </a>
+            {% endif %}
             {% endif %}
           </td>
         </tr>
@@ -539,10 +544,11 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
                 {% endif %}
                 <br>
               {% endif %}
+              {% set can_do = my_keys is none or job.job_key in my_keys %}
               <a href="{{ url_for('inspect_form', job_key=job.job_key) }}"
-                 class="btn btn-sm {% if insp %}btn-outline{% else %}btn-success{% endif %}"
+                 class="btn btn-sm {% if insp or not can_do %}btn-outline{% else %}btn-success{% endif %}"
                  style="margin-top:4px; font-size:.72rem; padding:3px 10px;">
-                &#128203; {% if insp %}{{ tr('查看', 'View') }}{% else %}{{ tr('开始检验', 'Inspect') }}{% endif %}
+                &#128203; {% if insp or not can_do %}{{ tr('查看', 'View') }}{% else %}{{ tr('开始检验', 'Inspect') }}{% endif %}
               </a>
             </td>
           </tr>

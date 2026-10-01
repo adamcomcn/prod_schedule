@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import app
 import pdf_report
 from db import db_conn
+from helpers import assign_job
 
 JOB = 'MEL|PO-1|ITEM'
 LINKS = {'inspect': 'https://x.test/inspect/a', 'pdf': 'https://x.test/inspect/a/report.pdf'}
@@ -112,6 +113,7 @@ class EndToEndMailTests(unittest.TestCase):
                              (u, generate_password_hash(u * 6), role))
             ids = {r['username']: r['id'] for r in conn.execute('SELECT id, username FROM users')}
         job = 'MELBOURNE|PO-7|UMC100'
+        assign_job(job, 'insp')
         H = ['Order Number', 'Daemco Purchase Order', 'Item Code', 'Item Description', 'Quantity']
         sched = {'MELBOURNE': [H, ['DPL7', 'PO-7', 'UMC100', 'Coupling', '40']]}
         app.save_json(app.CURRENT_FILE, sched); app.save_json(app.PREVIOUS_FILE, sched)

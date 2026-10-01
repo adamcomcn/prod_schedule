@@ -2330,6 +2330,99 @@ def find_job(job_key):
     return job_info
 
 
+def job_task(job_key):
+    """The inspection task for a job (with the assignee's name) or None."""
+    with db_conn() as conn:
+        return conn.execute(
+            "SELECT t.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS assignee_name "
+            'FROM inspection_tasks t LEFT JOIN users u ON u.id = t.assigned_to '
+            'WHERE t.job_key=?', (job_key,)).fetchone()
+
+
+def inspect_permission(job_key):
+    """(allowed, message): may the current user submit an inspection / checklist
+    for this job? Lead and admin always; inspectors only for tasks assigned to
+    them that are not closed. Anyone may still view the job and its reports."""
+    if g.get('can_assign'):
+        return True, ''
+    task = job_task(job_key)
+    if not task or not task['assigned_to']:
+        return False, tr('此订单尚未分配检验任务，请联系检验主管分配后再检验。',
+                         'This job has not been assigned yet. Ask the lead inspector to assign it.')
+    if task['assigned_to'] != g.user_id:
+        name = task['assignee_name'] or ''
+        return False, tr(f'此任务已分配给 {name}，你只能查看。',
+                         f'This task is assigned to {name}; you can only view it.')
+    if task['status'] == 'Closed':
+        return False, tr('此任务已被关闭，如需检验请联系检验主管。',
+                         'This task has been closed. Ask the lead inspector if it still needs an inspection.')
+    return True, ''
+
+
+def my_open_job_keys():
+    """Job keys the current user may inspect (None = every job: lead/admin)."""
+    if g.get('can_assign'):
+        return None
+    with db_conn() as conn:
+        return {r['job_key'] for r in conn.execute(
+            "SELECT job_key FROM inspection_tasks WHERE assigned_to=? "
+            "AND IFNULL(status, '') != 'Closed'", (g.user_id,))}
+
+
+def inspector_display_name():
+    return g.get('display_name') or g.get('username', '')
+
+
+@app.route('/inspect/<path:job_key>/can-submit')
+def inspect_can_submit(job_key):
+    """Checked by the inspection form just before uploading, so a refused
+    submit never throws away the inspector's photos."""
+    allowed, message = inspect_permission(job_key)
+    return jsonify(ok=allowed, message=message)
+
+
+@app.route('/inspect/<path:job_key>/assign', methods=['POST'])
+def inspect_assign(job_key):
+    """Lead / admin assigns a job from its inspection page; creates the task
+    first when the job has none (e.g. fully shipped jobs missing a QA BRT)."""
+    if not g.can_assign:
+        abort(403)
+    back = redirect(url_for('inspect_form', job_key=job_key))
+    note = request.form.get('note', '').strip()[:500]
+    with db_conn() as conn:
+        assignee = conn.execute(
+            "SELECT id, username, display_name, email FROM users "
+            "WHERE id=? AND active=1 AND role IN ('lead', 'inspector')",
+            (request.form.get('assignee_id', ''),)).fetchone()
+    if not assignee:
+        flash(tr('请选择检验员', 'Choose an inspector'), 'error')
+        return back
+    task = job_task(job_key)
+    if not task:
+        job = find_job(job_key)
+        if not job:
+            abort(404)
+        with db_conn() as conn:
+            conn.execute(
+                'INSERT INTO inspection_tasks (job_key, order_number, region, item_code, description, '
+                'supplier, quantity, est_completion, must_ship, week_label, status) '
+                'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                (job_key, job.get('Order Number', ''), job.get('region', ''), job.get('Item Code', ''),
+                 job.get('Item Description', ''), job.get('Supplier') or job.get('Foundry') or '',
+                 str(job.get('Quantity', '')), job.get('Estimated Completion Date', ''),
+                 job.get('Must Ship Date', ''), load_config().get('upload_date', ''), 'Pending'))
+        task = job_task(job_key)
+    with db_conn() as conn:
+        conn.execute(
+            "UPDATE inspection_tasks SET assigned_to=?, assigned_by=?, assigned_at=?, assign_note=?, "
+            "status=CASE WHEN status='Closed' THEN 'Pending' ELSE status END WHERE id=?",
+            (assignee['id'], g.username, datetime.now().strftime('%Y-%m-%d %H:%M'), note, task['id']))
+    name = assignee['display_name'] or assignee['username']
+    ok, msg = _send_assignment_email([dict(job_task(job_key))], assignee, note)
+    flash(tr(f'已分配给 {name}。', f'Assigned to {name}. ') + msg, 'success' if ok else 'warning')
+    return back
+
+
 @app.route('/inspect/<path:job_key>')
 def inspect_form(job_key):
     job_info = find_job(job_key)
@@ -2423,6 +2516,10 @@ def inspect_form(job_key):
                            auto_inspectors=auto_inspectors,
                            matched_category=matched_category,
                            evidence_reqs=evidence_reqs,
+                           can_inspect=inspect_permission(job_key)[0],
+                           inspect_block_message=inspect_permission(job_key)[1],
+                           task=job_task(job_key),
+                           assignees=_assignable() if g.can_assign else [],
                            now_date=datetime.now().strftime('%Y-%m-%d'),
                            google_configured=bool(config.get('sheet_id') and google_credentials_configured()))
 
@@ -2431,12 +2528,20 @@ INSPECTION_RESULTS = {'Pass', 'Fail', 'Partial Pass'}
 @app.route('/inspect/<path:job_key>/submit', methods=['POST'])
 def submit_inspection(job_key):
     form = request.form
+    allowed, message = inspect_permission(job_key)
+    if not allowed:
+        flash(message, 'error')
+        return redirect(url_for('inspect_form', job_key=job_key))
+    # Inspectors always report under their own name; lead/admin may record
+    # an inspection on someone else's behalf.
+    inspector_name = (form.get('inspector_name', '').strip() if g.can_assign
+                      else inspector_display_name())
 
     # ── Validate before anything is written ──────────────────────────────
     errors = []
     if form.get('result', '') not in INSPECTION_RESULTS:
         errors.append(tr('请选择总体检验结果', 'Please choose an overall result'))
-    if not form.get('inspector_name', '').strip():
+    if not inspector_name:
         errors.append(tr('请填写检验员', 'Inspector name is required'))
     if not form.get('inspection_date', '').strip():
         errors.append(tr('请填写检验日期', 'Inspection date is required'))
@@ -2460,7 +2565,7 @@ def submit_inspection(job_key):
         'item_description':  form.get('item_description', ''),
         'supplier':          form.get('supplier', ''),
         'quantity_ordered':  form.get('quantity_ordered', ''),
-        'inspector_name':    form.get('inspector_name', ''),
+        'inspector_name':    inspector_name,
         'inspection_date':   form.get('inspection_date', ''),
         'quantity_inspected':form.get('quantity_inspected', ''),
         'quantity_passed':   form.get('quantity_passed', ''),
@@ -3808,6 +3913,11 @@ def task_close():
     return back
 
 
+def _assignable():
+    with db_conn() as conn:
+        return assignable_users(conn)
+
+
 def assignable_users(conn):
     return conn.execute(
         "SELECT id, username, display_name, email, role FROM users "
@@ -3899,6 +4009,7 @@ TASK_STATUSES = ('Pending', 'In Progress', 'Completed', 'On Hold', 'Closed')
 # Statuses an inspector can pick on their own tasks ('Closed' is lead/admin only).
 INSPECTOR_TASK_STATUSES = ('Pending', 'In Progress', 'Completed', 'On Hold')
 app.jinja_env.globals['TASK_STATUSES'] = TASK_STATUSES
+app.jinja_env.globals['my_open_job_keys'] = my_open_job_keys
 app.jinja_env.globals['INSPECTOR_TASK_STATUSES'] = INSPECTOR_TASK_STATUSES
 # 'Closed' = closed by the lead without an inspection (order gone / not needed)
 DONE_STATUSES = ('Completed', 'Closed')
@@ -3997,6 +4108,10 @@ def inspect_checklist(job_key):
     sections = json.loads(tpl['sections_json'] or '[]')
 
     if request.method == 'POST':
+        allowed, message = inspect_permission(job_key)
+        if not allowed:
+            flash(message, 'error')
+            return redirect(url_for('inspect_checklist', job_key=job_key, tpl=tpl_id))
         f = request.form
         answers = {}
         for sect_idx, sect in enumerate(sections):
@@ -4016,7 +4131,8 @@ def inspect_checklist(job_key):
                 '(job_key,template_id,template_name,dpl_number,inspector,insp_date,answers,overall,summary)'
                 ' VALUES (?,?,?,?,?,?,?,?,?)',
                 (job_key, tpl['id'], tpl['name'],
-                 f.get('dpl_number','').strip(), f.get('inspector','').strip(),
+                 f.get('dpl_number','').strip(),
+                 f.get('inspector','').strip() if g.can_assign else inspector_display_name(),
                  f.get('insp_date','').strip(),
                  json.dumps(answers, ensure_ascii=False), overall, summary))
 
@@ -4031,6 +4147,8 @@ def inspect_checklist(job_key):
     return render_template('form_checklist.html',
                            job=job_info, tpl=tpl, sections=sections,
                            past_responses=past_responses,
+                           can_inspect=inspect_permission(job_key)[0],
+                           inspect_block_message=inspect_permission(job_key)[1],
                            now_date=datetime.now().strftime('%Y-%m-%d'))
 
 

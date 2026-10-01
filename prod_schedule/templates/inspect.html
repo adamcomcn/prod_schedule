@@ -91,6 +91,17 @@ input[name=result] { display:none; }
 .ev-tag-pass { background:#d1fae5; color:#065f46; }
 .ev-tag-fail { background:#fee2e2; color:#991b1b; }
 .ev-tag-pend { background:#f3f4f6; color:#6b7280; }
+.assign-strip { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;
+                background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:10px 14px; margin-bottom:12px;
+                font-size:.88rem; }
+.assign-strip.assign-mine { background:#f0fdf4; border-color:#86efac; }
+.assign-meta { color:#6b7280; font-size:.78rem; }
+.assign-form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.assign-form select, .assign-form input { width:auto; min-width:150px; padding:6px 10px; }
+.readonly-note { background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; border-radius:10px;
+                 padding:10px 14px; margin-bottom:12px; font-size:.88rem; }
+.readonly-note span { display:block; color:#3b82f6; font-size:.8rem; margin-top:2px; }
+.readonly-card { color:#6b7280; font-size:.88rem; }
 {% endblock %}
 
 {% block content %}
@@ -108,7 +119,39 @@ input[name=result] { display:none; }
 
 <div class="page">
 
-  {% if matched_tpl %}
+  {# ── Assignment: who owns this job; lead/admin can (re)assign here ── #}
+  <div class="assign-strip {{ 'assign-mine' if task and task.assigned_to == g.user_id else '' }}">
+    <div class="assign-who">
+      &#128100; {{ tr('负责人', 'Assigned to') }}:
+      {% if task and task.assigned_to %}
+        <strong>{{ task.assignee_name }}</strong>
+        <span class="assign-meta">· {{ task.status|status_label }}{% if task.assigned_by %} · {{ tr('分配人', 'by') }} {{ task.assigned_by }} {{ task.assigned_at }}{% endif %}</span>
+        {% if task.assign_note %}<div class="assign-meta">{{ tr('备注', 'Note') }}: {{ task.assign_note }}</div>{% endif %}
+      {% else %}
+        <strong style="color:#b45309;">{{ tr('未分配', 'Unassigned') }}</strong>
+      {% endif %}
+    </div>
+    {% if g.can_assign %}
+    <form method="POST" action="{{ url_for('inspect_assign', job_key=job.job_key) }}" class="assign-form">
+      <select name="assignee_id" required>
+        <option value="" disabled selected>{{ tr('分配给…', 'Assign to…') }}</option>
+        {% for u in assignees %}
+        <option value="{{ u.id }}">{{ u.display_name or u.username }}{% if u.role == 'lead' %} ({{ tr('主管', 'lead') }}){% endif %}{% if u.id == g.user_id %} — {{ tr('我', 'me') }}{% endif %}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="note" maxlength="500" placeholder="{{ tr('备注（选填）', 'Note (optional)') }}">
+      <button type="submit" class="btn btn-primary btn-sm">&#9993; {{ tr('分配' if not (task and task.assigned_to) else '重新分配', 'Assign' if not (task and task.assigned_to) else 'Reassign') }}</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if not can_inspect %}
+  <div class="readonly-note">&#128274; {{ inspect_block_message }}
+    <span>{{ tr('可以查看订单信息和历史检验报告。', 'You can still view the job details and past inspection reports.') }}</span>
+  </div>
+  {% endif %}
+
+  {% if matched_tpl and can_inspect %}
   <div style="background:#eff6ff; border:1.5px solid #3b82f6; border-radius:10px;
               padding:14px 18px; margin-bottom:16px; display:flex;
               align-items:center; gap:14px; flex-wrap:wrap;">
@@ -129,8 +172,9 @@ input[name=result] { display:none; }
 
   <div class="inspect-layout">
 
-    <!-- LEFT: form -->
+    <!-- LEFT: form (only for the assigned inspector, lead or admin) -->
     <div>
+      {% if can_inspect %}
       <div class="card">
         <div class="section-title">&#128203; {{ tr('新建检验报告', 'New Inspection Report') }}</div>
         <form method="POST"
@@ -139,6 +183,10 @@ input[name=result] { display:none; }
               id="inspect-form"
               data-max-bytes="{{ config['MAX_CONTENT_LENGTH'] or 0 }}">
 
+          <div id="draft-note" style="display:none; background:#fffbeb; border:1px solid #fcd34d; color:#92400e;
+               border-radius:8px; padding:8px 12px; margin-bottom:10px; font-size:.8rem;">
+            &#128190; {{ tr('已恢复上次未提交的草稿（照片和文件需要重新选择）。', 'Restored your unsent draft (photos and files must be chosen again).') }}
+          </div>
           <input type="hidden" name="region"           value="{{ job.get('region', '') }}">
           <input type="hidden" name="order_number"     value="{{ job.get('Order Number', '') }}">
           <input type="hidden" name="item_code"        value="{{ job.get('Item Code', '') }}">
@@ -156,7 +204,11 @@ input[name=result] { display:none; }
                 </span>
                 {% endif %}
               </label>
-              {% if auto_inspectors|length == 1 %}
+              {% if not g.can_assign %}
+                <input type="text" name="inspector_name" value="{{ g.display_name or g.username }}" readonly
+                       style="background:#f9fafb;">
+                <div style="font-size:.75rem; color:#6b7280; margin-top:3px;">{{ tr('以你的账号名称提交', 'Submitted under your account name') }}</div>
+              {% elif auto_inspectors|length == 1 %}
                 <input type="text" name="inspector_name" required value="{{ auto_inspectors[0] }}"
                        style="background:#f0fdf4; border-color:#86efac;">
                 <div style="font-size:.75rem; color:#059669; margin-top:3px;">&#10003; {{ tr('已根据产品类别自动分配', 'Auto-assigned from product category') }}</div>
@@ -358,6 +410,12 @@ input[name=result] { display:none; }
           </div>
         </form>
       </div>
+      {% else %}
+      <div class="card readonly-card">
+        &#128274; {{ tr('只读模式：你可以查看右侧的订单信息和历史报告，但不能提交新的检验。',
+                      'Read-only: you can view the job details and past reports on the right, but cannot submit a new inspection.') }}
+      </div>
+      {% endif %}
     </div>
 
     <!-- RIGHT: job info + past inspections -->
@@ -609,8 +667,58 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// ── Draft autosave (text fields only; files cannot be stored) ───────────────
+const inspectForm = document.getElementById('inspect-form');
+const DRAFT_KEY = 'inspectDraft:' + {{ job.job_key|tojson }};
+const REPORT_COUNT = {{ past_inspections|length }};
+function saveDraft() {
+  if (!inspectForm) return;
+  const data = {};
+  inspectForm.querySelectorAll('input, select, textarea').forEach(el => {
+    if (!el.name || el.type === 'file' || el.type === 'hidden' && el.name !== 'result' && !el.name.startsWith('ev_result_')) return;
+    if (el.type === 'checkbox') { (data[el.name] = data[el.name] || []); if (el.checked) data[el.name].push(el.value); }
+    else if (!el.readOnly) data[el.name] = el.value;
+  });
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({reports: REPORT_COUNT, data})); } catch (e) {}
+}
+function restoreDraft() {
+  if (!inspectForm) return;
+  let draft;
+  try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) { draft = null; }
+  if (!draft) return;
+  // A report was submitted after this draft was saved: the draft is done.
+  if (draft.reports !== REPORT_COUNT) { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} return; }
+  Object.entries(draft.data || {}).forEach(([name, value]) => {
+    inspectForm.querySelectorAll('[name="' + CSS.escape(name) + '"]').forEach(el => {
+      if (el.type === 'checkbox') el.checked = Array.isArray(value) && value.includes(el.value);
+      else if (!el.readOnly) el.value = value;
+    });
+  });
+  const result = draft.data && draft.data.result;
+  if (result) {
+    const btn = inspectForm.querySelector('.result-btn[data-val="' + CSS.escape(result) + '"]');
+    if (btn) setResult(result, btn);
+  }
+  Object.entries(draft.data || {}).forEach(([name, value]) => {
+    if (!name.startsWith('ev_result_') || !value) return;
+    const etype = name.slice(10);
+    const row = document.getElementById('ev-result-' + etype)?.parentElement?.querySelector('.ev-result-row');
+    const btn = row && [...row.querySelectorAll('.ev-result-btn')].find(b => (b.getAttribute('onclick') || '').includes("'" + value + "'"));
+    if (btn) evSetResult(etype, value, btn);
+  });
+  const note = document.getElementById('draft-note');
+  if (note) note.style.display = 'block';
+}
+if (inspectForm) {
+  restoreDraft();
+  inspectForm.addEventListener('input', saveDraft);
+  inspectForm.addEventListener('change', saveDraft);
+  document.querySelectorAll('.result-btn, .ev-result-btn').forEach(b => b.addEventListener('click', () => setTimeout(saveDraft, 0)));
+}
+
 // ── Pre-submit checks (the server validates too) ────────────────────────────
-document.getElementById('inspect-form').addEventListener('submit', function (e) {
+let permissionChecked = false;
+if (inspectForm) inspectForm.addEventListener('submit', function (e) {
   if (!document.getElementById('result-input').value) {
     e.preventDefault();
     alert({{ tr('请选择总体检验结果（合格 / 不合格 / 部分合格）', 'Please choose an overall result (Pass / Fail / Partial Pass).')|tojson }});
@@ -628,6 +736,32 @@ document.getElementById('inspect-form').addEventListener('submit', function (e) 
     return;
   }
   const btn = this.querySelector('button[type=submit]');
+  if (!permissionChecked) {
+    // Ask the server first: if the task was reassigned meanwhile, stop here
+    // so the selected photos and entries stay on the page.
+    e.preventDefault();
+    const form = this;
+    if (btn) { btn.disabled = true; btn.textContent = {{ tr('检查中…', 'Checking…')|tojson }}; }
+    fetch({{ url_for('inspect_can_submit', job_key=job.job_key)|tojson }}, {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(res => {
+        if (!res.ok) {
+          if (btn) { btn.disabled = false; btn.textContent = {{ tr('提交检验报告', 'Submit Inspection Report')|tojson }}; }
+          saveDraft();
+          alert(res.message);
+          return;
+        }
+        permissionChecked = true;
+        if (btn) btn.textContent = {{ tr('提交中…', 'Submitting…')|tojson }};
+        HTMLFormElement.prototype.submit.call(form);
+      })
+      .catch(() => {
+        // Network hiccup: let the server decide (it re-checks the permission).
+        permissionChecked = true;
+        HTMLFormElement.prototype.submit.call(form);
+      });
+    return;
+  }
   if (btn) { btn.disabled = true; btn.textContent = {{ tr('提交中…', 'Submitting…')|tojson }}; }
 });
 </script>
