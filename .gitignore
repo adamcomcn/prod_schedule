@@ -7,6 +7,7 @@
 !/requirements.txt
 !/.python-version
 !/RAILWAY_DEPLOYMENT.md
+!/.github/
 
 # ── 运行时数据（真实业务数据，绝对不提交）────────────────────────────────────
 /prod_schedule/data/app.db
