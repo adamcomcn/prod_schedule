@@ -413,6 +413,23 @@ input[name=result] { display:none; }
                class="btn btn-sm btn-outline" style="padding:2px 8px; font-size:.72rem;"
                title="{{ tr('PDF 检验报告', 'PDF inspection report') }}">&#128196; PDF</a>
           </div>
+          {% set rv = reviews.get(pidx) %}
+          <div class="hq-mail">
+            {% if rv and rv.status == 'approved' %}
+              <span class="hq-ok">&#10004; {{ tr('已审核通过', 'Approved') }} · {{ rv.reviewer_name }}{% if rv.self_review %} ({{ tr('自审', 'self-review') }}){% endif %} · {{ rv.reviewed_at }}{% if rv.comment %} — {{ rv.comment }}{% endif %}</span>
+            {% elif rv %}
+              <span class="hq-fail">&#8617; {{ tr('已退回', 'Returned') }} · {{ rv.reviewer_name }} · {{ rv.reviewed_at }} — {{ rv.comment }}</span>
+            {% else %}
+              <span class="hq-pending">&#9203; {{ tr('待审核', 'Pending review') }}</span>
+            {% endif %}
+            {% if g.can_assign %}
+            <form method="POST" action="{{ url_for('review_inspection', job_key=job.job_key, index=pidx) }}" style="display:inline-flex; gap:4px; align-items:center; flex-wrap:wrap;">
+              <input type="text" name="comment" placeholder="{{ tr('审核意见（退回必填）', 'Comment (required to return)') }}" maxlength="500" style="padding:2px 6px; font-size:.75rem; min-width:170px;">
+              <button type="submit" name="action" value="approve" class="hq-resend">{{ tr('审核通过', 'Approve') }}</button>
+              <button type="submit" name="action" value="reject" class="hq-resend">{{ tr('退回', 'Return') }}</button>
+            </form>
+            {% endif %}
+          </div>
           {% set em = report_emails.get(pidx) %}
           {% if em or g.can_assign %}
           <div class="hq-mail">

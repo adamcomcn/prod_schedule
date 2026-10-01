@@ -829,6 +829,19 @@ def init_db():
             edited_at  TEXT DEFAULT (datetime('now', 'localtime'))
         )''')
 
+        # Review (sign-off) of each submitted inspection report
+        conn.execute('''CREATE TABLE IF NOT EXISTS inspection_reviews (
+            job_key        TEXT NOT NULL,
+            insp_index     INTEGER NOT NULL,
+            status         TEXT NOT NULL,
+            reviewer       TEXT DEFAULT '',
+            reviewer_name  TEXT DEFAULT '',
+            reviewed_at    TEXT DEFAULT '',
+            comment        TEXT DEFAULT '',
+            self_review    INTEGER DEFAULT 0,
+            PRIMARY KEY (job_key, insp_index)
+        )''')
+
         # Defect codes
         existing_dc = {r[0] for r in conn.execute('SELECT code FROM defect_codes').fetchall()}
         for row in _DEFECT_SEEDS:
