@@ -711,6 +711,19 @@ def fmt_date(val):
         return str(val).replace(' 00:00:00', '')
     return str(val)
 
+def count_unique_jobs(sheet, rows):
+    """Orders in a sheet, counted the way the dashboard counts them: one per
+    order+item (split lots merge), rows without an order number ignored."""
+    if not rows or len(rows) < 2:
+        return 0
+    keys = set()
+    for row in rows[1:]:
+        jk = make_job_key(sheet, row, rows[0])
+        if jk.split('|')[1]:
+            keys.add(jk)
+    return len(keys)
+
+
 def make_job_key(sheet_name, row, headers):
     def col(name):
         try:
@@ -1448,6 +1461,9 @@ def _format_export_sheet(worksheet):
             45, max(12, max(len(str(cell.value or '')) for cell in column) + 2))
         worksheet.column_dimensions[column[0].column_letter].width = width
 
+ONTIME_MIN_SAMPLE = 5   # below this the on-time rate is shown as indicative only
+
+
 @app.route('/dashboard')
 def dashboard():
     current     = load_schedule(CURRENT_FILE)
@@ -1500,6 +1516,7 @@ def dashboard():
         return 'pending'
 
     region_stats = {}
+    seen_all = set()      # every order counted on this page
     for sheet in current.keys():
         rows      = current.get(sheet, [])
         prev_rows = previous.get(sheet, [])
@@ -1516,7 +1533,12 @@ def dashboard():
                     continue
                 seen_jk.add(jk)
                 status = statuses.get(jk, 'new')
-                stats[status] += 1
+                seen_all.add(jk)
+                if status == 'typo':          # a suspected-typo row is still a new order
+                    stats['new'] += 1
+                    stats['typo'] += 1
+                else:
+                    stats[status] += 1
                 stats['total'] += 1
                 if status in ('partially_shipped',):
                     if not inspections.get(jk):
@@ -1535,6 +1557,7 @@ def dashboard():
                 continue
             stats['shipped'] += 1
             stats['total']   += 1
+            seen_all.add(jk)
             if not inspections.get(jk):
                 stats['qa_violations'] += 1
             if jk in valve_keys:
@@ -1613,7 +1636,14 @@ def dashboard():
         sc['max_weekly'] = max(sc['weekly'].values()) if any(sc['weekly'].values()) else 1
         rated = sc['on_time'] + sc['late']
         sc['ontime_pct'] = round(sc['on_time'] / rated * 100) if rated else None
+        sc['rated'] = rated
+        sc['small_sample'] = 0 < rated < ONTIME_MIN_SAMPLE
         inspector_stats.append((name, sc))
+
+    outside = {k: v for k, v in inspections.items() if v and k not in seen_all}
+    inspections_outside = {'jobs': len(outside), 'reports': sum(len(v) for v in outside.values())}
+    inspections_all = {'jobs': sum(1 for v in inspections.values() if v),
+                       'reports': sum(len(v) for v in inspections.values())}
 
     prev_total       = totals['not_shipped'] + totals['partially_shipped'] + totals['shipped']
     curr_in_schedule = totals['new']         + totals['not_shipped']       + totals['partially_shipped']
@@ -1621,24 +1651,33 @@ def dashboard():
     # ── Weekly region trend data for chart ───────────────────────────────
     with db_conn() as conn:
         _snap_rows = conn.execute(
-            'SELECT week_label, week_date, region, total_orders '
-            'FROM weekly_snapshots ORDER BY week_date, region'
-        ).fetchall()
+            'SELECT rowid AS rid, week_label, week_date, region, total_orders '
+            'FROM weekly_snapshots ORDER BY rid').fetchall()
 
-    _all_regions = sorted({r['region'] for r in _snap_rows})
-    _week_order  = sorted({(r['week_date'], r['week_label']) for r in _snap_rows})
-    _chart_labels   = [lbl for _, lbl in _week_order]
-    _chart_date_map = {lbl: dt for dt, lbl in _week_order}
-
-    _region_series = {}
-    for region in _all_regions:
-        _region_series[region] = {r['week_label']: r['total_orders']
-                                   for r in _snap_rows if r['region'] == region}
-
-    _chart_datasets = [
-        {'region': r, 'data': [_region_series[r].get(lbl, None) for lbl in _chart_labels]}
-        for r in _all_regions
-    ]
+    # One point per ISO week = the last upload of that week (several uploads in
+    # a week, e.g. corrections, must not look like several weeks).
+    _by_week = {}
+    for r in _snap_rows:
+        try:
+            y, w, _ = datetime.strptime(r['week_date'], '%Y-%m-%d').isocalendar()
+        except (TypeError, ValueError):
+            continue
+        _by_week.setdefault((y, w), {})[r['region']] = (r['week_date'], r['total_orders'])
+    _weeks = sorted(_by_week)
+    _chart_labels = [f"{y}-W{w:02d}" for y, w in _weeks]
+    _chart_dates = [max(d for d, _ in _by_week[k].values()) for k in _weeks]
+    _all_regions = sorted({reg for v in _by_week.values() for reg in v})
+    _series = {reg: [(_by_week[k].get(reg) or (None, None))[1] for k in _weeks] for reg in _all_regions}
+    # the newest point is the schedule on screen: use the same numbers as the cards
+    if _weeks:
+        _live = {sheet: s['new'] + s['not_shipped'] + s['partially_shipped'] for sheet, s in region_stats.items()}
+        for reg in _all_regions:
+            if reg in _live:
+                _series[reg][-1] = _live[reg]
+            elif reg not in current:
+                _series[reg][-1] = None
+    _chart_datasets = [{'region': reg, 'data': _series[reg]} for reg in _all_regions
+                       if any(v for v in _series[reg])]
 
     return render_template('dashboard.html',
                            region_stats=region_stats,
@@ -1650,7 +1689,11 @@ def dashboard():
                            prev_total=prev_total,
                            curr_in_schedule=curr_in_schedule,
                            chart_labels=_chart_labels,
-                           chart_datasets=_chart_datasets)
+                           chart_dates=_chart_dates,
+                           chart_datasets=_chart_datasets,
+                           ontime_min=ONTIME_MIN_SAMPLE,
+                           inspections_all=inspections_all,
+                           inspections_outside=inspections_outside)
 
 
 def _upload_block_reason(data):
@@ -2063,7 +2106,7 @@ def _apply_schedule(data, baseline=False):
     _snap_date  = datetime.now().strftime('%Y-%m-%d')
     with db_conn() as conn:
         for _sheet, _rows in data.items():
-            _count = max(0, len(_rows) - 1)  # subtract header row
+            _count = count_unique_jobs(_sheet, _rows)
             if _count > 0:
                 conn.execute(
                     'INSERT OR REPLACE INTO weekly_snapshots '
