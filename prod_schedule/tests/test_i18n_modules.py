@@ -81,7 +81,8 @@ class I18nAndModuleTests(unittest.TestCase):
 
     def test_all_pilot_pages_render_in_both_languages(self):
         config = app.load_config()
-        config['modules'] = {'orders': True, 'suppliers': True, 'forms': True, 'products': True}
+        config['modules'] = {'orders': True, 'suppliers': True, 'forms': True, 'products': True,
+                             'regions': True, 'employees': True}
         app.save_json(app.CONFIG_FILE, config)
         for lang in ('zh', 'en'):
             self.client.get(f'/lang/{lang}')
@@ -98,7 +99,9 @@ class I18nAndModuleTests(unittest.TestCase):
         self.assertNotIn('href="/suppliers"', page)
         self.assertNotIn('href="/forms"', page)
         self.assertNotIn('href="/products"', page)
-        for path in ('/hr', '/training', '/knowledge', '/orders', '/suppliers', '/forms', '/products'):
+        self.assertNotIn('href="/regions"', page)
+        self.assertNotIn('href="/employees"', page)
+        for path in ('/hr', '/training', '/knowledge', '/orders', '/suppliers', '/forms', '/products', '/regions', '/employees'):
             self.assertEqual(self.client.get(path).status_code, 404, path)
 
     def test_admin_can_enable_module(self):
@@ -107,6 +110,9 @@ class I18nAndModuleTests(unittest.TestCase):
         self.assertEqual(self.client.get('/hr').status_code, 200)
         self.assertIn('href="/hr"', self.client.get('/').get_data(as_text=True))
         self.assertEqual(self.client.get('/training').status_code, 404)
+        # HR needs the employee records, so that page comes back with it
+        self.assertEqual(self.client.get('/employees').status_code, 200)
+        self.assertEqual(self.client.get('/regions').status_code, 404)
 
     def test_schedule_columns_can_be_hidden(self):
         page = self.client.get('/').get_data(as_text=True)
