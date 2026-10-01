@@ -136,6 +136,7 @@ tr.mine td { background:#f0fdf4; }
         ('In Progress', stats.status_counts.get('In Progress',0), '#3b82f6', '进行中'),
         ('Completed',   stats.status_counts.get('Completed',0),   '#10b981', '已完成'),
         ('On Hold',     stats.status_counts.get('On Hold',0),     '#f59e0b', '暂停'),
+        ('Closed',      stats.status_counts.get('Closed',0),      '#9ca3af', '已关闭'),
       ] %}
       {% for label, cnt, color, zh in status_list %}
       {% set pct = (cnt / stats.total * 100) | round(1) if stats.total else 0 %}
@@ -199,7 +200,7 @@ tr.mine td { background:#f0fdf4; }
       {% endif %}
 
       {# Completion vs overdue summary #}
-      {% set open_total = stats.total - stats.status_counts.get('Completed',0) %}
+      {% set open_total = stats.total - stats.status_counts.get('Completed',0) - stats.status_counts.get('Closed',0) %}
       {% if open_total > 0 %}
       <div style="margin-top:14px; padding-top:12px; border-top:1px solid #f1f5f9;
                   display:flex; justify-content:space-around; text-align:center;">
@@ -272,13 +273,13 @@ tr.mine td { background:#f0fdf4; }
     {# By Supplier (outstanding) #}
     <div class="stat-card">
       <div class="stat-card-title">
-        {{ tr('未完成任务 — 按供应商（前8）', 'Outstanding Tasks by Supplier (Top 8)') }}
+        {{ tr('未完成任务 — 按供应商', 'Outstanding Tasks by Supplier') }}
       </div>
       {% if stats.top_suppliers %}
         {% for sup, sv in stats.top_suppliers %}
         {% if sv['outstanding'] > 0 %}
         {% set pct = (sv['outstanding'] / stats.max_sup * 100) | round(1) %}
-        <div class="hbar-row">
+        <div class="hbar-row{% if loop.index > 8 %} sup-extra{% endif %}"{% if loop.index > 8 %} style="display:none"{% endif %}>
           <div class="hbar-label" title="{{ sup }}">{{ sup }}</div>
           <div class="hbar-wrap">
             <div class="hbar-fill" style="width:{{ pct }}%; background:#f97316;"></div>
@@ -292,6 +293,14 @@ tr.mine td { background:#f0fdf4; }
         </div>
         {% endif %}
         {% endfor %}
+        {% if stats.top_suppliers|length > 8 %}
+        <button type="button" id="supToggle" class="btn btn-sm btn-outline" style="margin-top:6px;"
+                onclick="var h=document.querySelectorAll('.sup-extra'); var show=h[0].style.display==='none';
+                         h.forEach(function(e){e.style.display=show?'flex':'none'});
+                         this.textContent=show?{{ tr('收起', 'Show top 8')|tojson }}:{{ tr('显示全部（' ~ stats.top_suppliers|length ~ '）', 'Show all (' ~ stats.top_suppliers|length ~ ')')|tojson }};">
+          {{ tr('显示全部（' ~ stats.top_suppliers|length ~ '）', 'Show all (' ~ stats.top_suppliers|length ~ ')') }}
+        </button>
+        {% endif %}
         <div class="hbar-legend">
           {{ tr('条形与数字 = 未完成任务数；', 'Bar and number = outstanding tasks; ') }}<span style="color:#059669;">✓ {{ tr('完成', 'done') }}</span> = {{ tr('该供应商已完成的任务数', 'completed tasks') }}
         </div>
@@ -389,6 +398,10 @@ tr.mine td { background:#f0fdf4; }
     <input type="text" name="note" maxlength="500" placeholder="{{ tr('备注（选填，会写入邮件）', 'Note (optional, included in the e-mail)') }}"
            style="flex:1; min-width:180px;">
     <button type="submit" class="btn btn-primary btn-sm">&#9993; {{ tr('分配并发邮件', 'Assign & e-mail') }}</button>
+    <button type="submit" class="btn btn-outline btn-sm" formaction="{{ url_for('task_close') }}" formnovalidate
+            onclick="return confirm({{ tr('关闭所选任务？关闭后不再统计、不再提醒（可在状态下拉里重新打开）。', 'Close the selected tasks? They stop counting and no reminders are sent (reopen from the status menu).')|tojson }});">
+      {{ tr('关闭所选', 'Close selected') }}
+    </button>
   </form>
   {% endif %}
 
@@ -416,6 +429,15 @@ tr.mine td { background:#f0fdf4; }
     <a href="{{ url_for('tasks', status='On Hold', scope=scope) }}"     class="{{ 'active' if status_filter=='On Hold' }}">
       {{ tr('暂停', 'On Hold') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('On Hold',0) if stats else 0 }})</span>
+    </a>
+    <a href="{{ url_for('tasks', status='Closed', scope=scope) }}"      class="{{ 'active' if status_filter=='Closed' and not orphan_only }}">
+      {{ tr('已关闭', 'Closed') }}
+      <span style="margin-left:4px; opacity:.6;">({{ stats.status_counts.get('Closed',0) if stats else 0 }})</span>
+    </a>
+    <a href="{{ url_for('tasks', orphan=1, scope=scope) }}" class="{{ 'active' if orphan_only }}"
+       title="{{ tr('未完成，但订单已不在当前排期（已出货或被移除）', 'Open tasks whose order is no longer in the current schedule (shipped or removed)') }}">
+      &#9888; {{ tr('订单已不在当前排期', 'Order not in current schedule') }}
+      <span style="margin-left:4px; opacity:.6;">({{ orphan_count }})</span>
     </a>
   </div>
 
@@ -447,7 +469,7 @@ tr.mine td { background:#f0fdf4; }
 
           {% set est = (t.est_completion or '')[:10] %}
           {% set days_left = days_until(t.est_completion, today) %}
-          {% if t.status == 'Completed' %}
+          {% if t.status in ['Completed', 'Closed'] %}
             {% set urg_cls = 'done' %}{% set row_cls = '' %}{% set days_label = '—' %}{% set days_cls = 'days-none' %}
           {% elif days_left is none %}
             {% set urg_cls = 'ok' %}{% set row_cls = '' %}{% set days_label = est or tr('无截止日', 'No due date') %}{% set days_cls = 'days-none' %}
@@ -474,6 +496,8 @@ tr.mine td { background:#f0fdf4; }
             <td>
               <a href="{{ url_for('inspect_form', job_key=t.job_key) }}"
                  style="font-weight:600;">{{ t.order_number }}</a>
+              {% if t.orphan %}<span class="badge" style="background:#fef3c7;color:#92400e;margin-left:4px;font-size:.66rem;"
+                    title="{{ tr('该订单已不在当前排期里（已出货或被移除），可关闭此任务', 'This order is no longer in the current schedule (shipped or removed); you can close the task') }}">&#9888; {{ tr('已不在排期', 'Not in schedule') }}</span>{% endif %}
             </td>
             <td><span style="font-family:monospace; background:#f3f4f6;
                 padding:2px 6px; border-radius:4px; font-size:.78rem;">
@@ -523,7 +547,7 @@ tr.mine td { background:#f0fdf4; }
                         style="border-color: {% if t.status=='Completed' %}#10b981
                                {% elif t.status=='In Progress' %}#3b82f6
                                {% else %}#d0d5dd{% endif %};">
-                  {% for s in ['Pending','In Progress','Completed','On Hold'] %}
+                  {% for s in ['Pending','In Progress','Completed','On Hold','Closed'] %}
                   <option value="{{ s }}" {{ 'selected' if t.status == s }}>{{ s|status_label }}</option>
                   {% endfor %}
                 </select>

@@ -171,7 +171,7 @@ app.jinja_env.globals['tr'] = tr
 app.jinja_env.globals['current_lang'] = current_lang
 
 _STATUS_LABELS = {
-    'Pending': '待检验', 'In Progress': '进行中', 'Completed': '已完成', 'On Hold': '暂停',
+    'Pending': '待检验', 'In Progress': '进行中', 'Completed': '已完成', 'On Hold': '暂停', 'Closed': '已关闭',
     'Pass': '合格', 'Fail': '不合格', 'Partial Pass': '部分合格', 'N/A': '不适用',
     'new': '新增', 'not_shipped': '未出货', 'partially_shipped': '部分出货',
     'shipped': '已出货', 'typo': '疑似笔误',
@@ -2119,7 +2119,7 @@ def _apply_schedule(data, baseline=False):
                                          "WHERE job_key=? AND IFNULL(supplier, '')=''", (sup, jk))
                         before = conn.execute(
                             "SELECT * FROM inspection_tasks WHERE job_key=? "
-                            "AND IFNULL(status, '') != 'Completed'", (jk,)).fetchone()
+                            "AND IFNULL(status, '') NOT IN ('Completed', 'Closed')", (jk,)).fetchone()
                         if not before:
                             continue
                         # Supplier: correct from the sheet, never blank it out
@@ -3412,7 +3412,7 @@ def send_due_reminders():
     today = date.today()
     with db_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM inspection_tasks WHERE IFNULL(status,'') != 'Completed'").fetchall()
+            "SELECT * FROM inspection_tasks WHERE IFNULL(status,'') NOT IN ('Completed', 'Closed')").fetchall()
         due = []
         for t in rows:
             d, _ = split_est(t['est_completion'])
@@ -3564,18 +3564,26 @@ def tasks():
     today = datetime.now().date()
 
     with db_conn() as conn:
-        every_task = conn.execute(
+        every_task = [dict(r) for r in conn.execute(
             "SELECT t.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS assignee_name "
             'FROM inspection_tasks t LEFT JOIN users u ON u.id = t.assigned_to '
             'ORDER BY t.est_completion ASC, t.created_at ASC'
-        ).fetchall()
+        ).fetchall()]
         assignees = assignable_users(conn)
+
+    # Open tasks whose order is no longer in the current schedule (shipped or removed)
+    in_schedule = set()
+    for sheet, sheet_rows in load_schedule(CURRENT_FILE).items():
+        for r in (sheet_rows or [])[1:]:
+            in_schedule.add(make_job_key(sheet, r, sheet_rows[0]))
+    for t in every_task:
+        t['orphan'] = t['status'] not in DONE_STATUSES and t['job_key'] not in in_schedule
 
     scope_counts = {
         'mine': sum(1 for t in every_task if t['assigned_to'] == g.user_id
-                    and t['status'] != 'Completed'),
+                    and t['status'] not in DONE_STATUSES),
         'unassigned': sum(1 for t in every_task if not t['assigned_to']
-                          and t['status'] != 'Completed'),
+                          and t['status'] not in DONE_STATUSES),
         'all': len(every_task),
     }
     if scope == 'mine':
@@ -3588,7 +3596,11 @@ def tasks():
     inspections = load_json(INSPECTIONS_CACHE, {})
 
     # Filtered view for the table
-    if status_filter:
+    orphan_only = request.args.get('orphan') == '1'
+    orphan_count = sum(1 for t in all_tasks if t['orphan'])
+    if orphan_only:
+        rows = [t for t in all_tasks if t['orphan']]
+    elif status_filter:
         rows = [t for t in all_tasks if t['status'] == status_filter]
     else:
         rows = all_tasks
@@ -3604,7 +3616,7 @@ def tasks():
     # Urgency counts (non-completed only)
     urg = defaultdict(int)
     for t in all_tasks:
-        if t['status'] == 'Completed':
+        if t['status'] in DONE_STATUSES:
             continue
         est_date = _parse_date(t['est_completion'])
         if not est_date:
@@ -3628,7 +3640,7 @@ def tasks():
         if t['status'] == 'Completed':
             region_data[r]['completed'] += 1
         est_date = _parse_date(t['est_completion'])
-        if est_date and est_date < today and t['status'] != 'Completed':
+        if est_date and est_date < today and t['status'] not in DONE_STATUSES:
             region_data[r]['overdue'] += 1
     region_stats = sorted(region_data.items(), key=lambda x: x[1]['total'], reverse=True)
     max_region = max((v['total'] for _, v in region_stats), default=1)
@@ -3639,9 +3651,11 @@ def tasks():
         s = (t['supplier'] or 'Unknown').strip() or 'Unknown'
         if t['status'] == 'Completed':
             sup_data[s]['completed'] += 1
-        else:
+        elif t['status'] != 'Closed':
             sup_data[s]['outstanding'] += 1
-    top_suppliers = sorted(sup_data.items(), key=lambda x: x[1]['outstanding'], reverse=True)[:8]
+    # every supplier with open tasks; the page shows the first 8 and can expand
+    top_suppliers = sorted(((k, v) for k, v in sup_data.items() if v['outstanding'] > 0),
+                           key=lambda x: x[1]['outstanding'], reverse=True)
     max_sup = max((v['outstanding'] for _, v in top_suppliers), default=1)
 
     # Inspection pass/fail
@@ -3669,7 +3683,27 @@ def tasks():
     review_queue = pending_reviews() if g.can_assign else []
     return render_template('tasks.html', review_queue=review_queue, tasks=rows, inspections=inspections,
                            today=today, status_filter=status_filter, stats=stats,
+                           orphan_only=orphan_only, orphan_count=orphan_count,
                            scope=scope, scope_counts=scope_counts, assignees=assignees)
+
+
+@app.route('/tasks/close', methods=['POST'])
+def task_close():
+    """Lead / admin closes tasks that no longer need an inspection."""
+    if not g.can_assign:
+        abort(403)
+    ids = [int(i) for i in request.form.getlist('task_ids') if i.isdigit()]
+    back = redirect(_safe_next_url(request.form.get('next')) or url_for('tasks'))
+    if not ids:
+        flash(tr('请先勾选要关闭的任务', 'Select at least one task first'), 'error')
+        return back
+    marks = ','.join('?' * len(ids))
+    with db_conn() as conn:
+        cur = conn.execute(
+            f"UPDATE inspection_tasks SET status='Closed' WHERE id IN ({marks}) "
+            "AND IFNULL(status,'') != 'Completed'", ids)
+    flash(tr(f'已关闭 {cur.rowcount} 个任务', f'Closed {cur.rowcount} task(s)'), 'success')
+    return back
 
 
 def assignable_users(conn):
@@ -3754,7 +3788,9 @@ def task_status_update(tid):
     return redirect(_safe_next_url(request.form.get('next')) or url_for('tasks'))
 
 
-TASK_STATUSES = ('Pending', 'In Progress', 'Completed', 'On Hold')
+TASK_STATUSES = ('Pending', 'In Progress', 'Completed', 'On Hold', 'Closed')
+# 'Closed' = closed by the lead without an inspection (order gone / not needed)
+DONE_STATUSES = ('Completed', 'Closed')
 
 
 def _update_task_after_inspection(job_key, result):
