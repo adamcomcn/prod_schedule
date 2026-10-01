@@ -820,6 +820,15 @@ def init_db():
             created_at  TEXT DEFAULT (datetime('now', 'localtime'))
         )''')
 
+        # Manual corrections of the supplier's completion date (typos)
+        conn.execute('''CREATE TABLE IF NOT EXISTS est_overrides (
+            job_key    TEXT PRIMARY KEY,
+            original   TEXT DEFAULT '',
+            corrected  TEXT DEFAULT '',
+            edited_by  TEXT DEFAULT '',
+            edited_at  TEXT DEFAULT (datetime('now', 'localtime'))
+        )''')
+
         # Defect codes
         existing_dc = {r[0] for r in conn.execute('SELECT code FROM defect_codes').fetchall()}
         for row in _DEFECT_SEEDS:

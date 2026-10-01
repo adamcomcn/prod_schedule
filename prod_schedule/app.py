@@ -1299,7 +1299,10 @@ def index():
             row for kind, row in page_entries if kind == 'shipped'
         ]
 
+    with db_conn() as _c:
+        est_overrides = {r['job_key']: dict(r) for r in _c.execute('SELECT * FROM est_overrides')}
     return render_template('index.html',
+                           est_overrides=est_overrides,
                            data=display_data,
                            statuses=statuses,
                            typo_flags=[t for t in typo_flags if t.get('sheet') == selected_sheet][:100],
@@ -1819,13 +1822,127 @@ def upload_excel():
     return redirect(url_for('upload_preview'))
 
 
+def _est_col(headers):
+    low = [str(h).lower() for h in headers]
+    return low.index('estimated completion date') if 'estimated completion date' in low else -1
+
+
+def _apply_est_overrides(data, commit=True):
+    """Keep manual completion-date corrections on top of a fresh upload.
+    While the supplier's cell still equals the value that was corrected, the
+    corrected value stays; once the supplier changes it, the correction is
+    dropped (commit=True) and the supplier's new value wins.
+    Returns (data, applied_count)."""
+    with db_conn() as conn:
+        overrides = {r['job_key']: dict(r) for r in conn.execute('SELECT * FROM est_overrides')}
+    if not overrides:
+        return data, 0
+    applied, stale = 0, set()
+    for sheet, rows in data.items():
+        if not rows or len(rows) < 2:
+            continue
+        idx = _est_col(rows[0])
+        if idx < 0:
+            continue
+        for row in rows[1:]:
+            if idx >= len(row):
+                continue
+            ov = overrides.get(make_job_key(sheet, row, rows[0]))
+            if not ov:
+                continue
+            if not est_changed(row[idx], ov['original']):
+                row[idx] = ov['corrected']
+                applied += 1
+            else:
+                stale.add(ov['job_key'])
+    if commit and stale:
+        with db_conn() as conn:
+            for jk in stale:
+                conn.execute('DELETE FROM est_overrides WHERE job_key=?', (jk,))
+    return data, applied
+
+
+@app.route('/schedule/est', methods=['POST'])
+def schedule_est_edit():
+    """Lead inspector / admin corrects a (typo) estimated completion date.
+    Notifies the task notification e-mails and the assigned inspector."""
+    if not g.can_assign:
+        return tr('无权限访问此页面', 'Forbidden'), 403
+    job_key = request.form.get('job_key', '')
+    new_est = ' '.join(request.form.get('est', '').split())
+    back = request.form.get('next', '')
+    if not back.startswith('/') or back.startswith('//'):
+        back = url_for('index')
+    if not new_est or len(new_est) > 100:
+        flash(tr('预计完成日不能为空（最多 100 字符）', 'Completion date is required (max 100 characters)'), 'error')
+        return redirect(back)
+
+    data = load_json(CURRENT_FILE, {})
+    old_est, hit, row_info = None, False, {}
+    for sheet, rows in data.items():
+        if not rows or len(rows) < 2 or is_ignored_sheet(sheet):
+            continue
+        idx = _est_col(rows[0])
+        if idx < 0:
+            continue
+        headers_low = [str(h).lower() for h in rows[0]]
+        for row in rows[1:]:
+            if idx < len(row) and make_job_key(sheet, row, rows[0]) == job_key:
+                if old_est is None:
+                    old_est = str(row[idx])
+                    def cell(name, row=row, hl=headers_low):
+                        return str(row[hl.index(name)]) if name in hl and hl.index(name) < len(row) else ''
+                    row_info = dict(region=sheet, order_number=cell('order number'),
+                                    item_code=cell('item code'), must_ship=cell('must ship date'))
+                row[idx] = new_est
+                hit = True
+    if not hit:
+        flash(tr('在当前排期中找不到该订单', 'Job not found in the current schedule'), 'error')
+        return redirect(back)
+    if old_est == new_est:
+        return redirect(back)
+
+    save_json(CURRENT_FILE, data)
+    config = load_config()
+    by = g.get('display_name') or g.get('username', '')
+    with db_conn() as conn:
+        prev = conn.execute('SELECT original FROM est_overrides WHERE job_key=?', (job_key,)).fetchone()
+        original = prev['original'] if prev else old_est
+        if est_changed(original, new_est):
+            conn.execute(
+                'INSERT INTO est_overrides (job_key, original, corrected, edited_by) VALUES (?,?,?,?) '
+                'ON CONFLICT(job_key) DO UPDATE SET corrected=excluded.corrected, '
+                'edited_by=excluded.edited_by, edited_at=datetime(\'now\',\'localtime\')',
+                (job_key, original, new_est, g.get('username', '')))
+        else:
+            conn.execute('DELETE FROM est_overrides WHERE job_key=?', (job_key,))
+        conn.execute('UPDATE inspection_tasks SET est_completion=? WHERE job_key=?', (new_est, job_key))
+        conn.execute('UPDATE outstanding_jobs SET est_completion=? WHERE job_key=?', (new_est, job_key))
+        conn.execute(
+            'INSERT INTO task_date_changes (job_key,old_est,new_est,old_ship,new_ship,week_label) '
+            'VALUES (?,?,?,?,?,?)',
+            (job_key, old_est, new_est, row_info['must_ship'], row_info['must_ship'],
+             config.get('upload_date', '')))
+        task = conn.execute('SELECT * FROM inspection_tasks WHERE job_key=?', (job_key,)).fetchone()
+    change = dict(task) if task else dict(job_key=job_key, assigned_to=None, **{
+        k: row_info[k] for k in ('region', 'order_number', 'item_code')})
+    change.update(old_est=old_est, new_est=new_est,
+                  old_ship=row_info['must_ship'], new_ship=row_info['must_ship'])
+    ok, msg = _send_date_change_email([change], edited_by=by)
+    flash(tr(f'预计完成日已更新为 {new_est}。邮件通知：{msg}',
+             f'Completion date updated to {new_est}. E-mail: {msg}'), 'success' if ok else 'warning')
+    return redirect(back)
+
+
 @app.route('/upload/preview')
 def upload_preview():
     pending = load_json(PENDING_UPLOAD_FILE, {})
     if not pending.get('data'):
         flash(tr('没有待确认的排期上传', 'No schedule upload is waiting for confirmation'), 'warning')
         return redirect(url_for('index'))
-    summary = schedule_diff_summary(load_schedule(CURRENT_FILE), pending['data'])
+    import copy
+    shown, _ = _apply_est_overrides(copy.deepcopy(pending['data']), commit=False)
+    summary = schedule_diff_summary(load_schedule(CURRENT_FILE), shown)
     return render_template('upload_preview.html', pending=pending, summary=summary,
                            config=load_config())
 
@@ -1894,6 +2011,11 @@ def _apply_schedule(data, baseline=False):
     if os.path.exists(CURRENT_FILE):
         shutil.copy(CURRENT_FILE, PREVIOUS_FILE)
 
+    data, kept_corrections = _apply_est_overrides(data)
+    if kept_corrections:
+        flash(tr(f'{kept_corrections} 个预计完成日沿用了主管的手动修正（供应商表格里仍是原值）',
+                 f'{kept_corrections} completion date(s) kept the lead\'s manual correction (supplier file unchanged)'),
+              'info')
     save_json(CURRENT_FILE, data)
     remember_schedule_upload(data, datetime.now().strftime('%d %b %Y %H:%M'))
 
@@ -3074,7 +3196,7 @@ def _task_recipients(tasks):
     return recipients
 
 
-def _send_date_change_email(changes):
+def _send_date_change_email(changes, edited_by=''):
     """Tell the lead and the assigned inspectors that completion / ship dates
     moved (earlier or later) or the remark text next to the date changed."""
     recipients = _task_recipients(changes)
@@ -3083,6 +3205,8 @@ def _send_date_change_email(changes):
     today = datetime.now().strftime('%Y-%m-%d')
     lines = [f"预计完成日变动 Completion date changes — {today}",
              f"{len(changes)} 个未完成任务的日期有变动 / {len(changes)} open task(s) changed.", '']
+    if edited_by:
+        lines.insert(2, f"由 {edited_by} 手动修改 / Edited manually by {edited_by}")
     for i, c in enumerate(changes, 1):
         lines.append(f"{i}. [{c['region']}]  {c['order_number']}  {c['item_code']}")
         old_d, _ = split_est(c['old_est'])
