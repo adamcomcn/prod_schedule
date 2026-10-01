@@ -121,8 +121,9 @@ class HqReportEmailTests(unittest.TestCase):
         self.assertIn('DPL7', subject)
         self.assertIn('Fail', subject)
         parts = [p for p in msg.walk() if p.get_content_disposition() == 'attachment']
-        self.assertEqual(len(parts), 1)
+        self.assertEqual(len(parts), 2)                       # the report + the uploaded brt.pdf
         self.assertTrue(parts[0].get_payload(decode=True).startswith(b'%PDF'))
+        self.assertEqual(parts[1].get_filename(), 'brt.pdf')
         rows = self.log_rows()
         self.assertEqual((rows[0]['status'], rows[0]['insp_index']), ('sent', 0))
         page = self.client_for('insp').get(f'/inspect/{JOB}').get_data(as_text=True)

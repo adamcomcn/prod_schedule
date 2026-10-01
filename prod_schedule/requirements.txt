@@ -6,3 +6,4 @@ google-auth==2.53.0
 google-api-python-client==2.196.0
 reportlab==5.0.1
 pillow==12.3.0
+pillow-heif==1.8.0

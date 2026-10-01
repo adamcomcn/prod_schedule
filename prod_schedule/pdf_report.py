@@ -22,6 +22,12 @@ from reportlab.platypus import (Image, KeepTogether, Paragraph, SimpleDocTemplat
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PHOTO_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
+try:                                   # iPhone photos (HEIC/HEIF); without the plugin they stay listed as files
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    PHOTO_EXTENSIONS |= {'.heic', '.heif'}
+except Exception:
+    pass
 NAVY = colors.HexColor('#1a3a5c')
 GREY = colors.HexColor('#6b7280')
 LINE = colors.HexColor('#d0d5dd')
@@ -339,7 +345,7 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
             story.append(t)
     if other_files:
-        story.append(_p(_bi('其他附件（请在系统中查看）', 'Other attachments (view in the system)'), st['h']))
+        story.append(_p(_bi('其他附件（见邮件附件，或在系统中查看）', 'Other attachments (see e-mail attachments, or view in the system)'), st['h']))
         for att in other_files:
             zh, en = evidence_labels.get(att['evidence_type'], (att['evidence_type'], ''))
             story.append(_p(f"• {zh} {en}: {att['original_name']}", st['small']))
