@@ -3880,17 +3880,26 @@ def task_status_update(tid):
     if new_status not in TASK_STATUSES:
         abort(400)
     with db_conn() as conn:
-        task = conn.execute('SELECT assigned_to FROM inspection_tasks WHERE id=?', (tid,)).fetchone()
+        task = conn.execute('SELECT assigned_to, status FROM inspection_tasks WHERE id=?',
+                            (tid,)).fetchone()
         if not task:
             abort(404)
-        # Inspectors may only update tasks assigned to them.
-        if not g.can_assign and task['assigned_to'] != g.user_id:
-            abort(403)
+        if not g.can_assign:
+            # Inspectors may only update tasks assigned to them, and closing
+            # a task (or reopening a closed one) is the lead's / admin's call.
+            if task['assigned_to'] != g.user_id:
+                abort(403)
+            if new_status not in INSPECTOR_TASK_STATUSES or task['status'] == 'Closed':
+                abort(403)
         conn.execute('UPDATE inspection_tasks SET status=? WHERE id=?', (new_status, tid))
     return redirect(_safe_next_url(request.form.get('next')) or url_for('tasks'))
 
 
 TASK_STATUSES = ('Pending', 'In Progress', 'Completed', 'On Hold', 'Closed')
+# Statuses an inspector can pick on their own tasks ('Closed' is lead/admin only).
+INSPECTOR_TASK_STATUSES = ('Pending', 'In Progress', 'Completed', 'On Hold')
+app.jinja_env.globals['TASK_STATUSES'] = TASK_STATUSES
+app.jinja_env.globals['INSPECTOR_TASK_STATUSES'] = INSPECTOR_TASK_STATUSES
 # 'Closed' = closed by the lead without an inspection (order gone / not needed)
 DONE_STATUSES = ('Completed', 'Closed')
 

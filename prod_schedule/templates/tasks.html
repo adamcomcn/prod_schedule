@@ -561,7 +561,7 @@ tr.mine td { background:#f0fdf4; }
               {% endif %}
             </td>
             <td class="status-cell">
-              {% if g.can_assign or t.assigned_to == g.user_id %}
+              {% if g.can_assign or (t.assigned_to == g.user_id and t.status != 'Closed') %}
               <form method="POST" action="{{ url_for('task_status_update', tid=t.id) }}"
                     style="display:inline;">
                 <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
@@ -570,7 +570,7 @@ tr.mine td { background:#f0fdf4; }
                         style="border-color: {% if t.status=='Completed' %}#10b981
                                {% elif t.status=='In Progress' %}#3b82f6
                                {% else %}#d0d5dd{% endif %};">
-                  {% for s in ['Pending','In Progress','Completed','On Hold','Closed'] %}
+                  {% for s in (TASK_STATUSES if g.can_assign else INSPECTOR_TASK_STATUSES) %}
                   <option value="{{ s }}" {{ 'selected' if t.status == s }}>{{ s|status_label }}</option>
                   {% endfor %}
                 </select>

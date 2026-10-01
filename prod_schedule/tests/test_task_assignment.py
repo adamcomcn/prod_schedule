@@ -154,6 +154,34 @@ class TaskAssignmentTests(unittest.TestCase):
         bad = yu.post(f'/tasks/{self.tasks[0]}/status', data={'_csrf_token': 'tok', 'status': 'Whatever'})
         self.assertEqual(bad.status_code, 400)
 
+    def test_only_lead_can_close_or_reopen(self):
+        with db_conn() as conn:
+            conn.execute('UPDATE inspection_tasks SET assigned_to=? WHERE id IN (?, ?)',
+                         (self.ids['yu'], self.tasks[0], self.tasks[1]))
+        yu, murphy = self.client_for('yu'), self.client_for('murphy')
+
+        def set_status(client, task, status):
+            return client.post(f'/tasks/{task}/status', data={'_csrf_token': 'tok', 'status': status})
+
+        # Inspector cannot close his own task, and does not see the option.
+        self.assertEqual(set_status(yu, self.tasks[0], 'Closed').status_code, 403)
+        page = yu.get('/tasks').get_data(as_text=True)
+        self.assertNotIn('value="Closed"', page)
+        self.assertIn('value="On Hold"', page)
+
+        # The lead can close it; the inspector then cannot reopen it.
+        self.assertEqual(set_status(murphy, self.tasks[0], 'Closed').status_code, 302)
+        self.assertEqual(set_status(yu, self.tasks[0], 'Pending').status_code, 403)
+        with db_conn() as conn:
+            status = conn.execute('SELECT status FROM inspection_tasks WHERE id=?',
+                                  (self.tasks[0],)).fetchone()[0]
+        self.assertEqual(status, 'Closed')
+        self.assertIn('value="Closed"', murphy.get('/tasks').get_data(as_text=True))
+
+        # The lead can reopen; other statuses stay open to the inspector.
+        self.assertEqual(set_status(murphy, self.tasks[0], 'Pending').status_code, 302)
+        self.assertEqual(set_status(yu, self.tasks[1], 'On Hold').status_code, 302)
+
     def test_inspection_result_updates_task_status(self):
         app._update_task_after_inspection('MELBOURNE|PO-0|ITEM0', 'Pass')
         app._update_task_after_inspection('MELBOURNE|PO-1|ITEM1', 'Fail')
