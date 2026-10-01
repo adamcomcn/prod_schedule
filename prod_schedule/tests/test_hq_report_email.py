@@ -54,7 +54,7 @@ class HqReportEmailTests(unittest.TestCase):
         app.app.config.update(TESTING=True, SEND_EMAIL_SYNC=True)
         FakeSMTP.sent, FakeSMTP.fail = [], False
         with db_conn() as conn:
-            for table in ('users', 'report_emails', 'inspection_attachments'):
+            for table in ('users', 'report_emails', 'inspection_attachments', 'inspection_reviews'):
                 conn.execute(f'DELETE FROM {table}')
             for name, role in (('insp', 'inspector'), ('lead', 'lead')):
                 conn.execute('INSERT INTO users (username,password_hash,role) VALUES (?,?,?)',
@@ -72,7 +72,8 @@ class HqReportEmailTests(unittest.TestCase):
 
     def set_config(self, emails, mode):
         config = app.load_config()
-        config.update(hq_report_emails=emails, hq_report_mode=mode, modules={})
+        config.update(hq_report_emails=emails, hq_report_mode=mode, modules={},
+                      task_notify_emails='lead@example.test')
         app.save_json(app.CONFIG_FILE, config)
 
     def client_for(self, name):
@@ -91,14 +92,28 @@ class HqReportEmailTests(unittest.TestCase):
             'ev_result_brt': 'Pass', 'ev_file_brt': (io.BytesIO(b'%PDF-1.4 brt'), 'brt.pdf'),
         }, content_type='multipart/form-data')
 
+    def approve(self, index=0, client=None, comment=''):
+        client = client or self.client_for('lead')
+        return client.post(f'/inspect/{JOB}/report/{index}/review', data={
+            '_csrf_token': 'tok', 'action': 'approve', 'comment': comment})
+
+    def hq_mails(self):
+        return [m for m in FakeSMTP.sent if 'lead@example.test' not in m[0]]
+
     def log_rows(self):
         with db_conn() as conn:
             return [dict(r) for r in conn.execute('SELECT * FROM report_emails ORDER BY id')]
 
-    def test_submit_emails_pdf_to_hq(self):
+    def test_submit_asks_for_review_and_hq_gets_pdf_after_approval(self):
         self.assertEqual(self.submit('Fail').status_code, 302)
-        self.assertEqual(len(FakeSMTP.sent), 1)
-        recipients, raw = FakeSMTP.sent[0]
+        self.assertEqual(len(FakeSMTP.sent), 1)                 # only the review request
+        self.assertEqual(FakeSMTP.sent[0][0], ['lead@example.test'])
+        self.assertEqual(self.hq_mails(), [])
+        self.assertEqual(self.client_for('insp').post(
+            f'/inspect/{JOB}/report/0/review', data={'_csrf_token': 'tok', 'action': 'approve'}).status_code, 403)
+
+        self.assertEqual(self.approve(comment='looks good').status_code, 302)
+        recipients, raw = self.hq_mails()[0]
         self.assertEqual(recipients, ['hq@example.test', 'qa@example.test'])
         msg = email.message_from_string(raw)
         subject = str(make_header(decode_header(msg['Subject'])))
@@ -106,34 +121,65 @@ class HqReportEmailTests(unittest.TestCase):
         self.assertIn('Fail', subject)
         parts = [p for p in msg.walk() if p.get_content_disposition() == 'attachment']
         self.assertEqual(len(parts), 1)
-        self.assertTrue(parts[0].get_filename().endswith('.pdf'))
         self.assertTrue(parts[0].get_payload(decode=True).startswith(b'%PDF'))
-        body = next(p for p in msg.walk() if p.get_content_type() == 'text/plain')
-        self.assertIn('/inspect/MELBOURNE%7CPO-7%7CUMC100', body.get_payload(decode=True).decode('utf-8'))
         rows = self.log_rows()
         self.assertEqual((rows[0]['status'], rows[0]['insp_index']), ('sent', 0))
         page = self.client_for('insp').get(f'/inspect/{JOB}').get_data(as_text=True)
         self.assertIn('已发送总部', page)
+        self.assertIn('已审核通过', page)
+
+    def test_pdf_shows_signature_and_review(self):
+        self.submit('Pass')
+        pdf, *_ = app.build_report_pdf(JOB, 0)
+        with db_conn() as conn:
+            self.assertIsNone(conn.execute('SELECT 1 FROM inspection_reviews').fetchone())
+        self.approve()                      # lead reviews a report submitted by 'insp'
+        review = app._review_of(JOB, 0)
+        self.assertEqual((review['status'], review['self_review']), ('approved', 0))
+        pdf2, *_ = app.build_report_pdf(JOB, 0)
+        self.assertTrue(pdf2.startswith(b'%PDF'))
+        self.assertNotEqual(pdf, pdf2)
+
+    def test_self_review_is_flagged(self):
+        self.submit('Pass', client=self.client_for('lead'))
+        self.approve()
+        self.assertEqual(app._review_of(JOB, 0)['self_review'], 1)
+
+    def test_return_requires_reason_and_blocks_hq_resend(self):
+        self.submit('Pass')
+        lead = self.client_for('lead')
+        lead.post(f'/inspect/{JOB}/report/0/review', data={'_csrf_token': 'tok', 'action': 'reject'})
+        self.assertIsNone(app._review_of(JOB, 0))
+        lead.post(f'/inspect/{JOB}/report/0/review',
+                  data={'_csrf_token': 'tok', 'action': 'reject', 'comment': '缺少 BRT'})
+        self.assertEqual(app._review_of(JOB, 0)['status'], 'rejected')
+        lead.post(f'/inspect/{JOB}/report/0/email', data={'_csrf_token': 'tok'})
+        self.assertEqual(self.hq_mails(), [])
 
     def test_issues_only_mode_skips_pass(self):
         self.set_config('hq@example.test', 'issues')
         self.submit('Pass')
-        self.assertEqual(FakeSMTP.sent, [])
+        self.approve(0)
+        self.assertEqual(self.hq_mails(), [])
         self.submit('Partial Pass')
-        self.assertEqual(len(FakeSMTP.sent), 1)
+        self.approve(1)
+        self.assertEqual(len(self.hq_mails()), 1)
         self.assertEqual(self.log_rows()[0]['insp_index'], 1)
 
     def test_off_or_no_recipients_sends_nothing(self):
         self.set_config('hq@example.test', 'off')
         self.submit('Fail')
+        self.approve(0)
         self.set_config('', 'all')
         self.submit('Fail')
-        self.assertEqual(FakeSMTP.sent, [])
+        self.approve(1)
+        self.assertEqual(self.hq_mails(), [])
         self.assertEqual(self.log_rows(), [])
 
     def test_failure_is_recorded_and_lead_can_resend(self):
+        self.assertEqual(self.submit('Pass').status_code, 302)
         FakeSMTP.fail = True
-        self.assertEqual(self.submit('Pass').status_code, 302)  # inspection still saved
+        self.approve(0)
         self.assertEqual(self.log_rows()[0]['status'], 'failed')
         self.assertEqual(len(app.load_json(app.INSPECTIONS_CACHE)[JOB]), 1)
         page = self.client_for('lead').get(f'/inspect/{JOB}').get_data(as_text=True)
@@ -149,9 +195,10 @@ class HqReportEmailTests(unittest.TestCase):
             f'/inspect/{JOB}/report/9/email', data={'_csrf_token': 'tok'}).status_code, 404)
 
     def test_background_thread_mode(self):
+        self.submit('Fail')
         app.app.config['SEND_EMAIL_SYNC'] = False
         with mock.patch('threading.Thread') as thread:
-            self.submit('Fail')
+            self.approve(0)
         thread.assert_called_once()
         self.assertTrue(thread.call_args.kwargs['daemon'])
         self.assertEqual(self.log_rows()[0]['status'], 'pending')

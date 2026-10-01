@@ -145,7 +145,7 @@ def _photo(path, max_w, max_h):
 
 
 def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=None,
-                         evidence_labels=None, checklist=None, logo_path=None, generated_by=''):
+                         evidence_labels=None, checklist=None, logo_path=None, generated_by='', review=None):
     """Return the PDF as bytes.
 
     job:        job details dict (schedule columns + region)
@@ -153,6 +153,7 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
     attachments: rows with evidence_type, original_name, file_path
     defect_names: {code: (name_en, name_cn)}
     evidence_labels: {type: (label_zh, label_en)}
+    review:     optional inspection_reviews row (status, reviewer_name, reviewed_at, comment, self_review)
     checklist:  optional {'name', 'inspector', 'date', 'overall', 'summary',
                           'rows': [(section, question, result, notes)]}
     """
@@ -344,11 +345,30 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
             story.append(_p(f"• {zh} {en}: {att['original_name']}", st['small']))
 
     # ── Sign-off ────────────────────────────────────────────────────────────
-    sign = Table([[
-        _p(_bi('检验员签字', 'Inspector signature') + '\n\n\n______________________', st['cell']),
-        _p(_bi('审核', 'Reviewed by') + '\n\n\n______________________', st['cell']),
-        _p(_bi('日期', 'Date') + '\n\n\n______________________', st['cell']),
-    ]], colWidths=[content_w / 3] * 3)
+    signed_by = record.get('inspector_name') or record.get('submitted_by') or ''
+    if record.get('submitted_by') and record.get('submitted_by') != signed_by:
+        signed_by += f" ({record['submitted_by']})"
+    signed_at = (record.get('submitted_at') or '')[:16].replace('T', ' ')
+    inspector_cell = (_bi('检验员签字', 'Inspector signature')
+                      + f"\n\n{signed_by}\n已电子签署 Signed electronically\n{signed_at}")
+    if review and review['status'] == 'approved':
+        tag = '\n自审 Self-review' if review['self_review'] else ''
+        note = f"\n{review['comment']}" if review['comment'] else ''
+        reviewer_cell = (_bi('审核', 'Reviewed by') + f"\n\n{review['reviewer_name']}{tag}\n"
+                         f"已审核通过 Approved{note}")
+        date_cell = _bi('审核日期', 'Review date') + f"\n\n{(review['reviewed_at'] or '')[:16]}"
+    elif review and review['status'] == 'rejected':
+        reviewer_cell = (_bi('审核', 'Reviewed by') + f"\n\n{review['reviewer_name']}\n"
+                         f"已退回 Returned\n{review['comment']}")
+        date_cell = _bi('审核日期', 'Review date') + f"\n\n{(review['reviewed_at'] or '')[:16]}"
+    else:
+        reviewer_cell = _bi('审核', 'Reviewed by') + '\n\n待审核 Pending review'
+        date_cell = _bi('审核日期', 'Review date') + '\n\n—'
+    sign = Table([[_p(inspector_cell, st['cell']), _p(reviewer_cell, st['cell']),
+                   _p(date_cell, st['cell'])]], colWidths=[content_w / 3] * 3)
+    sign.setStyle(TableStyle([('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#9ca3af')),
+                              ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#d1d5db')),
+                              ('VALIGN', (0, 0), (-1, -1), 'TOP')]))
     story += [Spacer(1, 8 * mm), KeepTogether(sign)]
 
     doc.build(story, onFirstPage=decorate, onLaterPages=decorate)

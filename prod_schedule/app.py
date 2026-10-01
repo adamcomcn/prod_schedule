@@ -2355,6 +2355,7 @@ def inspect_form(job_key):
                            past_inspections=past,
                            past_attachments=dict(past_attachments),
                            report_emails=report_email_status(job_key),
+                           reviews=review_status(job_key),
                            is_valve=valve_flag,
                            defect_groups=defect_groups,
                            matched_tpl=matched_tpl,
@@ -2486,8 +2487,8 @@ def submit_inspection(job_key):
         save_json(CURRENT_FILE, current_sched)
 
     _update_task_after_inspection(job_key, inspection_data['result'])
-    if hq_report_wanted(inspection_data['result']):
-        queue_report_email(job_key, len(cache[job_key]) - 1)
+    # HQ only receives the report once a reviewer has approved it.
+    _send_review_request_email(job_key, len(cache[job_key]) - 1, inspection_data)
 
     # Mark outstanding_jobs entry as completed
     with db_conn() as conn:
@@ -2562,6 +2563,8 @@ def build_report_pdf(job_key, index, generated_by=''):
             (job_key, index)).fetchall()]
         defect_names = {r['code']: (r['name'], r['name_cn'] or '') for r in conn.execute(
             'SELECT code, name, name_cn FROM defect_codes').fetchall()}
+        review = conn.execute('SELECT * FROM inspection_reviews WHERE job_key=? AND insp_index=?',
+                              (job_key, index)).fetchone()
 
     from pdf_report import build_inspection_pdf
     report_no = report_number(job_key, record, index)
@@ -2572,7 +2575,7 @@ def build_report_pdf(job_key, index, generated_by=''):
         evidence_labels={k: (v.get('label_zh') or v['label'], v['label']) for k, v in EVIDENCE_META.items()},
         checklist=_latest_checklist(job_key),
         logo_path=os.path.join(BASE_DIR, 'static', 'daemco_logo.png'),
-        generated_by=generated_by)
+        generated_by=generated_by, review=dict(review) if review else None)
     safe = re.sub(r'[^A-Za-z0-9._-]+', '_', f"{record.get('order_number') or ''}_{record.get('item_code') or ''}")
     return pdf, report_no, f'{report_no}_{safe}.pdf'.replace('__', '_'), record
 
@@ -2673,6 +2676,12 @@ def queue_report_email(job_key, index):
         threading.Thread(target=_send_report_email, args=args, daemon=True).start()
 
 
+def review_status(job_key):
+    with db_conn() as conn:
+        rows = conn.execute('SELECT * FROM inspection_reviews WHERE job_key=?', (job_key,)).fetchall()
+    return {r['insp_index']: r for r in rows}
+
+
 def report_email_status(job_key):
     """{insp_index: latest report_emails row}"""
     with db_conn() as conn:
@@ -2688,10 +2697,93 @@ def resend_report_email(job_key, index):
         abort(404)
     if not _email_list(load_config().get('hq_report_emails', '')):
         flash(tr('请先在设置中填写总部报告邮箱', 'Set the HQ report e-mails in Settings first'), 'error')
+    elif _review_of(job_key, index) is None or _review_of(job_key, index)['status'] != 'approved':
+        flash(tr('报告需先审核通过才能发送给总部', 'The report must be approved before it is sent to HQ'), 'error')
     else:
         queue_report_email(job_key, index)
         flash(tr('正在发送检验报告给总部…', 'Sending the inspection report to HQ…'), 'success')
     return redirect(url_for('inspect_form', job_key=job_key))
+
+
+def _review_of(job_key, index):
+    with db_conn() as conn:
+        return conn.execute('SELECT * FROM inspection_reviews WHERE job_key=? AND insp_index=?',
+                            (job_key, index)).fetchone()
+
+
+def _send_review_request_email(job_key, index, record):
+    """Ask the lead (task notification e-mails) to review a new report."""
+    recipients = _email_list(load_config().get('task_notify_emails', ''))
+    if not recipients:
+        return
+    link = url_for('inspect_form', job_key=job_key, _external=True)
+    result = record.get('result', '')
+    lines = [f"有检验报告待审核 An inspection report is waiting for review",
+             f"订单 Order: {record.get('order_number', '')}    物料 Item: {record.get('item_code', '')}",
+             f"检验员 Inspector: {record.get('inspector_name', '')}    结果 Result: {result}",
+             '', link]
+    subject = (f"【待审核】{record.get('order_number', '')} {record.get('item_code', '')} — "
+               f"{result} / report awaiting review")
+    body = '\n'.join(lines)
+    if app.config.get('SEND_EMAIL_SYNC'):
+        _smtp_send(subject, body, recipients)
+    else:
+        import threading
+        threading.Thread(target=_smtp_send, args=(subject, body, recipients), daemon=True).start()
+
+
+@app.route('/inspect/<path:job_key>/report/<int:index>/review', methods=['POST'])
+def review_inspection(job_key, index):
+    """Lead / admin approves or returns a submitted inspection report."""
+    if not g.can_assign:
+        abort(403)
+    records = load_json(INSPECTIONS_CACHE, {}).get(job_key, [])
+    if not 0 <= index < len(records):
+        abort(404)
+    record = records[index]
+    action = request.form.get('action', '')
+    comment = ' '.join(request.form.get('comment', '').split())[:500]
+    if action not in ('approve', 'reject'):
+        abort(400)
+    if action == 'reject' and not comment:
+        flash(tr('退回时请填写原因', 'Please give a reason when returning a report'), 'error')
+        return redirect(url_for('inspect_form', job_key=job_key))
+    status = 'approved' if action == 'approve' else 'rejected'
+    me = g.get('username', '')
+    with db_conn() as conn:
+        conn.execute(
+            'INSERT INTO inspection_reviews (job_key, insp_index, status, reviewer, reviewer_name, '
+            'reviewed_at, comment, self_review) VALUES (?,?,?,?,?,?,?,?) '
+            'ON CONFLICT(job_key, insp_index) DO UPDATE SET status=excluded.status, '
+            'reviewer=excluded.reviewer, reviewer_name=excluded.reviewer_name, '
+            'reviewed_at=excluded.reviewed_at, comment=excluded.comment, self_review=excluded.self_review',
+            (job_key, index, status, me, g.get('display_name') or me,
+             datetime.now().strftime('%Y-%m-%d %H:%M'), comment,
+             1 if me and me == record.get('submitted_by') else 0))
+    if status == 'approved':
+        if hq_report_wanted(record.get('result', '')):
+            queue_report_email(job_key, index)
+            flash(tr('已审核通过，正在发送检验报告给总部…', 'Approved. Sending the report to HQ…'), 'success')
+        else:
+            flash(tr('已审核通过', 'Approved'), 'success')
+    else:
+        _notify_report_returned(job_key, record, comment)
+        flash(tr('已退回，已通知检验员', 'Returned to the inspector'), 'success')
+    return redirect(url_for('inspect_form', job_key=job_key))
+
+
+def _notify_report_returned(job_key, record, comment):
+    with db_conn() as conn:
+        u = conn.execute("SELECT email FROM users WHERE username=? AND active=1 AND email != ''",
+                         (record.get('submitted_by', ''),)).fetchone()
+    recipients = _email_list(', '.join(_email_list(load_config().get('task_notify_emails', ''))
+                                       + ([u['email']] if u else [])))
+    if not recipients:
+        return
+    by = g.get('display_name') or g.get('username', '')
+    _smtp_send(f"【报告被退回】{record.get('order_number', '')} {record.get('item_code', '')} / report returned",
+               '\n'.join([f"检验报告被 {by} 退回 / Returned by {by}", f"原因 Reason: {comment}", '',
+                          url_for('inspect_form', job_key=job_key, _external=True)]), recipients)
 
 
 @app.route('/settings', methods=['GET', 'POST'])
