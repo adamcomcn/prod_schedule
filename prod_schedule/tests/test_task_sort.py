@@ -38,3 +38,21 @@ class TaskSortTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class StatusColumnTests(unittest.TestCase):
+    def test_status_select_is_not_squeezed(self):
+        app.app.config.update(TESTING=True)
+        with db_conn() as conn:
+            conn.execute('DELETE FROM users'); conn.execute('DELETE FROM inspection_tasks')
+            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('adm',?,'admin')",
+                         (generate_password_hash('x' * 12),))
+            uid = conn.execute("SELECT id FROM users WHERE username='adm'").fetchone()[0]
+            conn.execute("INSERT INTO inspection_tasks (job_key,order_number,region,item_code,status) "
+                         "VALUES ('M|P|I','D1','MEL','I','Completed')")
+        c = app.app.test_client()
+        with c.session_transaction() as s:
+            s['user_id'] = uid
+        page = c.get('/tasks').get_data(as_text=True)
+        self.assertIn('min-width:104px', page)
+        self.assertIn('class="status-cell"', page)
