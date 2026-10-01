@@ -2113,17 +2113,24 @@ def _apply_schedule(data, baseline=False):
                         # remember what changed so the inspectors are told.
                         est, ship, qty = (gcol('estimated completion date', row),
                                           gcol('must ship date', row), gcol('quantity', row))
+                        sup = gcol('supplier', row) or gcol('foundry', row)
+                        if sup:   # fill a missing supplier on any task, finished ones included
+                            conn.execute("UPDATE inspection_tasks SET supplier=? "
+                                         "WHERE job_key=? AND IFNULL(supplier, '')=''", (sup, jk))
                         before = conn.execute(
                             "SELECT * FROM inspection_tasks WHERE job_key=? "
                             "AND IFNULL(status, '') != 'Completed'", (jk,)).fetchone()
                         if not before:
                             continue
+                        # Supplier: correct from the sheet, never blank it out
+                        new_sup = sup if sup and sup != (before['supplier'] or '') else None
                         if (before['est_completion'] or '') == est and (before['must_ship'] or '') == ship \
-                                and (before['quantity'] or '') == qty:
+                                and (before['quantity'] or '') == qty and new_sup is None:
                             continue
                         conn.execute(
-                            "UPDATE inspection_tasks SET est_completion=?, must_ship=?, quantity=? "
-                            "WHERE job_key=?", (est, ship, qty, jk))
+                            "UPDATE inspection_tasks SET est_completion=?, must_ship=?, quantity=?, "
+                            "supplier=COALESCE(?, supplier) WHERE job_key=?",
+                            (est, ship, qty, new_sup, jk))
                         tasks_updated += 1
                         if est_changed(before['est_completion'], est) or \
                                 est_changed(before['must_ship'], ship):
