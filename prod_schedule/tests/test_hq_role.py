@@ -94,6 +94,34 @@ class HqRoleTests(unittest.TestCase):
         self.assertIn('DPL1', page)
         self.assertNotIn('assignForm', page)
 
+    def test_employee_link_only_shown_with_employee_modules(self):
+        boss = self.client_for('boss')
+        with db_conn() as conn:
+            conn.execute("INSERT INTO employees (name, active) VALUES ('Linked Person', 1)")
+            emp_id = conn.execute("SELECT id FROM employees WHERE name='Linked Person'").fetchone()[0]
+            conn.execute('UPDATE users SET employee_id=? WHERE username=?', (emp_id, 'yu'))
+        try:
+            page = boss.get('/admin/users').get_data(as_text=True)
+            self.assertNotIn('关联员工', page)
+            # Saving the account while the field is hidden keeps the existing link.
+            boss.post(f"/admin/users/{self.ids['yu']}/update", data={
+                '_csrf_token': 'tok', 'role': 'inspector', 'email': '', 'display_name': 'Yu',
+                'employee_id': str(emp_id)})
+            with db_conn() as conn:
+                self.assertEqual(conn.execute('SELECT employee_id FROM users WHERE username=?',
+                                              ('yu',)).fetchone()[0], emp_id)
+            config = app.load_config()
+            config['modules'] = {'hr': True}
+            app.save_json(app.CONFIG_FILE, config)
+            self.assertIn('关联员工', boss.get('/admin/users').get_data(as_text=True))
+        finally:
+            config = app.load_config()
+            config['modules'] = {}
+            app.save_json(app.CONFIG_FILE, config)
+            with db_conn() as conn:
+                conn.execute('UPDATE users SET employee_id=NULL')
+                conn.execute('DELETE FROM employees WHERE id=?', (emp_id,))
+
     def test_admin_can_create_hq_account(self):
         response = self.client_for('boss').post('/admin/users/create', data={
             '_csrf_token': 'tok', 'username': 'hq2', 'password': 'hq2-password-long',

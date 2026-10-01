@@ -18,6 +18,8 @@
   <option value="admin" {% if selected == 'admin' %}selected{% endif %}>{{ tr('管理员', 'Admin') }}</option>
 {% endmacro %}
 {% block content %}
+{# The employee link is only used by the HR / training / employee modules. #}
+{% set show_employee = module_enabled('hr') or module_enabled('training') or module_enabled('employees') %}
 <div class="page">
   <div class="card">
     <div class="card-title">{{ tr('新建账号', 'Create user account') }}</div>
@@ -28,7 +30,9 @@
         <div><label>{{ tr('邮箱（接收任务通知）', 'E-mail (task notifications)') }}</label><input type="email" name="email"></div>
         <div><label>{{ tr('临时密码（至少 12 位）', 'Temporary password (12+ characters)') }}</label><input type="password" name="password" minlength="12" required autocomplete="new-password"></div>
         <div><label>{{ tr('角色', 'Role') }}</label><select name="role">{{ role_options('inspector') }}</select></div>
+        {% if show_employee %}
         <div><label>{{ tr('关联员工', 'Employee link') }}</label><select name="employee_id"><option value="">{{ tr('无', 'None') }}</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+        {% endif %}
       </div>
       <button class="btn btn-primary" type="submit" style="margin-top:14px;">{{ tr('创建账号', 'Create account') }}</button>
       <div class="role-help">
@@ -44,7 +48,7 @@
     <div class="card-title">{{ tr('账号列表', 'User accounts') }}</div>
     <div style="overflow-x:auto;">
     <table class="user-table">
-      <thead><tr><th>{{ tr('用户名', 'Username') }}</th><th>{{ tr('显示名称 / 邮箱 / 角色 / 关联员工', 'Name / E-mail / Role / Employee') }}</th><th>{{ tr('状态', 'Status') }}</th><th>{{ tr('操作', 'Actions') }}</th></tr></thead>
+      <thead><tr><th>{{ tr('用户名', 'Username') }}</th><th>{% if show_employee %}{{ tr('显示名称 / 邮箱 / 角色 / 关联员工', 'Name / E-mail / Role / Employee') }}{% else %}{{ tr('显示名称 / 邮箱 / 角色', 'Name / E-mail / Role') }}{% endif %}</th><th>{{ tr('状态', 'Status') }}</th><th>{{ tr('操作', 'Actions') }}</th></tr></thead>
       <tbody>
       {% for user in users %}
         <tr>
@@ -54,7 +58,12 @@
               <input type="text" name="display_name" value="{{ user.display_name or '' }}" placeholder="{{ tr('显示名称', 'Display name') }}">
               <input type="email" name="email" value="{{ user.email or '' }}" placeholder="{{ tr('邮箱', 'E-mail') }}">
               <select name="role" style="width:auto;">{{ role_options(user.role) }}</select>
+              {% if show_employee %}
               <select name="employee_id" style="width:auto;"><option value="">{{ tr('无关联员工', 'No employee') }}</option>{% for e in employees %}<option value="{{ e.id }}" {% if user.employee_id == e.id %}selected{% endif %}>{{ e.name }}</option>{% endfor %}</select>
+              {% else %}
+              {# keep an existing link when the field is hidden #}
+              <input type="hidden" name="employee_id" value="{{ user.employee_id or '' }}">
+              {% endif %}
               <button class="btn btn-outline btn-sm" type="submit">{{ tr('保存', 'Update') }}</button>
             </form>
           </td>
