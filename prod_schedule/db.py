@@ -842,6 +842,14 @@ def init_db():
             PRIMARY KEY (job_key, insp_index)
         )''')
 
+        # One overdue-review reminder per report
+        conn.execute('''CREATE TABLE IF NOT EXISTS review_reminders (
+            job_key    TEXT NOT NULL,
+            insp_index INTEGER NOT NULL,
+            sent_at    TEXT DEFAULT (datetime('now', 'localtime')),
+            PRIMARY KEY (job_key, insp_index)
+        )''')
+
         # Defect codes
         existing_dc = {r[0] for r in conn.execute('SELECT code FROM defect_codes').fetchall()}
         for row in _DEFECT_SEEDS:

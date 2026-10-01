@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from email.header import decode_header, make_header
+from datetime import datetime, timedelta
 from unittest import mock
 
 os.environ.setdefault('APP_DATA_DIR', tempfile.mkdtemp(prefix='prod-schedule-tests-'))
@@ -202,6 +203,33 @@ class HqReportEmailTests(unittest.TestCase):
         thread.assert_called_once()
         self.assertTrue(thread.call_args.kwargs['daemon'])
         self.assertEqual(self.log_rows()[0]['status'], 'pending')
+
+    def test_overdue_review_reminded_once_fail_flagged(self):
+        self.submit('Fail')
+        FakeSMTP.sent = []
+        with app.app.test_request_context():
+            self.assertEqual(app.send_review_reminders(), 0)           # not 24 h yet
+            cache = app.load_json(app.INSPECTIONS_CACHE)
+            cache[JOB][0]['submitted_at'] = (datetime.now() - timedelta(hours=30)).isoformat()
+            app.save_json(app.INSPECTIONS_CACHE, cache)
+            self.assertEqual(app.send_review_reminders(), 1)
+            self.assertEqual(app.send_review_reminders(), 0)           # only once
+        recipients, raw = FakeSMTP.sent[0]
+        self.assertEqual(recipients, ['lead@example.test'])
+        subject = str(make_header(decode_header(email.message_from_string(raw)['Subject'])))
+        self.assertIn('含 1 份不合格', subject)
+
+    def test_reviewed_report_is_not_reminded_and_banner_shows(self):
+        self.submit('Fail')
+        page = self.client_for('lead').get('/tasks').get_data(as_text=True)
+        self.assertIn('份检验报告待审核', page)
+        self.approve(0)
+        cache = app.load_json(app.INSPECTIONS_CACHE)
+        cache[JOB][0]['submitted_at'] = (datetime.now() - timedelta(hours=40)).isoformat()
+        app.save_json(app.INSPECTIONS_CACHE, cache)
+        with app.app.test_request_context():
+            self.assertEqual(app.send_review_reminders(), 0)
+        self.assertNotIn('份检验报告待审核', self.client_for('lead').get('/tasks').get_data(as_text=True))
 
 
 if __name__ == '__main__':

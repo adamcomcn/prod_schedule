@@ -2160,7 +2160,7 @@ def _apply_schedule(data, baseline=False):
                      f'{len(date_changes)} task(s) had date changes. E-mail: {msg}'),
                   'success' if ok else 'warning')
         if not baseline:
-            send_due_reminders()
+            run_daily_reminders()
 
         updated_note = f'，{tasks_updated} 个任务日期/数量已同步' if tasks_updated else ''
         updated_note_en = f', {tasks_updated} task(s) updated' if tasks_updated else ''
@@ -3267,6 +3267,76 @@ def _send_task_email(new_tasks):
                       '\n'.join(lines), recipients)
 
 
+REVIEW_REMINDER_HOURS = 24
+
+
+def pending_reviews():
+    """Submitted reports nobody has reviewed yet, oldest first:
+    [{job_key, index, record, hours}]"""
+    now = datetime.now()
+    with db_conn() as conn:
+        done = {(r['job_key'], r['insp_index']) for r in conn.execute(
+            'SELECT job_key, insp_index FROM inspection_reviews')}
+    out = []
+    for job_key, records in load_json(INSPECTIONS_CACHE, {}).items():
+        for index, rec in enumerate(records):
+            if (job_key, index) in done:
+                continue
+            try:
+                hours = (now - datetime.fromisoformat(rec.get('submitted_at', ''))).total_seconds() / 3600
+            except (TypeError, ValueError):
+                hours = 0
+            out.append(dict(job_key=job_key, index=index, record=rec, hours=hours))
+    out.sort(key=lambda x: x['hours'], reverse=True)
+    return out
+
+
+def send_review_reminders():
+    """Once per report: remind the lead when a report has waited 24 h+ for review."""
+    overdue = [p for p in pending_reviews() if p['hours'] >= REVIEW_REMINDER_HOURS]
+    claimed = []
+    with db_conn() as conn:
+        for p in overdue:
+            if conn.execute('INSERT OR IGNORE INTO review_reminders (job_key, insp_index) VALUES (?,?)',
+                            (p['job_key'], p['index'])).rowcount:
+                claimed.append(p)
+
+    def release():
+        with db_conn() as conn:
+            for p in claimed:
+                conn.execute('DELETE FROM review_reminders WHERE job_key=? AND insp_index=?',
+                             (p['job_key'], p['index']))
+
+    if not claimed:
+        return 0
+    recipients = _email_list(load_config().get('task_notify_emails', ''))
+    if not recipients:
+        release()
+        return 0
+    claimed.sort(key=lambda p: (p['record'].get('result') == 'Pass', -p['hours']))   # Fail first
+    lines = [f"以下 {len(claimed)} 份检验报告已超过 {REVIEW_REMINDER_HOURS} 小时未审核，总部尚未收到。",
+             f"{len(claimed)} inspection report(s) have waited over {REVIEW_REMINDER_HOURS} h for review; HQ has not received them.", '']
+    for i, p in enumerate(claimed, 1):
+        r = p['record']
+        flag = '⚠ ' if r.get('result') != 'Pass' else ''
+        lines.append(f"{i}. {flag}{r.get('order_number', '')}  {r.get('item_code', '')}  — {r.get('result', '')}  "
+                     f"({r.get('inspector_name', '')}, 已等待 {int(p['hours'])} 小时 / waiting {int(p['hours'])} h)")
+        lines.append('    ' + url_for('inspect_form', job_key=p['job_key'], _external=True))
+        lines.append('')
+    n_bad = sum(1 for p in claimed if p['record'].get('result') != 'Pass')
+    ok, _ = _smtp_send(
+        f"【审核超时】{len(claimed)} 份检验报告待审核" + (f"（含 {n_bad} 份不合格）" if n_bad else '')
+        + f" / {len(claimed)} report(s) overdue for review", '\n'.join(lines), recipients)
+    if not ok:
+        release()
+        return 0
+    return len(claimed)
+
+
+def run_daily_reminders():
+    return send_due_reminders(), send_review_reminders()
+
+
 def _est_label(value):
     d, note = split_est(value)
     if not d:
@@ -3585,7 +3655,8 @@ def tasks():
         fail_ct=fail_ct,
     )
 
-    return render_template('tasks.html', tasks=rows, inspections=inspections,
+    review_queue = pending_reviews() if g.can_assign else []
+    return render_template('tasks.html', review_queue=review_queue, tasks=rows, inspections=inspections,
                            today=today, status_filter=status_filter, stats=stats,
                            scope=scope, scope_counts=scope_counts, assignees=assignees)
 
@@ -4639,7 +4710,7 @@ def _run_reminders_in_background(base_url):
     def work():
         try:
             with app.test_request_context(base_url=base_url):
-                send_due_reminders()
+                run_daily_reminders()
         except Exception:
             logger.exception('Due-date reminder run failed')
     import threading
@@ -4653,7 +4724,7 @@ def cron_reminders():
     supplied = request.headers.get('X-Cron-Token', '') or request.args.get('token', '')
     if not token or not hmac.compare_digest(supplied, token):
         abort(404)
-    return {'reminders_sent': send_due_reminders()}
+    return {'reminders_sent': send_due_reminders(), 'review_reminders_sent': send_review_reminders()}
 
 
 @app.route('/lang/<code>')
