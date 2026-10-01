@@ -109,6 +109,14 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('对账', page)
         self.assertIn('数据口径说明', page)
 
+    def test_region_bar_length_follows_order_count(self):
+        cur = {'BIG': rows(*[(n, '') for n in range(10)]), 'SMALL': rows((101, ''), (102, ''))}
+        app.save_json(app.PREVIOUS_FILE, cur); app.save_json(app.CURRENT_FILE, cur)
+        with self.context() as (ctx, page):
+            pass
+        self.assertIn('width:100.0%; height:100%', page)        # largest region fills the row
+        self.assertIn('width:20.0%; height:100%', page)         # 2 of 10 orders
+
 
 if __name__ == '__main__':
     unittest.main()

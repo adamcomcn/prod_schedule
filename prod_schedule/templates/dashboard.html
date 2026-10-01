@@ -283,12 +283,17 @@
           </div>
         </div>
 
-        <!-- Mini composition bars per region -->
+        <!-- Per-region bars: length = number of orders, colours = status mix -->
         {% if region_stats|length > 1 %}
+        {% set max_total = namespace(v=1) %}
+        {% for region, s in region_stats.items() %}{% if s.total > max_total.v %}{% set max_total.v = s.total %}{% endif %}{% endfor %}
         <div style="margin-top:16px; padding-top:14px; border-top:1px solid #f1f5f9;">
           <div style="font-size:.72rem; color:#9ca3af; font-weight:600;
-                      text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px;">
+                      text-transform:uppercase; letter-spacing:.04em; margin-bottom:2px;">
             {{ tr('按区域', 'By region') }}
+          </div>
+          <div style="font-size:.72rem; color:#9ca3af; margin-bottom:8px;">
+            {{ tr('条的长度 = 该区域订单数（最大的区域占满）；条内颜色 = 状态构成，图例同上。', 'Bar length = orders in the region (largest fills the row); colours = status mix, legend above.') }}
           </div>
           {% for region, s in region_stats.items() %}
           {% if s.total > 0 %}
@@ -296,14 +301,16 @@
             <div style="font-size:.75rem; color:#374151; width:90px; flex-shrink:0;
                         overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
                  title="{{ region }}">{{ region }}</div>
-            <div style="flex:1; display:flex; height:10px; border-radius:4px;
-                        overflow:hidden; background:#f3f4f6;">
-              {% if s.new > 0 %}<div style="width:{{ (s.new/s.total*100)|round(1) }}%; background:#10b981;"></div>{% endif %}
-              {% if s.not_shipped > 0 %}<div style="width:{{ (s.not_shipped/s.total*100)|round(1) }}%; background:#ef4444;"></div>{% endif %}
-              {% if s.partially_shipped > 0 %}<div style="width:{{ (s.partially_shipped/s.total*100)|round(1) }}%; background:#f59e0b;"></div>{% endif %}
-              {% if s.shipped > 0 %}<div style="width:{{ (s.shipped/s.total*100)|round(1) }}%; background:#9ca3af;"></div>{% endif %}
+            <div style="flex:1; height:10px; border-radius:4px; background:#f3f4f6; overflow:hidden;">
+              <div style="width:{{ (s.total / max_total.v * 100)|round(1) }}%; height:100%; display:flex; border-radius:4px; overflow:hidden;"
+                   title="{{ region }}: {{ s.total }}">
+                {% if s.new > 0 %}<div style="width:{{ (s.new/s.total*100)|round(1) }}%; background:#10b981;" title="{{ tr('新增', 'New') }}: {{ s.new }}"></div>{% endif %}
+                {% if s.not_shipped > 0 %}<div style="width:{{ (s.not_shipped/s.total*100)|round(1) }}%; background:#ef4444;" title="{{ tr('未发货', 'Not shipped') }}: {{ s.not_shipped }}"></div>{% endif %}
+                {% if s.partially_shipped > 0 %}<div style="width:{{ (s.partially_shipped/s.total*100)|round(1) }}%; background:#f59e0b;" title="{{ tr('部分发货', 'Partial') }}: {{ s.partially_shipped }}"></div>{% endif %}
+                {% if s.shipped > 0 %}<div style="width:{{ (s.shipped/s.total*100)|round(1) }}%; background:#9ca3af;" title="{{ tr('已发货', 'Shipped') }}: {{ s.shipped }}"></div>{% endif %}
+              </div>
             </div>
-            <div style="font-size:.72rem; color:#9ca3af; width:28px; text-align:right; flex-shrink:0;">
+            <div style="font-size:.72rem; color:#6b7280; width:28px; text-align:right; flex-shrink:0;">
               {{ s.total }}
             </div>
           </div>
