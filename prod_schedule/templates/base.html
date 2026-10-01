@@ -119,14 +119,18 @@ textarea { resize: vertical; min-height: 80px; }
   {{ navlink('dashboard', '仪表板', 'Dashboard', ep == 'dashboard') }}
   {{ navlink('index', '排期', 'Schedule', ep in ['index', 'upload_preview']) }}
   {{ navlink('tasks', '检验任务', 'Tasks', ep == 'tasks') }}
+  {% if module_enabled('forms') %}
   {{ navlink('form_templates_page', '检验模板', 'Forms', ep in ['form_templates_page', 'inspect_checklist']) }}
+  {% endif %}
   {% if module_enabled('orders') %}
   {{ navlink('orders', '订单', 'Orders', ep in ['orders', 'order_new', 'order_edit']) }}
   {% endif %}
   {% if module_enabled('suppliers') %}
   {{ navlink('suppliers', '供应商', 'Suppliers', ep in ['suppliers', 'supplier_new', 'supplier_edit']) }}
   {% endif %}
+  {% if module_enabled('products') %}
   {{ navlink('products', '产品', 'Products', ep in ['products', 'product_new', 'product_edit']) }}
+  {% endif %}
   {% if g.is_admin %}
   {{ navlink('regions', '区域', 'Regions', ep == 'regions') }}
   {{ navlink('employees', '员工', 'Employees', ep in ['employees', 'employee_new', 'employee_edit']) }}

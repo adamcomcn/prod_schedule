@@ -81,7 +81,7 @@ class I18nAndModuleTests(unittest.TestCase):
 
     def test_all_pilot_pages_render_in_both_languages(self):
         config = app.load_config()
-        config['modules'] = {'orders': True, 'suppliers': True}
+        config['modules'] = {'orders': True, 'suppliers': True, 'forms': True, 'products': True}
         app.save_json(app.CONFIG_FILE, config)
         for lang in ('zh', 'en'):
             self.client.get(f'/lang/{lang}')
@@ -96,7 +96,9 @@ class I18nAndModuleTests(unittest.TestCase):
         self.assertNotIn('href="/knowledge"', page)
         self.assertNotIn('href="/orders"', page)
         self.assertNotIn('href="/suppliers"', page)
-        for path in ('/hr', '/training', '/knowledge', '/orders', '/suppliers'):
+        self.assertNotIn('href="/forms"', page)
+        self.assertNotIn('href="/products"', page)
+        for path in ('/hr', '/training', '/knowledge', '/orders', '/suppliers', '/forms', '/products'):
             self.assertEqual(self.client.get(path).status_code, 404, path)
 
     def test_admin_can_enable_module(self):
