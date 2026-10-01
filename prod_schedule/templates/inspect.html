@@ -420,7 +420,7 @@ input[name=result] { display:none; }
             {% elif rv %}
               <span class="hq-fail">&#8617; {{ tr('已退回', 'Returned') }} · {{ rv.reviewer_name }} · {{ rv.reviewed_at }} — {{ rv.comment }}</span>
             {% else %}
-              <span class="hq-pending">&#9203; {{ tr('待审核', 'Pending review') }}</span>
+              <span class="{{ 'hq-fail' if p.result != 'Pass' else 'hq-pending' }}" style="{{ 'font-weight:700;' if p.result != 'Pass' else '' }}">&#9203; {{ tr('待审核', 'Pending review') }}{% if p.result != 'Pass' %} — {{ tr('不合格/部分合格报告，总部尚未收到', 'failed/partial report, HQ has not received it') }}{% endif %}</span>
             {% endif %}
             {% if g.can_assign %}
             <form method="POST" action="{{ url_for('review_inspection', job_key=job.job_key, index=pidx) }}" style="display:inline-flex; gap:4px; align-items:center; flex-wrap:wrap;">
