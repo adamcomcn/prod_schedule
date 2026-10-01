@@ -20,7 +20,9 @@
 .task-table tr.urgent  td { background:#fff8f0; }
 .task-table tbody tr:hover td { filter:brightness(.97); }
 .status-sel { font-size:.78rem; border:1px solid #d0d5dd; border-radius:6px;
-              padding:4px 8px; background:#fff; cursor:pointer; }
+              padding:4px 8px; background:#fff; cursor:pointer;
+              width:auto; min-width:104px; }   /* the global select rule is width:100% and got squeezed */
+.task-table td.status-cell, .task-table th[data-key="status"] { white-space:nowrap; }
 .days-badge { display:inline-block; padding:2px 8px; border-radius:10px;
               font-size:.75rem; font-weight:700; white-space:nowrap; }
 .days-overdue { background:#fee2e2; color:#991b1b; }
@@ -558,7 +560,7 @@ tr.mine td { background:#f0fdf4; }
                 <span style="color:#9ca3af; font-size:.78rem;">{{ tr('未分配', 'Unassigned') }}</span>
               {% endif %}
             </td>
-            <td>
+            <td class="status-cell">
               {% if g.can_assign or t.assigned_to == g.user_id %}
               <form method="POST" action="{{ url_for('task_status_update', tid=t.id) }}"
                     style="display:inline;">
