@@ -8,6 +8,9 @@
 
 .card-note { font-size:.74rem; color:#6b7280; line-height:1.55; margin:-4px 0 12px; }
 .card-note b { color:#374151; }
+.chart-switch { display:inline-flex; border:1px solid #d0d5dd; border-radius:8px; overflow:hidden; }
+.chart-switch button { border:0; background:#fff; padding:4px 14px; font-size:.78rem; cursor:pointer; color:#4b5563; }
+.chart-switch button.active { background:#1a3a5c; color:#fff; font-weight:600; }
 .help-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 16px; margin-bottom:16px; font-size:.78rem; color:#4b5563; line-height:1.7; }
 .help-box summary { cursor:pointer; font-weight:700; color:#1a3a5c; }
 .stat-card { background: #fff; border-radius: 10px;
@@ -534,8 +537,14 @@
   <!-- Weekly region trend chart -->
   {% if chart_labels and chart_labels|length > 1 %}
   <div class="card">
-    <div class="card-title">{{ tr('各区域每周订单趋势', 'Weekly Orders by Region') }}</div>
-    <div class="card-note">{{ tr('每个点 = 该周<b>最后一次上传</b>的排期里的订单数（同一周多次上传只取最后一次），按订单号+物料去重；最右边的点就是当前排期，与上面卡片的数字一致。曲线下降通常表示订单发货离开了排期，上升表示新增订单多于发货。', 'Each point = orders in the <b>last upload of that week</b> (several uploads in a week count once), de-duplicated by PO + item; the right-most point is the current schedule and matches the cards above. A falling line usually means orders shipped out; a rising line means more new orders than shipments.')|safe }}</div>
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <span>{{ tr('各区域每周订单趋势', 'Weekly Orders by Region') }}</span>
+      <span class="chart-switch" role="group" aria-label="{{ tr('图表类型', 'Chart type') }}">
+        <button type="button" data-mode="bar" class="active">{{ tr('柱状', 'Bars') }}</button>
+        <button type="button" data-mode="line">{{ tr('折线', 'Lines') }}</button>
+      </span>
+    </div>
+    <div class="card-note">{{ tr('每个点/每根柱 = 该周<b>最后一次上传</b>的排期里的订单数（同一周多次上传只取最后一次），按订单号+物料去重；最右边就是当前排期，与上面卡片的数字一致。<b>柱状</b>：柱子总高度 = 当周订单总数，按区域分色堆叠，柱顶数字是总数。<b>折线</b>：每个区域一条线；只显示有上传记录的周，数据点很少时不要过度解读两点之间的斜线。柱子变矮通常表示订单发货离开了排期，变高表示新增订单多于发货。', 'Each point / bar = orders in the <b>last upload of that week</b> (several uploads in a week count once), de-duplicated by PO + item; the right-most one is the current schedule and matches the cards above. <b>Bars</b>: bar height = total orders that week, stacked by region, the number on top is the total. <b>Lines</b>: one line per region; only weeks with an upload are shown, so do not read much into the slope between two far-apart points. A shorter bar usually means orders shipped out; a taller one means more new orders than shipments.')|safe }}</div>
     <div style="position:relative;height:260px;">
       <canvas id="weeklyRegionChart"></canvas>
     </div>
@@ -615,53 +624,98 @@
   var dates    = {{ chart_dates | tojson }};
   var datasets = {{ chart_datasets | tojson }};
 
-  var COLORS = [
-    '#1a3a5c','#2563eb','#059669','#d97706',
-    '#7c3aed','#dc2626','#0891b2','#65a30d'
-  ];
+  var COLORS = ['#1a3a5c','#2563eb','#059669','#d97706','#7c3aed','#dc2626','#0891b2','#65a30d'];
+  var canvas = document.getElementById('weeklyRegionChart');
+  var chart = null;
+  var ORDERS = {{ tr('订单数', 'Orders')|tojson }};
+  var TOTAL = {{ tr('合计', 'Total')|tojson }};
 
-  var chartDatasets = datasets.map(function(ds, i) {
-    return {
-      label: ds.region,
-      data: ds.data,
-      borderColor: COLORS[i % COLORS.length],
-      backgroundColor: COLORS[i % COLORS.length] + '22',
-      borderWidth: 2,
-      pointRadius: 4,
-      pointHoverRadius: 6,
-      tension: 0.3,
-      spanGaps: true
-    };
-  });
+  function colorOf(i) { return COLORS[i % COLORS.length]; }
+  function weekTotal(i) {
+    return datasets.reduce(function (sum, ds) { return sum + (ds.data[i] || 0); }, 0);
+  }
 
-  new Chart(document.getElementById('weeklyRegionChart'), {
-    type: 'line',
-    data: { labels: labels, datasets: chartDatasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
-        tooltip: {
-          callbacks: {
-            title: function(items) { var i = items[0].dataIndex; return labels[i] + ' · ' + dates[i]; },
-            label: function(ctx) {
-              return ctx.dataset.label + ': ' + (ctx.parsed.y ?? '–') + ' orders';
+  // numbers inside the stacked segments and the total above each bar
+  var barLabels = {
+    id: 'barLabels',
+    afterDatasetsDraw: function (c) {
+      if (c.config.type !== 'bar') return;
+      var ctx = c.ctx; ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      c.data.datasets.forEach(function (ds, di) {
+        c.getDatasetMeta(di).data.forEach(function (bar, i) {
+          var v = ds.data[i];
+          if (!v || Math.abs(bar.base - bar.y) < 14) return;
+          ctx.fillStyle = '#fff'; ctx.font = '600 11px sans-serif';
+          ctx.fillText(v, bar.x, (bar.y + bar.base) / 2);
+        });
+      });
+      var top = c.getDatasetMeta(c.data.datasets.length - 1);
+      ctx.fillStyle = '#111827'; ctx.font = '700 12px sans-serif';
+      labels.forEach(function (_, i) {
+        var y = Infinity;
+        c.data.datasets.forEach(function (ds, di) {
+          var b = c.getDatasetMeta(di).data[i];
+          if (b && ds.data[i]) y = Math.min(y, b.y);
+        });
+        if (y !== Infinity) ctx.fillText(weekTotal(i), c.getDatasetMeta(0).data[i].x, y - 10);
+      });
+      ctx.restore();
+    }
+  };
+
+  function build(mode) {
+    if (chart) chart.destroy();
+    var isBar = mode === 'bar';
+    chart = new Chart(canvas, {
+      type: isBar ? 'bar' : 'line',
+      data: {
+        labels: labels,
+        datasets: datasets.map(function (ds, i) {
+          var base = { label: ds.region, data: ds.data, borderColor: colorOf(i), backgroundColor: colorOf(i) };
+          return isBar
+            ? Object.assign(base, { stack: 'orders', maxBarThickness: 64, borderWidth: 0 })
+            : Object.assign(base, { backgroundColor: colorOf(i) + '22', borderWidth: 2, pointRadius: 4,
+                                    pointHoverRadius: 6, tension: 0.3, spanGaps: true });
+        })
+      },
+      plugins: [barLabels],
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        layout: { padding: { top: isBar ? 18 : 0 } },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              title: function (items) { var i = items[0].dataIndex; return labels[i] + ' · ' + dates[i]; },
+              label: function (ctx) { return ctx.dataset.label + ': ' + (ctx.parsed.y == null ? '–' : ctx.parsed.y); },
+              footer: function (items) { return TOTAL + ': ' + weekTotal(items[0].dataIndex); }
             }
           }
-        }
-      },
-      scales: {
-        x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 } } },
-        y: {
-          beginAtZero: true,
-          grid: { color: '#f1f5f9' },
-          ticks: { font: { size: 11 }, stepSize: 20 },
-          title: { display: true, text: {{ tr('订单数', 'Orders')|tojson }}, font: { size: 11 } }
+        },
+        scales: {
+          x: { stacked: isBar, grid: { display: false }, ticks: { font: { size: 11 } } },
+          y: {
+            stacked: isBar, beginAtZero: true, grid: { color: '#f1f5f9' },
+            ticks: { font: { size: 11 } },
+            title: { display: true, text: ORDERS, font: { size: 11 } }
+          }
         }
       }
-    }
-  });
+    });
+  }
+
+  var saved = 'bar';
+  try { saved = localStorage.getItem('dashTrendMode') || 'bar'; } catch (e) {}
+  var buttons = document.querySelectorAll('.chart-switch button');
+  function select(mode) {
+    buttons.forEach(function (b) { b.classList.toggle('active', b.dataset.mode === mode); });
+    build(mode);
+    try { localStorage.setItem('dashTrendMode', mode); } catch (e) {}
+  }
+  buttons.forEach(function (b) { b.addEventListener('click', function () { select(b.dataset.mode); }); });
+  select(saved === 'line' ? 'line' : 'bar');
 })();
 </script>
 {% endif %}

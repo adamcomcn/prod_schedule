@@ -117,6 +117,19 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('width:100.0%; height:100%', page)        # largest region fills the row
         self.assertIn('width:20.0%; height:100%', page)         # 2 of 10 orders
 
+    def test_trend_chart_has_bar_and_line_modes(self):
+        cur = {'MEL': rows((1, ''), (2, ''))}
+        app.save_json(app.PREVIOUS_FILE, cur); app.save_json(app.CURRENT_FILE, cur)
+        with db_conn() as conn:
+            for d in ('2026-09-22', '2026-09-30'):
+                conn.execute('INSERT INTO weekly_snapshots (week_label, week_date, region, total_orders) VALUES (?,?,?,?)',
+                             (d, d, 'MEL', 5))
+        with self.context() as (ctx, page):
+            pass
+        self.assertIn('data-mode="bar"', page)
+        self.assertIn('data-mode="line"', page)
+        self.assertIn("stack: 'orders'", page)
+
 
 if __name__ == '__main__':
     unittest.main()
