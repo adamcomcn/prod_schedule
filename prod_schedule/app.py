@@ -3562,6 +3562,7 @@ def tasks():
     if scope not in ('mine', 'unassigned', 'all'):
         scope = 'all'
     today = datetime.now().date()
+    reconcile_tasks_with_inspections()
 
     with db_conn() as conn:
         every_task = [dict(r) for r in conn.execute(
@@ -3791,6 +3792,36 @@ def task_status_update(tid):
 TASK_STATUSES = ('Pending', 'In Progress', 'Completed', 'On Hold', 'Closed')
 # 'Closed' = closed by the lead without an inspection (order gone / not needed)
 DONE_STATUSES = ('Completed', 'Closed')
+
+
+def reconcile_tasks_with_inspections():
+    """Keep the task list in step with the submitted inspection reports: a
+    still-Pending task takes the status of its latest report, and a report
+    whose job has no task gets one. Returns (updated, created)."""
+    updated = created = 0
+    with db_conn() as conn:
+        existing = {r['job_key']: r['status'] for r in conn.execute(
+            'SELECT job_key, status FROM inspection_tasks')}
+        for job_key, records in load_json(INSPECTIONS_CACHE, {}).items():
+            if not records:
+                continue
+            rec = records[-1]
+            status = 'Completed' if rec.get('result') == 'Pass' else 'In Progress'
+            if job_key in existing:
+                if (existing[job_key] or 'Pending') == 'Pending':
+                    conn.execute('UPDATE inspection_tasks SET status=? WHERE job_key=?', (status, job_key))
+                    updated += 1
+            else:
+                conn.execute(
+                    'INSERT OR IGNORE INTO inspection_tasks (job_key,order_number,region,item_code,'
+                    'description,supplier,quantity,status) VALUES (?,?,?,?,?,?,?,?)',
+                    (job_key, rec.get('order_number', ''), rec.get('region', ''), rec.get('item_code', ''),
+                     rec.get('item_description', ''), rec.get('supplier', ''),
+                     rec.get('quantity_ordered', ''), status))
+                created += 1
+    if updated or created:
+        logger.info('Reconciled tasks with inspections: %s updated, %s created', updated, created)
+    return updated, created
 
 
 def _update_task_after_inspection(job_key, result):
