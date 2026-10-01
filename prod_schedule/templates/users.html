@@ -14,6 +14,7 @@
 {% macro role_options(selected) %}
   <option value="inspector" {% if selected == 'inspector' %}selected{% endif %}>{{ tr('检验员', 'Inspector') }}</option>
   <option value="lead" {% if selected == 'lead' %}selected{% endif %}>{{ tr('检验主管（可分配任务）', 'Lead inspector (assigns tasks)') }}</option>
+  <option value="hq" {% if selected == 'hq' %}selected{% endif %}>{{ tr('澳洲总部人员（查看/审核）', 'Melbourne HQ (view / review)') }}</option>
   <option value="admin" {% if selected == 'admin' %}selected{% endif %}>{{ tr('管理员', 'Admin') }}</option>
 {% endmacro %}
 {% block content %}
@@ -33,6 +34,7 @@
       <div class="role-help">
         {{ tr('检验员：只看到并更新分配给自己的任务。', 'Inspector: sees and updates the tasks assigned to them.') }}<br>
         {{ tr('检验主管：可以把任务分配给自己或其他检验员，分配后自动发送邮件通知。', 'Lead inspector: assigns tasks to themselves or other inspectors; an e-mail is sent automatically.') }}<br>
+        {{ tr('澳洲总部人员：查看所有排期、任务、报告、仪表板和价格，可以审核检验报告；不提交检验、不分配任务。', 'Melbourne HQ: sees all schedules, tasks, reports, the dashboard and prices, and can review reports; does not inspect or assign.') }}<br>
         {{ tr('管理员：上传排期、系统设置、账号管理，也可以分配任务。', 'Admin: uploads schedules, manages settings and accounts, and can also assign tasks.') }}
       </div>
     </form>

@@ -77,7 +77,7 @@ LOGIN_MAX_FAILURES = 5
 _login_failures = defaultdict(deque)
 
 ADMIN_ENDPOINTS = {
-    'dashboard', 'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings',
+    'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings',
     'settings_modules', 'office_location_add',
     'office_location_delete', 'supplier_new', 'supplier_edit', 'suppliers_import',
     'supplier_delete', 'category_new', 'category_delete', 'inspector_add',
@@ -1209,7 +1209,7 @@ def index():
         statuses, typo_flags, shipped_rows = compute_changes(previous, current)
     else:
         statuses, typo_flags, shipped_rows = {}, [], {}
-    if not g.is_admin:
+    if not g.can_see_prices:
         # Prices never reach inspectors (not even via search).
         current, shipped_rows = strip_admin_only_columns(current, shipped_rows)
     config = load_config()
@@ -1364,7 +1364,7 @@ def export_comparison_excel():
     statuses, _, shipped_rows = (
         compute_changes(previous, current)
         if current and previous else ({}, [], {}))
-    if not g.is_admin:
+    if not g.can_see_prices:
         current, shipped_rows = strip_admin_only_columns(current, shipped_rows)
 
     workbook = openpyxl.Workbook()
@@ -2345,6 +2345,9 @@ def inspect_permission(job_key):
     them that are not closed. Anyone may still view the job and its reports."""
     if g.get('can_assign'):
         return True, ''
+    if g.get('is_hq'):
+        return False, tr('总部账号可以查看和审核检验报告，但不提交检验。',
+                         'Head-office accounts can view and review reports but do not submit inspections.')
     task = job_task(job_key)
     if not task or not task['assigned_to']:
         return False, tr('此订单尚未分配检验任务，请联系检验主管分配后再检验。',
@@ -2951,8 +2954,8 @@ def _send_review_request_email(job_key, index, record):
 
 @app.route('/inspect/<path:job_key>/report/<int:index>/review', methods=['POST'])
 def review_inspection(job_key, index):
-    """Lead / admin approves or returns a submitted inspection report."""
-    if not g.can_assign:
+    """Lead / admin / HQ approves or returns a submitted inspection report."""
+    if not g.can_review:
         abort(403)
     records = load_json(INSPECTIONS_CACHE, {}).get(job_key, [])
     if not 0 <= index < len(records):
@@ -3764,7 +3767,7 @@ def tasks():
     from datetime import timedelta
     status_filter = request.args.get('status', '')
     # Inspectors land on their own tasks; the lead / admin on everything.
-    scope = request.args.get('scope') or ('all' if g.can_assign else 'mine')
+    scope = request.args.get('scope') or ('all' if g.can_assign or g.is_hq else 'mine')
     if scope not in ('mine', 'unassigned', 'all'):
         scope = 'all'
     today = datetime.now().date()
@@ -3887,7 +3890,7 @@ def tasks():
         fail_ct=fail_ct,
     )
 
-    review_queue = pending_reviews() if g.can_assign else []
+    review_queue = pending_reviews() if g.can_review else []
     return render_template('tasks.html', review_queue=review_queue, tasks=rows, inspections=inspections,
                            today=today, status_filter=status_filter, stats=stats,
                            orphan_only=orphan_only, orphan_count=orphan_count,
@@ -4852,7 +4855,9 @@ def _startup_safety_checks():
 _startup_safety_checks()
 
 # admin: everything; lead: inspector who also assigns tasks; inspector: own tasks
-ROLES = ('admin', 'lead', 'inspector')
+# hq = Melbourne head office: views everything (incl. dashboard and prices)
+# and reviews reports, but does not inspect or assign.
+ROLES = ('admin', 'lead', 'inspector', 'hq')
 
 def _valid_email(value):
     return bool(re.fullmatch(r'[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+', value or ''))
@@ -4998,11 +5003,17 @@ def _auth_check():
     g.role = user['role']
     g.employee_id = user['employee_id']
     g.is_admin = user['role'] == 'admin'
+    g.is_hq = user['role'] == 'hq'
     g.can_assign = user['role'] in ('admin', 'lead')
+    g.can_review = user['role'] in ('admin', 'lead', 'hq')
+    g.can_see_prices = user['role'] in ('admin', 'hq')
+    g.can_view_dashboard = user['role'] in ('admin', 'hq')
     if not app.config.get('TESTING') and _last_reminder_day['day'] != date.today():
         _last_reminder_day['day'] = date.today()
         _run_reminders_in_background(request.host_url)
     g.display_name = user['display_name'] or user['username']
+    if request.endpoint == 'dashboard' and not g.can_view_dashboard:
+        return tr('无权限访问此页面', 'Forbidden'), 403
     if request.endpoint in ADMIN_ENDPOINTS and not g.is_admin:
         return tr('无权限访问此页面', 'Forbidden'), 403
     disabled = _disabled_module_for_path(request.path)

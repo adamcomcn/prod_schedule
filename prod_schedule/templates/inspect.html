@@ -480,7 +480,7 @@ input[name=result] { display:none; }
             {% else %}
               <span class="{{ 'hq-fail' if p.result != 'Pass' else 'hq-pending' }}" style="{{ 'font-weight:700;' if p.result != 'Pass' else '' }}">&#9203; {{ tr('待审核', 'Pending review') }}{% if p.result != 'Pass' %} — {{ tr('不合格/部分合格报告，总部尚未收到', 'failed/partial report, HQ has not received it') }}{% endif %}</span>
             {% endif %}
-            {% if g.can_assign %}
+            {% if g.can_review %}
             <form method="POST" action="{{ url_for('review_inspection', job_key=job.job_key, index=pidx) }}" style="display:inline-flex; gap:4px; align-items:center; flex-wrap:wrap;">
               <input type="text" name="comment" placeholder="{{ tr('审核意见（退回必填）', 'Comment (required to return)') }}" maxlength="500" style="padding:2px 6px; font-size:.75rem; min-width:170px;">
               <button type="submit" name="action" value="approve" class="hq-resend">{{ tr('审核通过', 'Approve') }}</button>

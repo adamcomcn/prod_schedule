@@ -102,7 +102,7 @@ textarea { resize: vertical; min-height: 80px; }
 </head>
 <body>
 <nav class="nav">
-  <a href="{{ url_for('dashboard' if g.is_admin else 'index') }}" class="nav-brand"
+  <a href="{{ url_for('dashboard' if g.can_view_dashboard else 'index') }}" class="nav-brand"
      style="display:flex;align-items:center;gap:10px;text-decoration:none;">
     <img src="{{ url_for('static', filename='daemco_logo.png') }}" alt="Daemco"
          style="height:26px;filter:brightness(0) invert(1);flex-shrink:0;">
@@ -116,7 +116,7 @@ textarea { resize: vertical; min-height: 80px; }
   {% macro navlink(endpoint, zh, en, active) %}
     <a href="{{ url_for(endpoint) }}" class="nav-link {% if active %}active{% endif %}">{{ tr(zh, en) }}</a>
   {% endmacro %}
-  {% if g.is_admin %}
+  {% if g.can_view_dashboard %}
   {{ navlink('dashboard', '仪表板', 'Dashboard', ep == 'dashboard') }}
   {% endif %}
   {{ navlink('index', '排期', 'Schedule', ep in ['index', 'upload_preview']) }}
