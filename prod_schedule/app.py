@@ -77,7 +77,7 @@ LOGIN_MAX_FAILURES = 5
 _login_failures = defaultdict(deque)
 
 ADMIN_ENDPOINTS = {
-    'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings',
+    'dashboard', 'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings',
     'settings_modules', 'office_location_add',
     'office_location_delete', 'supplier_new', 'supplier_edit', 'suppliers_import',
     'supplier_delete', 'category_new', 'category_delete', 'inspector_add',

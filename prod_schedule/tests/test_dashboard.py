@@ -131,5 +131,35 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("stack: 'orders'", page)
 
 
+class DashboardAccessTests(unittest.TestCase):
+    def setUp(self):
+        app.app.config.update(TESTING=True)
+        with db_conn() as conn:
+            conn.execute('DELETE FROM users')
+            for u, role in (('adm', 'admin'), ('lead', 'lead'), ('insp', 'inspector')):
+                conn.execute('INSERT INTO users (username,password_hash,role) VALUES (?,?,?)',
+                             (u, generate_password_hash('x' * 12), role))
+            self.ids = {r['username']: r['id'] for r in conn.execute('SELECT id, username FROM users')}
+        cfg = app.load_config(); cfg['modules'] = {}; app.save_json(app.CONFIG_FILE, cfg)
+
+    def client(self, user):
+        c = app.app.test_client()
+        with c.session_transaction() as s:
+            s['user_id'] = self.ids[user]
+        return c
+
+    def test_only_admin_can_open_the_dashboard(self):
+        self.assertEqual(self.client('adm').get('/dashboard').status_code, 200)
+        for user in ('lead', 'insp'):
+            self.assertEqual(self.client(user).get('/dashboard').status_code, 403, user)
+
+    def test_nav_hides_the_dashboard_from_non_admins(self):
+        admin_page = self.client('adm').get('/tasks').get_data(as_text=True)
+        self.assertIn('href="/dashboard"', admin_page)
+        for user in ('lead', 'insp'):
+            page = self.client(user).get('/tasks').get_data(as_text=True)
+            self.assertNotIn('href="/dashboard"', page, user)      # menu entry and the logo link
+
+
 if __name__ == '__main__':
     unittest.main()
