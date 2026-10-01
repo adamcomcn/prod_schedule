@@ -168,3 +168,19 @@ class QaBrtSystemTruthTests(unittest.TestCase):
         self.assertTrue(app.qa_excel_mismatch(row, self.H, []))
         self.assertFalse(app.qa_excel_mismatch(row, self.H, [{'result': 'Pass'}]))
         self.assertFalse(app.qa_excel_mismatch(['D1', 'PO1', 'X', ''], self.H, []))
+
+    def test_region_bars_explain_the_symbols(self):
+        from werkzeug.security import generate_password_hash
+        with db_conn() as conn:
+            conn.execute('DELETE FROM users'); conn.execute('DELETE FROM inspection_tasks')
+            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('adm',?,'admin')",
+                         (generate_password_hash('x' * 12),))
+            uid = conn.execute("SELECT id FROM users WHERE username='adm'").fetchone()[0]
+            conn.execute("INSERT INTO inspection_tasks (job_key,order_number,region,item_code,est_completion,status) "
+                         "VALUES ('M|P|I','D1','MELBOURNE','I','2020-01-01','Pending')")
+        c = app.app.test_client()
+        with c.session_transaction() as s:
+            s['user_id'] = uid
+        page = c.get('/tasks').get_data(as_text=True)
+        self.assertIn('⚠ 逾期 1', page)
+        self.assertIn('预计完成日已过、仍未完成的任务数', page)
