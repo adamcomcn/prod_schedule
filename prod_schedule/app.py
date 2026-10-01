@@ -271,6 +271,8 @@ MODULES = {
                   'paths': ('/hr',)},
     'training':  {'zh': '培训与考试', 'en': 'Training & exams', 'paths': ('/training',)},
     'knowledge': {'zh': '知识库', 'en': 'Knowledge base', 'paths': ('/knowledge',)},
+    'orders':    {'zh': '订单（手动录入）', 'en': 'Orders (manual entry)', 'paths': ('/orders',)},
+    'suppliers': {'zh': '供应商', 'en': 'Suppliers', 'paths': ('/suppliers',)},
 }
 
 def module_enabled(name):

@@ -80,6 +80,9 @@ class I18nAndModuleTests(unittest.TestCase):
         self.assertIn('Sign in to continue', page)
 
     def test_all_pilot_pages_render_in_both_languages(self):
+        config = app.load_config()
+        config['modules'] = {'orders': True, 'suppliers': True}
+        app.save_json(app.CONFIG_FILE, config)
         for lang in ('zh', 'en'):
             self.client.get(f'/lang/{lang}')
             for path in PAGES:
@@ -91,7 +94,9 @@ class I18nAndModuleTests(unittest.TestCase):
         self.assertNotIn('href="/hr"', page)
         self.assertNotIn('href="/training"', page)
         self.assertNotIn('href="/knowledge"', page)
-        for path in ('/hr', '/training', '/knowledge'):
+        self.assertNotIn('href="/orders"', page)
+        self.assertNotIn('href="/suppliers"', page)
+        for path in ('/hr', '/training', '/knowledge', '/orders', '/suppliers'):
             self.assertEqual(self.client.get(path).status_code, 404, path)
 
     def test_admin_can_enable_module(self):
