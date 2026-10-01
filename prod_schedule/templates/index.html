@@ -248,8 +248,10 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
             {{ h|header_label }}<span class="sort-icon">&#x21C5;</span>
           </th>
           {% endfor %}
-          <th style="min-width:130px">{{ tr('检验状态', 'Inspection Status') }}</th>
-          <th style="min-width:120px">V-Trust</th>
+          <th style="min-width:130px" onclick="sortTable({{ si }}, {{ rows[0]|length + 1 }})"
+              title="{{ tr('点击排序：不合格 → 部分合格 → 待检验 → 合格', 'Sort: Fail → Partial → Pending → Pass') }}">{{ tr('检验状态', 'Inspection Status') }}<span class="sort-icon">&#x21C5;</span></th>
+          <th style="min-width:120px" onclick="sortTable({{ si }}, {{ rows[0]|length + 2 }})"
+              title="{{ tr('点击排序：不合格 → 待检验 → 合格 → 不适用', 'Sort: Fail → Pending → Pass → N/A') }}">V-Trust<span class="sort-icon">&#x21C5;</span></th>
           <th style="min-width:100px">{{ tr('报告', 'Report') }}</th>
         </tr>
       </thead>
@@ -300,7 +302,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
             {% if is_est and g.can_assign %}<button type="button" class="est-edit" data-key="{{ job_key }}" data-val="{{ cell }}" title="{{ tr('修改预计完成日', 'Edit completion date') }}" style="border:none;background:none;cursor:pointer;color:#2563eb;">&#9998;</button>{% endif %}
           </td>
           {% endfor %}
-          <td class="inspect-col">
+          <td class="inspect-col" data-sort="{{ {'Fail': '0', 'Partial Pass': '1', 'Pass': '3'}.get(insp[-1].result, '1') if insp else '2' }}-{{ insp[-1].inspection_date if insp else '' }}">
             {% if insp %}
               {% set last = insp[-1] %}
               {% set result = last.result|lower %}
@@ -319,7 +321,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
               <span class="badge badge-shipped">{{ tr('待检验', 'Pending') }}</span>
             {% endif %}
           </td>
-          <td class="inspect-col">
+          <td class="inspect-col" data-sort="{% if is_v %}{{ {'fail': '0', 'pass': '3'}.get(vtrust_val|lower, '1' if vtrust_val else '2') }}{% else %}9{% endif %}">
             {% if is_v %}
               {% if vtrust_val|lower == 'pass' %}
                 <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; {{ tr('合格', 'Pass') }}</span>
@@ -381,7 +383,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% for i in range(headers|length) %}
           <td data-col="{{ headers[i]|lower }}">{{ row[i] if i < row|length else '' }}</td>
           {% endfor %}
-          <td class="inspect-col">
+          <td class="inspect-col" data-sort="{{ {'Fail': '0', 'Partial Pass': '1', 'Pass': '3'}.get(insp2[-1].result, '1') if insp2 else '2' }}-{{ insp2[-1].inspection_date if insp2 else '' }}">
             {% if insp2 %}
               {% set last2 = insp2[-1] %}
               {% set result2 = last2.result|lower %}
@@ -400,7 +402,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
               <span class="badge badge-shipped">{{ tr('待检验', 'Pending') }}</span>
             {% endif %}
           </td>
-          <td class="inspect-col">
+          <td class="inspect-col" data-sort="{% if is_v2 %}{{ {'fail': '0', 'pass': '3'}.get(vtrust_val2|lower, '1' if vtrust_val2 else '2') }}{% else %}9{% endif %}">
             {% if is_v2 %}
               {% if vtrust_val2|lower == 'pass' %}
                 <span class="badge" style="background:#d1fae5;color:#065f46">&#10003; {{ tr('合格', 'Pass') }}</span>
@@ -759,15 +761,24 @@ function sortTable(tIdx, col) {
   const key = tIdx + '_' + col;
   const asc = sortState[key] = !sortState[key];
   const tbody = document.getElementById('tbody-' + tIdx);
-  const rows = Array.from(tbody.querySelectorAll('tr'));
-  rows.sort((a, b) => {
-    const va = a.cells[col] ? a.cells[col].textContent.trim() : '';
-    const vb = b.cells[col] ? b.cells[col].textContent.trim() : '';
+  const value = cell => cell ? (cell.dataset.sort !== undefined ? cell.dataset.sort : cell.textContent.trim()) : '';
+  const compare = (a, b) => {
+    const va = value(a.cells[col]), vb = value(b.cells[col]);
     const na = parseFloat(va), nb = parseFloat(vb);
-    const cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb);
+    const usesRank = a.cells[col] && a.cells[col].dataset.sort !== undefined;
+    const cmp = (!usesRank && !isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb);
     return asc ? cmp : -cmp;
-  });
-  rows.forEach(r => tbody.appendChild(r));
+  };
+  // Sort this week's rows and the "shipped this week" rows separately,
+  // keeping the divider between them.
+  const all = Array.from(tbody.children);
+  const divider = all.find(r => r.classList.contains('shipped-divider'));
+  const cut = divider ? all.indexOf(divider) : all.length;
+  const active = all.slice(0, cut).sort(compare);
+  const shipped = divider ? all.slice(cut + 1).sort(compare) : [];
+  active.forEach(r => tbody.appendChild(r));
+  if (divider) tbody.appendChild(divider);
+  shipped.forEach(r => tbody.appendChild(r));
 }
 </script>
 {% if g.can_assign %}
