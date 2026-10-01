@@ -91,3 +91,64 @@ class NotifyTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EstEditTests(unittest.TestCase):
+    HEADERS = ['Order Number', 'Daemco Purchase Order', 'Item Code', 'Estimated Completion Date', 'Must Ship Date']
+
+    def setUp(self):
+        app.app.config.update(TESTING=True)
+        FakeSMTP.sent = []
+        from werkzeug.security import generate_password_hash
+        with db_conn() as conn:
+            for t in ('users', 'inspection_tasks', 'est_overrides', 'task_date_changes'):
+                conn.execute(f'DELETE FROM {t}')
+            for u, role, mail in (('murphy', 'lead', 'murphy@example.test'),
+                                  ('yu', 'inspector', 'yu@example.test'),
+                                  ('other', 'inspector', 'other@example.test')):
+                conn.execute('INSERT INTO users (username,password_hash,role,email) VALUES (?,?,?,?)',
+                             (u, generate_password_hash(u * 4), role, mail))
+            self.ids = {r['username']: r['id'] for r in conn.execute('SELECT id, username FROM users')}
+            conn.execute("INSERT INTO inspection_tasks (job_key,order_number,region,item_code,est_completion,assigned_to) "
+                         "VALUES ('MEL|PO1|ITM','DPL1','MEL','ITM','2026-06-12',?)", (self.ids['yu'],))
+        cfg = app.load_config(); cfg['task_notify_emails'] = 'lead@example.test'; cfg['modules'] = {}
+        app.save_json(app.CONFIG_FILE, cfg)
+        self.sched = lambda est: {'MEL': [self.HEADERS, ['DPL1', 'PO1', 'ITM', est, '2026-06-30']]}
+        app.save_json(app.CURRENT_FILE, self.sched('2026-06-12'))
+
+    def client(self, user):
+        c = app.app.test_client()
+        with c.session_transaction() as s:
+            s['user_id'] = self.ids[user]; s['_csrf_token'] = 'tok'
+        return c
+
+    @mock.patch.dict(os.environ, SMTP_ENV)
+    @mock.patch('smtplib.SMTP_SSL', FakeSMTP)
+    def test_lead_edit_updates_everything_and_notifies(self):
+        r = self.client('murphy').post('/schedule/est', data={
+            '_csrf_token': 'tok', 'job_key': 'MEL|PO1|ITM', 'est': '2026-07-12', 'next': '/'})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(app.load_json(app.CURRENT_FILE)['MEL'][1][3], '2026-07-12')
+        with db_conn() as conn:
+            self.assertEqual(conn.execute('SELECT est_completion FROM inspection_tasks').fetchone()[0], '2026-07-12')
+            ov = conn.execute('SELECT * FROM est_overrides').fetchone()
+        self.assertEqual((ov['original'], ov['corrected']), ('2026-06-12', '2026-07-12'))
+        self.assertEqual(FakeSMTP.sent[0][1], ['lead@example.test', 'yu@example.test'])
+
+    def test_inspector_cannot_edit(self):
+        r = self.client('yu').post('/schedule/est', data={
+            '_csrf_token': 'tok', 'job_key': 'MEL|PO1|ITM', 'est': '2026-07-12'})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(app.load_json(app.CURRENT_FILE)['MEL'][1][3], '2026-06-12')
+
+    @mock.patch.dict(os.environ, SMTP_ENV)
+    @mock.patch('smtplib.SMTP_SSL', FakeSMTP)
+    def test_correction_survives_upload_until_supplier_changes_it(self):
+        self.client('murphy').post('/schedule/est', data={
+            '_csrf_token': 'tok', 'job_key': 'MEL|PO1|ITM', 'est': '2026-07-12'})
+        data, kept = app._apply_est_overrides(self.sched('2026-06-12'))      # supplier unchanged
+        self.assertEqual((data['MEL'][1][3], kept), ('2026-07-12', 1))
+        data, kept = app._apply_est_overrides(self.sched('2026-07-01'))      # supplier changed it
+        self.assertEqual((data['MEL'][1][3], kept), ('2026-07-01', 0))
+        with db_conn() as conn:
+            self.assertIsNone(conn.execute('SELECT 1 FROM est_overrides').fetchone())

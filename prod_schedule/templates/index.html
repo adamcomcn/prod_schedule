@@ -288,7 +288,11 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
             {% if qa_warn %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>{% endif %}
           </td>
           {% for cell in row %}
-          <td data-col="{{ headers[loop.index0]|lower if loop.index0 < headers|length else '' }}">{{ cell|status_label if headers[loop.index0] == 'Current Status' else cell }}</td>
+          {% set is_est = loop.index0 < headers|length and headers[loop.index0]|lower == 'estimated completion date' %}
+          <td data-col="{{ headers[loop.index0]|lower if loop.index0 < headers|length else '' }}">{{ cell|status_label if headers[loop.index0] == 'Current Status' else cell }}
+            {% if is_est and job_key in est_overrides %}<span title="{{ tr('已由', 'Corrected by') }} {{ est_overrides[job_key].edited_by }} {{ tr('修正，供应商原值：', ', supplier value: ') }}{{ est_overrides[job_key].original }}" style="color:#d97706;cursor:help;">&#9998;*</span>{% endif %}
+            {% if is_est and g.can_assign %}<button type="button" class="est-edit" data-key="{{ job_key }}" data-val="{{ cell }}" title="{{ tr('修改预计完成日', 'Edit completion date') }}" style="border:none;background:none;cursor:pointer;color:#2563eb;">&#9998;</button>{% endif %}
+          </td>
           {% endfor %}
           <td class="inspect-col">
             {% if insp %}
@@ -754,4 +758,21 @@ function sortTable(tIdx, col) {
   rows.forEach(r => tbody.appendChild(r));
 }
 </script>
+{% if g.can_assign %}
+<form id="est-form" method="POST" action="{{ url_for('schedule_est_edit') }}" style="display:none">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="job_key"><input type="hidden" name="est"><input type="hidden" name="next">
+</form>
+<script>
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('.est-edit');
+  if (!b) return;
+  var v = prompt({{ tr('修改预计完成日（保存后会邮件通知相关人员）', 'Edit completion date (relevant people will be notified by e-mail)')|tojson }}, b.dataset.val);
+  if (v === null || v.trim() === '' || v.trim() === b.dataset.val) return;
+  var f = document.getElementById('est-form');
+  f.job_key.value = b.dataset.key; f.est.value = v.trim(); f.next.value = location.pathname + location.search;
+  f.submit();
+});
+</script>
+{% endif %}
 {% endblock %}
