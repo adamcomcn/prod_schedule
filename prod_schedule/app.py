@@ -3130,9 +3130,17 @@ def send_due_reminders():
                 due.append(dict(t))
     if not due:
         return 0
+
+    def release():
+        # sending failed: re-arm so the next run retries
+        with db_conn() as conn:
+            for t in due:
+                conn.execute("UPDATE inspection_tasks SET reminder_est='' WHERE id=?", (t['id'],))
+
     due.sort(key=lambda t: split_est(t['est_completion'])[0])
     recipients = _task_recipients(due)
     if not recipients:
+        release()
         return 0
     lines = [f"预计完成日提醒 Completion reminder — {today.isoformat()}",
              f"以下 {len(due)} 个任务距预计完成日不足 {REMINDER_DAYS} 天（或已过期），请安排检验。",
@@ -3145,8 +3153,11 @@ def send_due_reminders():
         lines.append(f"    预计完成 Est. completion: {_est_label(t['est_completion'])}  ({when})")
         lines.append('    ' + url_for('inspect_form', job_key=t['job_key'], _external=True))
         lines.append('')
-    _smtp_send(f"【完成日提醒】{len(due)} 项检验任务 / {len(due)} inspection task(s) due within {REMINDER_DAYS} days",
-               '\n'.join(lines), recipients)
+    ok, _ = _smtp_send(f"【完成日提醒】{len(due)} 项检验任务 / {len(due)} inspection task(s) due within {REMINDER_DAYS} days",
+                       '\n'.join(lines), recipients)
+    if not ok:
+        release()
+        return 0
     return len(due)
 
 

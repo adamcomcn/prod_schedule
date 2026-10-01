@@ -75,6 +75,14 @@ class NotifyTests(unittest.TestCase):
             self.assertEqual(app.send_due_reminders(), 1)
         self.assertEqual(len(FakeSMTP.sent), 2)
 
+    def test_failed_send_does_not_consume_reminder(self):
+        self.add((date.today() + timedelta(days=3)).isoformat())
+        with app.app.test_request_context():
+            with mock.patch.object(app, '_smtp_send', return_value=(False, 'boom')):
+                self.assertEqual(app.send_due_reminders(), 0)
+            with mock.patch.object(app, '_smtp_send', return_value=(True, 'ok')):
+                self.assertEqual(app.send_due_reminders(), 1)
+
     def test_far_date_not_reminded(self):
         self.add((date.today() + timedelta(days=40)).isoformat())
         with app.app.test_request_context():
