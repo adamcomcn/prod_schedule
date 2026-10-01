@@ -60,6 +60,11 @@
               font-size:.72rem; font-weight:700; color:#111827; background:rgba(255,255,255,.92);
               padding:0 6px; border-radius:3px; line-height:16px; }
 .hbar-sub   { font-size:.74rem; color:#9ca3af; flex-shrink:0; width:150px; text-align:right; white-space:nowrap; }
+.task-table th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+.task-table th.sortable:hover { color:#1d4ed8; }
+.task-table th.sortable::after { content:'\2195'; margin-left:5px; font-size:.7rem; opacity:.35; }
+.task-table th.sortable.asc::after  { content:'\25B2'; opacity:.9; color:#1d4ed8; }
+.task-table th.sortable.desc::after { content:'\25BC'; opacity:.9; color:#1d4ed8; }
 .hbar-legend { margin-top:10px; padding-top:8px; border-top:1px solid #f1f5f9; font-size:.74rem; color:#6b7280; line-height:1.6; }
 
 /* ── urgency tiles ── */
@@ -461,16 +466,16 @@ tr.mine td { background:#f0fdf4; }
           <tr>
             {% if g.can_assign %}<th style="width:28px;"></th>{% endif %}
             <th style="width:12px;"></th>
-            <th>{{ tr('区域', 'Region') }}</th>
-            <th>{{ tr('订单号', 'Order No.') }}</th>
-            <th>{{ tr('产品编码', 'Item Code') }}</th>
-            <th>{{ tr('描述', 'Description') }}</th>
-            <th>{{ tr('数量', 'Qty') }}</th>
-            <th>{{ tr('预计完工', 'Est. Completion') }}</th>
-            <th>{{ tr('距今天数', 'Days Until Due') }}</th>
-            <th>{{ tr('检验结果', 'Inspection Result') }}</th>
-            <th>{{ tr('负责人', 'Assigned to') }}</th>
-            <th>{{ tr('任务状态', 'Task Status') }}</th>
+            <th class="sortable" data-key="region">{{ tr('区域', 'Region') }}</th>
+            <th class="sortable" data-key="order">{{ tr('订单号', 'Order No.') }}</th>
+            <th class="sortable" data-key="item">{{ tr('产品编码', 'Item Code') }}</th>
+            <th class="sortable" data-key="desc">{{ tr('描述', 'Description') }}</th>
+            <th class="sortable" data-key="qty" data-type="num">{{ tr('数量', 'Qty') }}</th>
+            <th class="sortable" data-key="est">{{ tr('预计完工', 'Est. Completion') }}</th>
+            <th class="sortable" data-key="days" data-type="num">{{ tr('距今天数', 'Days Until Due') }}</th>
+            <th class="sortable" data-key="result" title="{{ tr('不合格 → 部分合格 → 合格', 'Fail → Partial → Pass') }}">{{ tr('检验结果', 'Inspection Result') }}</th>
+            <th class="sortable" data-key="assignee">{{ tr('负责人', 'Assigned to') }}</th>
+            <th class="sortable" data-key="status">{{ tr('任务状态', 'Task Status') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -498,7 +503,12 @@ tr.mine td { background:#f0fdf4; }
             {% set days_label = est %}{% set days_cls = 'days-ok' %}
           {% endif %}
 
-          <tr class="{{ row_cls }}{% if t.assigned_to == g.user_id %} mine{% endif %}">
+          <tr class="{{ row_cls }}{% if t.assigned_to == g.user_id %} mine{% endif %}"
+              data-region="{{ t.region }}" data-order="{{ t.order_number }}" data-item="{{ t.item_code }}"
+              data-desc="{{ t.description }}" data-qty="{{ t.quantity }}" data-est="{{ est_iso(t.est_completion) }}"
+              data-days="{{ days_left if days_left is not none else '' }}"
+              data-result="{{ {'Fail': '1', 'Partial Pass': '2', 'Pass': '3'}.get(last_result, '') }}"
+              data-assignee="{{ t.assignee_name or '' }}" data-status="{{ t.status }}">
             {% if g.can_assign %}
             <td><input type="checkbox" class="task-check" name="task_ids" value="{{ t.id }}" form="assignForm" onchange="updateAssignCount()"></td>
             {% endif %}
@@ -618,6 +628,34 @@ function updateAssignCount() {
     var show = rows[0].style.display === 'none';
     rows.forEach(function (r) { r.style.display = show ? 'flex' : 'none'; });
     btn.textContent = show ? btn.dataset.open : btn.dataset.closed;
+  });
+})();
+</script>
+<script>
+(function () {
+  var table = document.querySelector('.task-table');
+  if (!table || !table.tBodies.length) return;
+  var body = table.tBodies[0];
+  var heads = table.querySelectorAll('th.sortable');
+  var collator = new Intl.Collator(undefined, {numeric: true, sensitivity: 'base'});
+  heads.forEach(function (th) {
+    th.addEventListener('click', function () {
+      var key = th.dataset.key, num = th.dataset.type === 'num';
+      var dir = th.classList.contains('asc') ? -1 : 1;
+      heads.forEach(function (h) { h.classList.remove('asc', 'desc'); });
+      th.classList.add(dir === 1 ? 'asc' : 'desc');
+      var rows = Array.prototype.slice.call(body.rows);
+      rows.sort(function (a, b) {
+        var x = a.dataset[key] || '', y = b.dataset[key] || '';
+        if (x === '' && y === '') return 0;
+        if (x === '') return 1;            // blanks always last
+        if (y === '') return -1;
+        var c = num ? (parseFloat(x) - parseFloat(y)) : collator.compare(x, y);
+        if (isNaN(c)) c = collator.compare(x, y);
+        return c * dir;
+      });
+      rows.forEach(function (r) { body.appendChild(r); });
+    });
   });
 })();
 </script>

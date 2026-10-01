@@ -370,6 +370,13 @@ def days_until(value, today):
 
 app.jinja_env.globals['days_until'] = days_until
 
+def est_iso(value):
+    """ISO date of a schedule date cell ('2026/6/15 ready for ship' -> '2026-06-15'), '' if none."""
+    parsed = _parse_date(value)
+    return parsed.isoformat() if parsed else ''
+
+app.jinja_env.globals['est_iso'] = est_iso
+
 def load_config():
     return load_json(CONFIG_FILE, {
         'sheet_id': '',
