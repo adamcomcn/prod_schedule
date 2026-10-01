@@ -152,3 +152,19 @@ class EstEditTests(unittest.TestCase):
         self.assertEqual((data['MEL'][1][3], kept), ('2026-07-01', 0))
         with db_conn() as conn:
             self.assertIsNone(conn.execute('SELECT 1 FROM est_overrides').fetchone())
+
+
+class QaBrtSystemTruthTests(unittest.TestCase):
+    H = ['Order Number', 'Daemco Purchase Order', 'Item Code', 'QA BRTs Sent?']
+
+    def test_excel_yes_is_not_a_report(self):
+        self.assertTrue(app.qa_brt_missing('shipped', []))
+        self.assertTrue(app.qa_brt_missing('partially_shipped', None))
+        self.assertFalse(app.qa_brt_missing('shipped', [{'result': 'Pass'}]))
+        self.assertFalse(app.qa_brt_missing('not_shipped', []))
+
+    def test_mismatch_when_excel_yes_but_no_report(self):
+        row = ['D1', 'PO1', 'X', 'YES']
+        self.assertTrue(app.qa_excel_mismatch(row, self.H, []))
+        self.assertFalse(app.qa_excel_mismatch(row, self.H, [{'result': 'Pass'}]))
+        self.assertFalse(app.qa_excel_mismatch(['D1', 'PO1', 'X', ''], self.H, []))

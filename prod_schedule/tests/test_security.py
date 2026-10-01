@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import openpyxl
 
 TEST_DATA_DIR = tempfile.mkdtemp(prefix='prod-schedule-tests-')
@@ -105,6 +106,7 @@ class SecurityAndProductionTests(unittest.TestCase):
             app.decrypt_excel(encrypted_office_header, '')
 
     def test_all_fully_shipped_jobs_are_retained_and_require_qa_brt(self):
+        real_load_json = app.load_json
         headers = [
             'Daemco Purchase Order', 'Item Code', 'Item Description',
             'Supplier', 'Quantity', 'QA BRTs Sent?']
@@ -117,8 +119,13 @@ class SecurityAndProductionTests(unittest.TestCase):
         current = {'MELBOURNE': [headers]}
         _, _, shipped_rows = app.compute_changes(previous, current)
 
-        persisted, pending = app.persist_fully_shipped_jobs(
-            previous, current, shipped_rows, '12 Jun 2026 12:00')
+        # The Excel 'QA BRTs Sent?' cell is not trusted: only a report in the
+        # system completes a fully shipped job.
+        with mock.patch.object(app, 'load_json', side_effect=lambda path, default=None: (
+                {'MELBOURNE|PO-DONE|ITEM-1': [{'result': 'Pass'}]}
+                if path == app.INSPECTIONS_CACHE else real_load_json(path, default))):
+            persisted, pending = app.persist_fully_shipped_jobs(
+                previous, current, shipped_rows, '12 Jun 2026 12:00')
 
         self.assertEqual(persisted, 2)
         self.assertEqual(pending, 1)

@@ -271,8 +271,8 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% set job_key = sheet_name ~ '|' ~ (ns.po if ns.po else ns.order) ~ '|' ~ ns.item %}
           {% set status = statuses.get(job_key, '') %}
           {# QA alert: shipped or partially shipped but QA BRTs not confirmed #}
-          {% set qa_val = (row[ns_qa.idx] if ns_qa.idx >= 0 and ns_qa.idx < row|length else '')|lower|trim %}
-          {% set qa_warn = status in ['shipped', 'partially_shipped'] and qa_val not in ['yes', 'y'] %}
+          {% set qa_warn = status in ['shipped', 'partially_shipped'] and not inspections.get(job_key) %}
+          {% set qa_mismatch = qa_excel_mismatch(row, headers, inspections.get(job_key)) %}
           {# V-Trust alert: valve item shipped/partial without V-Trust pass #}
           {% set insp = inspections.get(job_key, []) %}
           {% set vtrust_val = vtrust_status(insp) %}
@@ -290,6 +290,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
               <span class="badge badge-typo">&#9888; {{ tr('疑似笔误', 'TYPO?') }}</span>
             {% endif %}
             {% if qa_warn %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>{% endif %}
+            {% if qa_mismatch %}<span class="badge" style="background:#f59e0b;color:#fff;margin-top:2px" title="{{ tr('Excel 中 QA BRT 已发送=YES，但系统里没有检验报告，请补检验报告', 'Excel says QA BRTs sent = YES but there is no inspection report in the system') }}">&#9888; {{ tr('Excel 已标 YES，系统无报告', 'Excel YES, no report') }}</span>{% endif %}
           </td>
           {% for cell in row %}
           {% set is_est = loop.index0 < headers|length and headers[loop.index0]|lower == 'estimated completion date' %}
@@ -366,12 +367,13 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% set vtrust_val2 = vtrust_status(insp2) %}
           {% set is_v2 = shipped_key in valve_keys %}
           {% set vtrust_warn2 = is_v2 and vtrust_val2|lower != 'pass' %}
-          {% set qa_val2 = (row[ns_qa.idx] if ns_qa.idx >= 0 and ns_qa.idx < row|length else '')|lower|trim %}
-          {% set qa_warn2 = qa_val2 not in ['yes', 'y'] %}
+          {% set qa_warn2 = not insp2 %}
+          {% set qa_mismatch2 = qa_excel_mismatch(row, headers, insp2) %}
         <tr class="row-shipped{% if qa_warn2 %} row-qa-warn{% endif %}{% if vtrust_warn2 %} row-vtrust-warn{% endif %}" data-key="{{ shipped_key }}">
           <td>
             <span class="badge badge-shipped">{{ tr('已出货', 'SHIPPED') }}</span>
             {% if qa_warn2 %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>{% endif %}
+            {% if qa_mismatch2 %}<span class="badge" style="background:#f59e0b;color:#fff;margin-top:2px">&#9888; {{ tr('Excel 已标 YES，系统无报告', 'Excel YES, no report') }}</span>{% endif %}
           </td>
           {% for i in range(headers|length) %}
           <td data-col="{{ headers[i]|lower }}">{{ row[i] if i < row|length else '' }}</td>
