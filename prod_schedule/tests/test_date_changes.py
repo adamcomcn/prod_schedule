@@ -184,3 +184,20 @@ class QaBrtSystemTruthTests(unittest.TestCase):
         page = c.get('/tasks').get_data(as_text=True)
         self.assertIn('⚠ 逾期 1', page)
         self.assertIn('预计完成日已过、仍未完成的任务数', page)
+
+
+class TaskPageLabelTests(unittest.TestCase):
+    def test_status_overview_labels_are_rendered(self):
+        from werkzeug.security import generate_password_hash
+        app.app.config.update(TESTING=True)
+        with db_conn() as conn:
+            conn.execute('DELETE FROM users')
+            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('adm',?,'admin')",
+                         (generate_password_hash('x' * 12),))
+            uid = conn.execute("SELECT id FROM users WHERE username='adm'").fetchone()[0]
+        c = app.app.test_client()
+        with c.session_transaction() as s:
+            s['user_id'] = uid
+        page = c.get('/tasks').get_data(as_text=True)
+        self.assertNotIn('{{', page)
+        self.assertIn('待处理', page)

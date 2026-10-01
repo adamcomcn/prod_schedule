@@ -141,7 +141,7 @@ tr.mine td { background:#f0fdf4; }
       {% set pct = (cnt / stats.total * 100) | round(1) if stats.total else 0 %}
       <div class="status-row">
         <div class="status-label">
-          {{ tr('{{ zh }}', '{{ label }}') }}
+          {{ tr(zh, label) }}
         </div>
         <div class="status-bar-wrap">
           <div class="status-bar" style="width:{{ pct }}%; background:{{ color }};"></div>
