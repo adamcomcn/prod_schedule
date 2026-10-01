@@ -804,6 +804,22 @@ def init_db():
             except Exception:
                 pass
 
+        # Completion-date change log + two-week reminder marker
+        try:
+            conn.execute("ALTER TABLE inspection_tasks ADD COLUMN reminder_est TEXT DEFAULT ''")
+        except Exception:
+            pass
+        conn.execute('''CREATE TABLE IF NOT EXISTS task_date_changes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_key     TEXT NOT NULL,
+            old_est     TEXT DEFAULT '',
+            new_est     TEXT DEFAULT '',
+            old_ship    TEXT DEFAULT '',
+            new_ship    TEXT DEFAULT '',
+            week_label  TEXT DEFAULT '',
+            created_at  TEXT DEFAULT (datetime('now', 'localtime'))
+        )''')
+
         # Defect codes
         existing_dc = {r[0] for r in conn.execute('SELECT code FROM defect_codes').fetchall()}
         for row in _DEFECT_SEEDS:

@@ -315,16 +315,43 @@ def _save_uploaded_file(file_obj, directory, allowed_extensions):
     file_obj.save(os.path.join(directory, saved_name))
     return original, saved_name
 
+_DATE_IN_TEXT = re.compile(r'(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)')
+
 def _parse_date(value):
-    """Parse a schedule date cell ('2026-10-05', '2026/10/05', '05/10/2026',
-    '2026-10-05 00:00:00'); return None for blanks or text such as 'TBC'."""
-    text = str(value or '').strip()[:10]
-    for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%d/%m/%Y', '%d.%m.%Y'):
+    """Parse a schedule date cell ('2026-10-05', '2026/6/7', '05/10/2026',
+    '2026-10-05 00:00:00', '2026/6/15 ready for ship'); return None for
+    blanks or text without a date such as 'TBC'."""
+    text = str(value or '').strip()
+    match = _DATE_IN_TEXT.search(text)
+    if match:
         try:
-            return datetime.strptime(text, fmt).date()
+            return date(*(int(g) for g in match.groups()))
+        except ValueError:
+            return None
+    for fmt in ('%d/%m/%Y', '%d.%m.%Y'):
+        try:
+            return datetime.strptime(text[:10], fmt).date()
         except ValueError:
             continue
     return None
+
+def split_est(value):
+    """Split an estimated-completion cell into (date or None, remark text),
+    e.g. '2026/6/15 ready for ship' -> (2026-06-15, 'ready for ship')."""
+    text = str(value or '').strip()
+    parsed = _parse_date(text)
+    if not parsed:
+        return None, ' '.join(text.split())
+    match = _DATE_IN_TEXT.search(text)
+    rest = (text[:match.start()] + ' ' + text[match.end():]) if match else ''
+    rest = re.sub(r'\d{1,2}:\d{2}(:\d{2})?', '', rest)
+    return parsed, ' '.join(rest.split()).strip(' -,;')
+
+def est_changed(old, new):
+    """True when the date or the remark text really differs (ignores
+    formatting such as '2026-05-15' vs '2026/5/15 00:00:00')."""
+    (d1, n1), (d2, n2) = split_est(old), split_est(new)
+    return d1 != d2 or n1.lower() != n2.lower()
 
 def days_until(value, today):
     parsed = _parse_date(value)
@@ -1691,7 +1718,7 @@ def schedule_diff_summary(current, new):
 
     for key, detail in new_rows.items():
         old = old_rows.get(key)
-        if old and old['est_completion'] != detail['est_completion']:
+        if old and est_changed(old['est_completion'], detail['est_completion']):
             summary['date_changes'].append(dict(detail, previous_est=old['est_completion']))
 
     for sheet in list(new.keys()) + [s for s in current if s not in new]:
@@ -1933,6 +1960,7 @@ def _apply_schedule(data, baseline=False):
                          f'{pending_shipped} fully shipped job(s) require a QA BRT inspection report'),
                       'warning')
         new_tasks_created = []
+        date_changes = []
         tasks_updated = 0
         seen_this_upload = set()
         with db_conn() as conn:
@@ -1955,16 +1983,32 @@ def _apply_schedule(data, baseline=False):
                     seen_this_upload.add(jk)
                     if jk in existing_keys:
                         # Suppliers move completion / ship dates week to week;
-                        # keep open tasks in step with the latest schedule.
+                        # keep open tasks in step with the latest schedule and
+                        # remember what changed so the inspectors are told.
                         est, ship, qty = (gcol('estimated completion date', row),
                                           gcol('must ship date', row), gcol('quantity', row))
-                        cur = conn.execute(
-                            "UPDATE inspection_tasks SET est_completion=?, must_ship=?, "
-                            "quantity=? WHERE job_key=? AND IFNULL(status, '') != 'Completed' AND "
-                            "(IFNULL(est_completion, '') != ? OR IFNULL(must_ship, '') != ? "
-                            " OR IFNULL(quantity, '') != ?)",
-                            (est, ship, qty, jk, est, ship, qty))
-                        tasks_updated += cur.rowcount
+                        before = conn.execute(
+                            "SELECT * FROM inspection_tasks WHERE job_key=? "
+                            "AND IFNULL(status, '') != 'Completed'", (jk,)).fetchone()
+                        if not before:
+                            continue
+                        if (before['est_completion'] or '') == est and (before['must_ship'] or '') == ship \
+                                and (before['quantity'] or '') == qty:
+                            continue
+                        conn.execute(
+                            "UPDATE inspection_tasks SET est_completion=?, must_ship=?, quantity=? "
+                            "WHERE job_key=?", (est, ship, qty, jk))
+                        tasks_updated += 1
+                        if est_changed(before['est_completion'], est) or \
+                                est_changed(before['must_ship'], ship):
+                            conn.execute(
+                                'INSERT INTO task_date_changes (job_key,old_est,new_est,old_ship,'
+                                'new_ship,week_label) VALUES (?,?,?,?,?,?)',
+                                (jk, before['est_completion'], est, before['must_ship'], ship,
+                                 config.get('upload_date', '')))
+                            date_changes.append(dict(
+                                dict(before), old_est=before['est_completion'], new_est=est,
+                                old_ship=before['must_ship'], new_ship=ship))
                         continue
                     if statuses.get(jk) in ('new', 'typo'):
                         task = dict(
@@ -1987,6 +2031,14 @@ def _apply_schedule(data, baseline=False):
                              task['must_ship'], task['week_label']))
                         new_tasks_created.append(task)
                         existing_keys.add(jk)
+
+        if date_changes and not baseline:
+            ok, msg = _send_date_change_email(date_changes)
+            flash(tr(f'{len(date_changes)} 个任务的预计完成日/出货日有变动。邮件通知：{msg}',
+                     f'{len(date_changes)} task(s) had date changes. E-mail: {msg}'),
+                  'success' if ok else 'warning')
+        if not baseline:
+            send_due_reminders()
 
         updated_note = f'，{tasks_updated} 个任务日期/数量已同步' if tasks_updated else ''
         updated_note_en = f', {tasks_updated} task(s) updated' if tasks_updated else ''
@@ -2999,6 +3051,103 @@ def _send_task_email(new_tasks):
     lines.append(url_for('tasks', scope='unassigned', _external=True))
     return _smtp_send(f"【新检验任务 {len(new_tasks)} 项 / {len(new_tasks)} new inspection tasks】{today}",
                       '\n'.join(lines), recipients)
+
+
+def _est_label(value):
+    d, note = split_est(value)
+    if not d:
+        return (note or '—')
+    return d.isoformat() + (f' ({note})' if note else '')
+
+
+def _task_recipients(tasks):
+    """Task notification e-mails + the assigned inspector of each task."""
+    recipients = _email_list(load_config().get('task_notify_emails', ''))
+    ids = {t['assigned_to'] for t in tasks if t.get('assigned_to')}
+    if ids:
+        with db_conn() as conn:
+            marks = ','.join('?' * len(ids))
+            mails = [r['email'] for r in conn.execute(
+                f"SELECT email FROM users WHERE id IN ({marks}) AND active=1 AND email != ''",
+                tuple(ids)).fetchall()]
+        recipients = _email_list(', '.join(recipients + mails))
+    return recipients
+
+
+def _send_date_change_email(changes):
+    """Tell the lead and the assigned inspectors that completion / ship dates
+    moved (earlier or later) or the remark text next to the date changed."""
+    recipients = _task_recipients(changes)
+    if not recipients:
+        return False, tr('未设置通知邮箱', 'No notification e-mail configured')
+    today = datetime.now().strftime('%Y-%m-%d')
+    lines = [f"预计完成日变动 Completion date changes — {today}",
+             f"{len(changes)} 个未完成任务的日期有变动 / {len(changes)} open task(s) changed.", '']
+    for i, c in enumerate(changes, 1):
+        lines.append(f"{i}. [{c['region']}]  {c['order_number']}  {c['item_code']}")
+        old_d, _ = split_est(c['old_est'])
+        new_d, _ = split_est(c['new_est'])
+        if est_changed(c['old_est'], c['new_est']):
+            if old_d and new_d and old_d != new_d:
+                delta = (new_d - old_d).days
+                trend = (f"延后 {delta} 天 / delayed {delta} d" if delta > 0
+                         else f"提前 {-delta} 天 / earlier by {-delta} d")
+            else:
+                trend = '备注变化 / remark changed'
+            lines.append(f"    预计完成 Est. completion: {_est_label(c['old_est'])}  →  "
+                         f"{_est_label(c['new_est'])}   [{trend}]")
+        if est_changed(c['old_ship'], c['new_ship']):
+            lines.append(f"    最迟出货 Must ship: {_est_label(c['old_ship'])}  →  {_est_label(c['new_ship'])}")
+        if c.get('assigned_to'):
+            lines.append("    已分配 Assigned")
+        lines.append('    ' + url_for('inspect_form', job_key=c['job_key'], _external=True))
+        lines.append('')
+    return _smtp_send(f"【日期变动】{len(changes)} 项检验任务 / {len(changes)} inspection task(s) with date changes",
+                      '\n'.join(lines), recipients)
+
+
+REMINDER_DAYS = 14
+
+
+def send_due_reminders():
+    """Once per task and completion date: e-mail when an open task is within
+    two weeks of its estimated completion date. A changed date re-arms it."""
+    today = date.today()
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM inspection_tasks WHERE IFNULL(status,'') != 'Completed'").fetchall()
+        due = []
+        for t in rows:
+            d, _ = split_est(t['est_completion'])
+            if not d or (d - today).days > REMINDER_DAYS:
+                continue
+            marker = d.isoformat()
+            # atomic claim so concurrent workers do not both send
+            cur = conn.execute(
+                "UPDATE inspection_tasks SET reminder_est=? WHERE id=? AND IFNULL(reminder_est,'') != ?",
+                (marker, t['id'], marker))
+            if cur.rowcount:
+                due.append(dict(t))
+    if not due:
+        return 0
+    due.sort(key=lambda t: split_est(t['est_completion'])[0])
+    recipients = _task_recipients(due)
+    if not recipients:
+        return 0
+    lines = [f"预计完成日提醒 Completion reminder — {today.isoformat()}",
+             f"以下 {len(due)} 个任务距预计完成日不足 {REMINDER_DAYS} 天（或已过期），请安排检验。",
+             f"{len(due)} task(s) are within {REMINDER_DAYS} days of the estimated completion date.", '']
+    for i, t in enumerate(due, 1):
+        d, _ = split_est(t['est_completion'])
+        left = (d - today).days
+        when = f"还有 {left} 天 / in {left} d" if left >= 0 else f"已逾期 {-left} 天 / {-left} d overdue"
+        lines.append(f"{i}. [{t['region']}]  {t['order_number']}  {t['item_code']}")
+        lines.append(f"    预计完成 Est. completion: {_est_label(t['est_completion'])}  ({when})")
+        lines.append('    ' + url_for('inspect_form', job_key=t['job_key'], _external=True))
+        lines.append('')
+    _smtp_send(f"【完成日提醒】{len(due)} 项检验任务 / {len(due)} inspection task(s) due within {REMINDER_DAYS} days",
+               '\n'.join(lines), recipients)
+    return len(due)
 
 
 def _send_assignment_email(tasks, assignee, note=''):
@@ -4215,14 +4364,14 @@ def user_update(uid):
 
 @app.before_request
 def _auth_check():
-    if request.method == 'POST':
+    if request.method == 'POST' and request.endpoint != 'cron_reminders':
         submitted = request.form.get('_csrf_token') or request.headers.get('X-CSRF-Token')
         expected = session.get('_csrf_token', '')
         if not submitted or not expected or not hmac.compare_digest(submitted, expected):
             return 'Invalid CSRF token', 400
 
     g.lang = _lang_from_cookie()
-    public = {'healthz', 'login', 'static', 'set_language'}
+    public = {'healthz', 'login', 'static', 'set_language', 'cron_reminders'}
     if request.endpoint in public or request.endpoint is None:
         return None
 
@@ -4246,12 +4395,39 @@ def _auth_check():
     g.employee_id = user['employee_id']
     g.is_admin = user['role'] == 'admin'
     g.can_assign = user['role'] in ('admin', 'lead')
+    if not app.config.get('TESTING') and _last_reminder_day['day'] != date.today():
+        _last_reminder_day['day'] = date.today()
+        _run_reminders_in_background(request.host_url)
     g.display_name = user['display_name'] or user['username']
     if request.endpoint in ADMIN_ENDPOINTS and not g.is_admin:
         return tr('无权限访问此页面', 'Forbidden'), 403
     disabled = _disabled_module_for_path(request.path)
     if disabled:
         abort(404)
+
+_last_reminder_day = {'day': None}
+
+
+def _run_reminders_in_background(base_url):
+    def work():
+        try:
+            with app.test_request_context(base_url=base_url):
+                send_due_reminders()
+        except Exception:
+            logger.exception('Due-date reminder run failed')
+    import threading
+    threading.Thread(target=work, daemon=True).start()
+
+
+@app.route('/cron/reminders', methods=['GET', 'POST'])
+def cron_reminders():
+    """Token-protected hook for an external scheduler (Railway cron etc.)."""
+    token = os.environ.get('CRON_SECRET', '')
+    supplied = request.headers.get('X-Cron-Token', '') or request.args.get('token', '')
+    if not token or not hmac.compare_digest(supplied, token):
+        abort(404)
+    return {'reminders_sent': send_due_reminders()}
+
 
 @app.route('/lang/<code>')
 def set_language(code):
