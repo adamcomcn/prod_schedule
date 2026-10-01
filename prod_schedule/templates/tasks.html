@@ -258,10 +258,15 @@ tr.mine td { background:#f0fdf4; }
           </div>
         </div>
         {% endfor %}
+        {% set reg_ns = namespace(done=false, over=false) %}
+        {% for region, rv in stats.region_stats %}
+          {% if rv['completed'] > 0 %}{% set reg_ns.done = true %}{% endif %}
+          {% if rv['overdue'] > 0 %}{% set reg_ns.over = true %}{% endif %}
+        {% endfor %}
         <div class="hbar-legend">
-          {{ tr('条形与数字 = 该地区任务总数', 'Bar and number = total tasks in the region') }}<br>
-          <span style="color:#059669;">✓ {{ tr('完成', 'done') }}</span> = {{ tr('已完成的任务数', 'completed tasks') }} ·
-          <span style="color:#dc2626;">⚠ {{ tr('逾期', 'overdue') }}</span> = {{ tr('预计完成日已过、仍未完成的任务数', 'estimated completion date passed and not completed') }}
+          {{ tr('条形与数字 = 该地区任务总数', 'Bar and number = total tasks in the region') }}
+          {% if reg_ns.done %}<br><span style="color:#059669;">✓ {{ tr('完成', 'done') }}</span> = {{ tr('已完成的任务数', 'completed tasks') }}{% endif %}
+          {% if reg_ns.over %}<br><span style="color:#dc2626;">⚠ {{ tr('逾期', 'overdue') }}</span> = {{ tr('预计完成日已过、仍未完成的任务数', 'estimated completion date passed and not completed') }}{% endif %}
         </div>
       {% else %}
         <div style="color:#9ca3af; font-size:.82rem; text-align:center; padding:20px 0;">
@@ -295,14 +300,20 @@ tr.mine td { background:#f0fdf4; }
         {% endfor %}
         {% if stats.top_suppliers|length > 8 %}
         <button type="button" id="supToggle" class="btn btn-sm btn-outline" style="margin-top:6px;"
-                onclick="var h=document.querySelectorAll('.sup-extra'); var show=h[0].style.display==='none';
-                         h.forEach(function(e){e.style.display=show?'flex':'none'});
-                         this.textContent=show?{{ tr('收起', 'Show top 8')|tojson }}:{{ tr('显示全部（' ~ stats.top_suppliers|length ~ '）', 'Show all (' ~ stats.top_suppliers|length ~ ')')|tojson }};">
+                data-open="{{ tr('收起', 'Show top 8') }}"
+                data-closed="{{ tr('显示全部（' ~ stats.top_suppliers|length ~ '）', 'Show all (' ~ stats.top_suppliers|length ~ ')') }}">
           {{ tr('显示全部（' ~ stats.top_suppliers|length ~ '）', 'Show all (' ~ stats.top_suppliers|length ~ ')') }}
         </button>
         {% endif %}
+        {% set sup_ns = namespace(done=false, unknown=false) %}
+        {% for sup, sv in stats.top_suppliers %}
+          {% if sv['completed'] > 0 %}{% set sup_ns.done = true %}{% endif %}
+          {% if sup == 'Unknown' %}{% set sup_ns.unknown = true %}{% endif %}
+        {% endfor %}
         <div class="hbar-legend">
-          {{ tr('条形与数字 = 未完成任务数；', 'Bar and number = outstanding tasks; ') }}<span style="color:#059669;">✓ {{ tr('完成', 'done') }}</span> = {{ tr('该供应商已完成的任务数', 'completed tasks') }}
+          {{ tr('条形与数字 = 该供应商的未完成任务数', 'Bar and number = outstanding tasks of the supplier') }}
+          {% if sup_ns.done %}<br><span style="color:#059669;">✓ {{ tr('完成', 'done') }}</span> = {{ tr('该供应商已完成的任务数', 'completed tasks of the supplier') }}{% endif %}
+          {% if sup_ns.unknown %}<br><strong>Unknown</strong> = {{ tr('任务没有记录供应商（排期里未标注，或订单已不在当前排期的历史任务）', 'no supplier recorded for the task (not given in the schedule, or an old task whose order has left the schedule)') }}{% endif %}
         </div>
       {% else %}
         <div style="color:#9ca3af; font-size:.82rem; text-align:center; padding:20px 0;">
@@ -596,5 +607,18 @@ function updateAssignCount() {
   var el = document.getElementById('assignCount');
   if (el) el.textContent = {{ tr('已选 ', '')|tojson }} + n + {{ tr(' 项', ' selected')|tojson }};
 }
+</script>
+<script>
+(function () {
+  var btn = document.getElementById('supToggle');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var rows = document.querySelectorAll('.sup-extra');
+    if (!rows.length) return;
+    var show = rows[0].style.display === 'none';
+    rows.forEach(function (r) { r.style.display = show ? 'flex' : 'none'; });
+    btn.textContent = show ? btn.dataset.open : btn.dataset.closed;
+  });
+})();
 </script>
 {% endblock %}
