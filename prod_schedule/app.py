@@ -273,6 +273,8 @@ MODULES = {
     'knowledge': {'zh': '知识库', 'en': 'Knowledge base', 'paths': ('/knowledge',)},
     'orders':    {'zh': '订单（手动录入）', 'en': 'Orders (manual entry)', 'paths': ('/orders',)},
     'suppliers': {'zh': '供应商', 'en': 'Suppliers', 'paths': ('/suppliers',)},
+    'forms':     {'zh': '检验模板（数字检验清单）', 'en': 'Inspection form templates', 'paths': ('/forms',)},
+    'products':  {'zh': '产品（类别 / 自动分配检验员）', 'en': 'Products (categories / auto inspectors)', 'paths': ('/products',)},
 }
 
 def module_enabled(name):
