@@ -79,6 +79,19 @@ class OrphanTaskTests(unittest.TestCase):
         self.assertIn('id="supToggle"', page)
         self.assertIn('SUP14', page)
 
+    def test_toggle_is_script_driven_and_legend_matches_chart(self):
+        with db_conn() as conn:
+            for n in range(5, 15):
+                conn.execute("INSERT INTO inspection_tasks (job_key,order_number,region,item_code,status,supplier) "
+                             "VALUES (?,?,?,?,?,?)", (f'MEL|PO{n}|I{n}', f'D{n}', 'MEL', f'I{n}', 'Pending', f'SUP{n}'))
+        page = self.client('lead').get('/tasks').get_data(as_text=True)
+        self.assertIn('id="supToggle"', page)
+        self.assertIn('data-closed="显示全部（', page)
+        self.assertNotIn('onclick="var h=', page)
+        self.assertIn("getElementById('supToggle')", page)
+        # Unknown is explained; a supplier with no completed tasks gets no ✓ line
+        self.assertIn('任务没有记录供应商', page)
+
 
 if __name__ == '__main__':
     unittest.main()
