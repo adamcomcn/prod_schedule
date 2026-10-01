@@ -274,11 +274,18 @@ MODULES = {
     'orders':    {'zh': '订单（手动录入）', 'en': 'Orders (manual entry)', 'paths': ('/orders',)},
     'suppliers': {'zh': '供应商', 'en': 'Suppliers', 'paths': ('/suppliers',)},
     'forms':     {'zh': '检验模板（数字检验清单）', 'en': 'Inspection form templates', 'paths': ('/forms',)},
+    'regions':   {'zh': '区域（层级维护）', 'en': 'Regions (hierarchy)', 'paths': ('/regions',)},
+    'employees': {'zh': '员工档案（人事/培训需要）', 'en': 'Employee records (needed by HR / Training)',
+                  'paths': ('/employees',)},
     'products':  {'zh': '产品（类别 / 自动分配检验员）', 'en': 'Products (categories / auto inspectors)', 'paths': ('/products',)},
 }
 
 def module_enabled(name):
-    return bool(load_config().get('modules', {}).get(name, False))
+    modules = load_config().get('modules', {})
+    if name == 'employees':
+        # HR and Training are built on the employee records
+        return any(bool(modules.get(m, False)) for m in ('employees', 'hr', 'training'))
+    return bool(modules.get(name, False))
 
 def _disabled_module_for_path(path):
     for name, info in MODULES.items():

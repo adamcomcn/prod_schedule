@@ -131,8 +131,10 @@ textarea { resize: vertical; min-height: 80px; }
   {% if module_enabled('products') %}
   {{ navlink('products', '产品', 'Products', ep in ['products', 'product_new', 'product_edit']) }}
   {% endif %}
-  {% if g.is_admin %}
+  {% if g.is_admin and module_enabled('regions') %}
   {{ navlink('regions', '区域', 'Regions', ep == 'regions') }}
+  {% endif %}
+  {% if g.is_admin and module_enabled('employees') %}
   {{ navlink('employees', '员工', 'Employees', ep in ['employees', 'employee_new', 'employee_edit']) }}
   {% endif %}
   {% if module_enabled('hr') %}
