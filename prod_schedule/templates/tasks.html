@@ -555,7 +555,6 @@ tr.mine td { background:#f0fdf4; }
                 <span class="assignee{% if t.assigned_to == g.user_id %} assignee-me{% endif %}"
                       title="{{ tr('分配人', 'Assigned by') }}: {{ t.assigned_by }} · {{ t.assigned_at }}{% if t.assign_note %} · {{ t.assign_note }}{% endif %}">
                   {{ t.assignee_name }}</span>
-                {% if t.assign_note %}<div class="assign-note">{{ t.assign_note }}</div>{% endif %}
               {% else %}
                 <span style="color:#9ca3af; font-size:.78rem;">{{ tr('未分配', 'Unassigned') }}</span>
               {% endif %}
