@@ -170,7 +170,8 @@ class I18nAndModuleTests(unittest.TestCase):
         self.client.get('/lang/zh')
         page = self.client.get(f'/inspect/{JOB}').get_data(as_text=True)
         self.assertIn('V-Trust 压力测试视频', page)
-        self.assertIn('上传 V-Trust 压力测试视频', page)
+        self.assertIn('V-Trust 压力测试视频齐全，结果合格', page)  # check item
+        self.assertIn('T1 平均值', page)  # DAQ reading field
         self.client.get('/lang/en')
         page = self.client.get(f'/inspect/{JOB}').get_data(as_text=True)
         self.assertIn('V-Trust Pressure Test Video', page)

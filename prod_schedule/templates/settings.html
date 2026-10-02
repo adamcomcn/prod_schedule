@@ -239,6 +239,42 @@
     </div>
     {% endif %}
 
+    <!-- Product reference (classifies products for required evidence) -->
+    {% set ref_count, ref_updated, ref_unknown = evidence_coverage %}
+    <div class="card" style="margin-top:0;">
+      <div class="card-title">&#128230; {{ tr('产品对照表（所需证据规则）', 'Product reference (required-evidence rules)') }}</div>
+      <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">
+        {{ tr('上传 reference.xlsx（含 ReferenceData 和 Product Codes 工作表），系统据此判断每个产品属于哪一类，并显示对应的所需证据。产品有变动时重新上传即可。',
+              'Upload reference.xlsx (sheets ReferenceData and Product Codes). It tells the system which product type each item is, and therefore which evidence is required. Re-upload when products change.') }}
+      </p>
+      <div style="font-size:.85rem; margin-bottom:10px;">
+        <span class="status-dot {{ 'dot-green' if ref_count else 'dot-red' }}"></span>
+        {% if ref_count %}
+          {{ tr('已导入 ' ~ ref_count ~ ' 个产品编码', ref_count ~ ' product codes imported') }}{% if ref_updated %} · {{ ref_updated }}{% endif %}
+        {% else %}
+          {{ tr('尚未导入（只能按编码前缀判断，部分产品可能无法识别）', 'Not imported yet (only code prefixes are used; some products may not be recognised)') }}
+        {% endif %}
+      </div>
+      <form method="POST" action="{{ url_for('settings_reference') }}" enctype="multipart/form-data"
+            style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <input type="file" name="reference" accept=".xlsx" required style="width:auto;">
+        <button type="submit" class="btn btn-primary btn-sm">{{ tr('上传并导入', 'Upload & import') }}</button>
+      </form>
+      <div style="font-size:.85rem; margin-top:12px;">
+        {% if ref_unknown %}
+          <span class="status-dot dot-red"></span>
+          {{ tr('当前排期中有 ' ~ ref_unknown|length ~ ' 个产品没有匹配的证据规则：', ref_unknown|length ~ ' product(s) on the current schedule match no evidence rule:') }}
+          <ul style="margin:6px 0 0 18px; font-size:.8rem; color:#374151;">
+            {% for code, desc in ref_unknown[:30] %}<li><code>{{ code }}</code> {{ desc }}</li>{% endfor %}
+          </ul>
+          {% if ref_unknown|length > 30 %}<div style="font-size:.78rem; color:#6b7280;">… {{ ref_unknown|length - 30 }}</div>{% endif %}
+        {% else %}
+          <span class="status-dot dot-green"></span>
+          {{ tr('当前排期中的所有产品都有对应的证据规则', 'Every product on the current schedule has an evidence rule') }}
+        {% endif %}
+      </div>
+    </div>
+
     <!-- PDF report font -->
     <div class="card" style="margin-top:0;">
       <div class="card-title">&#128196; {{ tr('PDF 检验报告', 'PDF inspection reports') }}</div>

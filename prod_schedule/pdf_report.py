@@ -261,12 +261,24 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
         rows = [[_p(_bi('项目', 'Item'), st['label']), _p(_bi('结果', 'Result'), st['label']),
                  _p(_bi('文件', 'Files'), st['label']), _p(_bi('备注', 'Notes'), st['label'])]]
         styles = []
+        mark = {'ok': '√', 'fail': '×'}
         for i, (etype, data) in enumerate(evidence.items(), start=1):
             zh, en = evidence_labels.get(etype, (etype.upper(), etype.upper()))
             res = data.get('result', '')
-            rows.append([_p(f'{zh}\n{en}', st['cell']), _p(_result_text(res) if res else '—', st['cell']),
+            item_cell = [_p(f'{zh}\n{en}', st['cell'])]
+            # check items from the required-evidence matrix: √ / × / – (not checked)
+            for chk in data.get('checks') or []:
+                item_cell.append(_p(f"{mark.get(chk.get('state'), '–')} {chk.get('zh', '')} / {chk.get('en', '')}",
+                                    st['small']))
+            notes = data.get('notes') or ''
+            daq = data.get('daq_values') or {}
+            if daq:
+                readings = '  '.join(f'{k.upper()} {v:g} MPa' for k, v in daq.items())
+                verdict = ('√ 合格 OK' if data.get('daq_ok') else '× 低于要求 Below limit')
+                notes = (f'DAQ: {readings}  {verdict}' + ('\n' + notes if notes else ''))
+            rows.append([item_cell, _p(_result_text(res) if res else '—', st['cell']),
                          _p('\n'.join(data.get('files') or []) or '—', st['small']),
-                         _p(data.get('notes'), st['cell'])])
+                         _p(notes, st['cell'])])
             if res in RESULT_COLORS:
                 styles.append(('BACKGROUND', (1, i), (1, i), RESULT_COLORS[res][0]))
         t = Table(rows, colWidths=[45 * mm, 28 * mm, 55 * mm, content_w - 128 * mm], repeatRows=1)
@@ -275,6 +287,14 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ] + styles))
         story.append(t)
+    missing = record.get('missing_evidence') or []
+    if missing:
+        names = ', '.join(' / '.join(evidence_labels.get(m, (m.upper(), m.upper()))) for m in missing)
+        warn = Table([[_p(_bi('⚠ 缺少证据文件', '⚠ Missing evidence files') + f': {names}', st['cell'])]],
+                     colWidths=[content_w])
+        warn.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), AMBER[0]),
+                                  ('BOX', (0, 0), (-1, -1), 0.6, AMBER[1])]))
+        story += [Spacer(1, 2 * mm), warn]
 
     # ── Defects ─────────────────────────────────────────────────────────────
     codes = record.get('defect_codes') or []

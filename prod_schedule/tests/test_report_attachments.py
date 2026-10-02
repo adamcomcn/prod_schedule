@@ -131,19 +131,24 @@ class EndToEndMailTests(unittest.TestCase):
         env = {'SMTP_HOST': 'smtp.example.test', 'SMTP_PORT': '587', 'SMTP_USERNAME': 'n@example.test', 'SMTP_PASSWORD': 'x'}
         with mock.patch.dict(os.environ, env), mock.patch('smtplib.SMTP', self.FakeSMTP):
             r = client('insp').post(f'/inspect/{job}/submit', data={
-                '_csrf_token': 'tok', 'region': 'MELBOURNE', 'order_number': 'DPL7', 'item_code': 'UMC100',
-                'item_description': 'Coupling', 'inspector_name': 'Yu', 'inspection_date': '2026-10-09',
+                # an RSV needs BRT + DAQ + V-Trust, so the DAQ file applies
+                '_csrf_token': 'tok', 'region': 'MELBOURNE', 'order_number': 'DPL7', 'item_code': 'RSV0100FLFLCC',
+                'item_description': 'DN100 Resilient Seated Gate Valve', 'inspector_name': 'Yu',
+                'inspection_date': '2026-10-09',
                 'quantity_inspected': '10', 'quantity_passed': '10', 'result': 'Pass',
                 'ev_result_daq': 'Pass', 'ev_file_daq': [(io.BytesIO(b'PK-excel'), 'daq.xlsx'),
                                                          (io.BytesIO(b'video'), 'test.mp4')],
+                # not required for an RSV: must not be attached
+                'ev_result_xrf': 'Pass', 'ev_file_xrf': [(io.BytesIO(b'%PDF xrf'), 'xrf.pdf')],
             }, content_type='multipart/form-data')
             self.assertEqual(r.status_code, 302)
             client('lead').post(f'/inspect/{job}/report/0/review', data={'_csrf_token': 'tok', 'action': 'approve'})
         raw = EndToEndMailTests.sent[-1][1]
         msg = email.message_from_string(raw)
         names = [p.get_filename() for p in msg.walk() if p.get_content_disposition() == 'attachment']
-        self.assertEqual(len(names), 2)
+        self.assertEqual(len(names), 2)  # the PDF report + daq.xlsx
         self.assertIn('daq.xlsx', names)
+        self.assertNotIn('xrf.pdf', names)
         body = next(p for p in msg.walk() if p.get_content_type() == 'text/plain').get_payload(decode=True).decode()
         self.assertIn('daq.xlsx', body)
         self.assertIn('test.mp4', body)

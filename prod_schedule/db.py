@@ -780,6 +780,17 @@ def init_db():
             except Exception:
                 pass
 
+        # Product reference (reference.xlsx): classifies products for the
+        # required-evidence rules (evidence_rules.py)
+        conn.execute('''CREATE TABLE IF NOT EXISTS product_reference (
+            code          TEXT PRIMARY KEY,
+            description   TEXT DEFAULT '',
+            category      TEXT DEFAULT '',
+            sub_category  TEXT DEFAULT '',
+            pc_category   TEXT DEFAULT '',
+            updated_at    TEXT DEFAULT ''
+        )''')
+
         # Log of inspection-report e-mails to HQ (one row per send attempt)
         conn.execute('''CREATE TABLE IF NOT EXISTS report_emails (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,

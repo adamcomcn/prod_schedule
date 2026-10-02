@@ -78,7 +78,7 @@ _login_failures = defaultdict(deque)
 
 ADMIN_ENDPOINTS = {
     'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings',
-    'settings_modules', 'office_location_add',
+    'settings_modules', 'settings_reference', 'office_location_add',
     'office_location_delete', 'supplier_new', 'supplier_edit', 'suppliers_import',
     'supplier_delete', 'category_new', 'category_delete', 'inspector_add',
     'inspector_delete', 'product_new', 'product_edit', 'product_delete',
@@ -431,246 +431,59 @@ EVIDENCE_META = {
     'spark':    {'label': 'Spark / Holiday Test Video', 'label_zh': '电火花测试视频',
                  'icon': '⚡', 'color': '#991b1b', 'bg': '#fee2e2',
                  'accepts': '.mp4,.mov,.avi,.mkv,video/*'},
+    'pressure': {'label': 'Pressure Test Records', 'label_zh': '压力测试记录',
+                 'icon': '🧪', 'color': '#1e3a8a', 'bg': '#e0e7ff',
+                 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.heic,.mp4,.mov,image/*,video/*'},
     'xrf':      {'label': 'XRF Report (Material Composition)', 'label_zh': 'XRF 材质成分报告',
                  'icon': '⚗️', 'color': '#065f46', 'bg': '#d1fae5',
                  'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.heic,image/*'},
 }
 
 # Chinese version of each guidance line (lines are combined per product).
-GUIDANCE_ZH = {
-    'Inspection checklist must be signed and dated by inspector.':
-        '检验清单须由检验员签名并注明日期。',
-    'Check Material sheet: chemical and mechanical properties within limits':
-        '检查材质表：化学成分和力学性能在限值内',
-    'Check Material sheet: chemical and mechanical properties within limits (Spec 500-7)':
-        '检查材质表：化学成分和力学性能在限值内（Spec 500-7）',
-    'Check Checking Report: C1–C7 & A1–A9 must be OK (refer to SPEC sheet)':
-        '检查检验报告：C1–C7 和 A1–A9 必须全部 OK（参照 SPEC 表）',
-    'Note: DN375 has no DAQ — verify pressure test via Cells Z–AG and V-Trust video only':
-        '注意：DN375 没有 DAQ，只通过 Z–AG 单元格和 V-Trust 视频核对压力测试',
-    'Check DAQ section (Cells AB–BH):':
-        '检查 DAQ 部分（AB–BH 单元格）：',
-    '  • T1 Average [AL] (Gate test 1) ≥ 1.76 MPa':
-        '  • T1 平均值 [AL]（闸板测试 1）≥ 1.76 MPa',
-    '  • T2 Average [AW] (Gate test 2) ≥ 1.76 MPa':
-        '  • T2 平均值 [AW]（闸板测试 2）≥ 1.76 MPa',
-    '  • T3 Average [BH] (Body test)   ≥ 2.40 MPa':
-        '  • T3 平均值 [BH]（阀体测试）≥ 2.40 MPa',
-    'Upload pressure test machine exported data (Excel or PDF).':
-        '上传压力测试机导出的数据（Excel 或 PDF）。',
-    'Verify: T1 Average ≥ 1.76 MPa, T2 Average ≥ 1.76 MPa, T3 Average ≥ 2.40 MPa':
-        '核对：T1 平均值 ≥ 1.76 MPa，T2 平均值 ≥ 1.76 MPa，T3 平均值 ≥ 2.40 MPa',
-    'Upload V-Trust pressure test video(s) (MP4 / MOV).':
-        '上传 V-Trust 压力测试视频（MP4 / MOV）。',
-    'Ensure all videos are received and show acceptable test results.':
-        '确认所有视频已收到，且测试结果合格。',
-    '电火花 Holiday / Spark test video required for DN200 and above.':
-        'DN200 及以上需要电火花（Holiday / Spark）测试视频。',
-    'Ensure all spark test videos are received (MP4 / MOV).':
-        '确认所有电火花测试视频已收到（MP4 / MOV）。',
-    'Check 316 SS.jpg — confirm material is 316 stainless steel':
-        '检查 316 SS.jpg — 确认材质为 316 不锈钢',
-    'Check Assembly Report — all criteria acceptable':
-        '检查装配报告 — 所有项目合格',
-    'Check Bolt 316.jpg — confirm bolt material is 316 SS':
-        '检查 Bolt 316.jpg — 确认螺栓材质为 316 不锈钢',
-    'Check Dimension Report — compare to Daemco design drawings':
-        '检查尺寸报告 — 与 Daemco 设计图纸比对',
-    'For GAL variant: ensure bolts are Steel (Q235B) material':
-        'GAL 型号：确认螺栓为钢制（Q235B）',
-    'Check Assembly Folder — all checkboxes acceptable':
-        '检查装配文件夹 — 所有勾选项合格',
-    'Check Dimension Report — compare to Daemco REPAIR CLAMP 2023.11.7 drawing':
-        '检查尺寸报告 — 与 Daemco REPAIR CLAMP 2023.11.7 图纸比对',
-    'Check Material Folder — verify 316 stainless steel':
-        '检查材质文件夹 — 确认为 316 不锈钢',
-    'Upload XRF Excel / PDF report.':
-        '上传 XRF 报告（Excel / PDF）。',
-    'Verify material is 316 stainless steel. Confirm Pass or Fail.':
-        '确认材质为 316 不锈钢，并标记合格或不合格。',
-    'Review BRT document for acceptability.':
-        '审核 BRT 文件是否合格。',
-    'Check material report: chemical and mechanical properties within limits.':
-        '检查材质报告：化学成分和力学性能在限值内。',
-    'Check DPL Fitting — Casting Inspection Report: all criteria acceptable':
-        '检查 DPL 管件铸件检验报告：所有项目合格',
-    'Check DPL Fitting — Final Inspection Report: all criteria acceptable':
-        '检查 DPL 管件最终检验报告：所有项目合格',
-    'Check material report: chemical and mechanical properties within limits.':
-        '检查材质报告：化学成分和力学性能在限值内。',
-    'For CI/DI products: compare to Dandong Foundry acceptable limits':
-        '灰铁/球铁产品：与丹东铸造厂的合格限值比对',
-    'for cast iron / ductile iron (chemical composition & mechanical properties).':
-        '（灰铁/球铁的化学成分和力学性能）。',
-}
+import evidence_rules
 
-def localize_evidence(meta, guidance):
-    if current_lang() == 'en':
-        return meta['label'], guidance
-    lines = [GUIDANCE_ZH.get(line, line) for line in guidance.split('\n')]
-    return meta.get('label_zh') or meta['label'], '\n'.join(lines)
 
-def extract_dn(item_code):
-    """Return DN size (int) from an RSV item code, or None if not parseable."""
-    import re
-    code = (item_code or '').upper().strip()
-    # RSV0 + 3 digits:  RSV0080… → DN80,  RSV0250… → DN250
-    m = re.match(r'^RSV0(\d{3})', code)
-    if m:
-        return int(m.group(1))
-    # RSVPE/SO/SP/CAP + digits:  RSVPE125 → DN125
-    m = re.match(r'^RSV(?:PE|SO|SP|CAP)(\d{1,3})', code)
-    if m:
-        return int(m.group(1))
-    return None
+def product_reference(code):
+    """Row of the imported product reference table (reference.xlsx) or None."""
+    code = (code or '').strip().upper()
+    if not code:
+        return None
+    with db_conn() as conn:
+        row = conn.execute('SELECT * FROM product_reference WHERE code=?', (code,)).fetchone()
+    return dict(row) if row else None
 
-def get_evidence_requirements(item_code, category_name=''):
-    """Return list of evidence dicts required for this product.
-    Each dict: {type, label, icon, color, bg, accepts, guidance}
 
-    Matching priority:
-      1. Item code prefix (reliable, code-driven)
-      2. Product category name (fallback when code prefix unknown)
-    """
-    import re
-    code = (item_code or '').upper().strip()
-    cat  = (category_name or '').lower()
+def product_type_for(item_code, description=''):
+    return evidence_rules.classify(item_code, description, product_reference(item_code))
 
-    def ev(etype, guidance):
-        m = EVIDENCE_META[etype]
-        label, text = localize_evidence(m, guidance)
-        return {**m, 'type': etype, 'label': label, 'guidance': text}
 
+def product_type_name(ptype):
+    if not ptype:
+        return ''
+    name = evidence_rules.PRODUCT_TYPES[ptype]['name']
+    return tr(name['zh'], name['en'])
+
+
+def get_evidence_requirements(item_code, description=''):
+    """Evidence cards required for a product, from the agreed rule matrix
+    (evidence_rules.PRODUCT_TYPES). Each card lists its check items."""
+    ptype = product_type_for(item_code, description)
+    if not ptype:
+        return []
+    en = current_lang() == 'en'
     reqs = []
-
-    # ── 1. RSVCAP — Valve Caps (Checklist only, NOT gate valves) ───────
-    # Must be checked before the generic RSV block
-    if code.startswith('RSVCAP'):
-        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
-        return reqs
-
-    # ── 2. All RSV Gate Valves (FL / SO / SP / PE and any other suffix) ─
-    # Rules are size-driven for ALL sub-types (FL, SO, SP, PE, etc.)
-    # Spreadsheet rows 3 & 4 explicitly list FL, SO, SP, PE together
-    if code.startswith('RSV'):
-        dn = extract_dn(code)
-
-        # BRT guidance depends only on DN (not sub-type)
-        if dn == 375:
-            brt_guide = (
-                'Check Material sheet: chemical and mechanical properties within limits\n'
-                'Check Checking Report: C1–C7 & A1–A9 must be OK (refer to SPEC sheet)\n'
-                'Note: DN375 has no DAQ — verify pressure test via Cells Z–AG and V-Trust video only')
-        else:
-            brt_guide = (
-                'Check Material sheet: chemical and mechanical properties within limits (Spec 500-7)\n'
-                'Check Checking Report: C1–C7 & A1–A9 must be OK (refer to SPEC sheet)\n'
-                'Check DAQ section (Cells AB–BH):\n'
-                '  • T1 Average [AL] (Gate test 1) ≥ 1.76 MPa\n'
-                '  • T2 Average [AW] (Gate test 2) ≥ 1.76 MPa\n'
-                '  • T3 Average [BH] (Body test)   ≥ 2.40 MPa')
-        reqs.append(ev('brt', brt_guide))
-
-        # DAQ — all RSVs except DN375
-        if dn != 375:
-            reqs.append(ev('daq',
-                'Upload pressure test machine exported data (Excel or PDF).\n'
-                'Verify: T1 Average ≥ 1.76 MPa, T2 Average ≥ 1.76 MPa, T3 Average ≥ 2.40 MPa'))
-
-        # V-Trust — all RSVs
-        reqs.append(ev('vtrust',
-            'Upload V-Trust pressure test video(s) (MP4 / MOV).\n'
-            'Ensure all videos are received and show acceptable test results.'))
-
-        # Spark / Holiday test — DN200 and above only
-        if dn is not None and dn >= 200:
-            reqs.append(ev('spark',
-                '电火花 Holiday / Spark test video required for DN200 and above.\n'
-                'Ensure all spark test videos are received (MP4 / MOV).'))
-
-        return reqs
-
-    # ── 3. UMC Couplings (item code starts with UMC) ───────────────────
-    if code.startswith('UMC'):
-        is_gal = 'GAL' in code
-        guide = ('Check 316 SS.jpg — confirm material is 316 stainless steel\n'
-                 'Check Assembly Report — all criteria acceptable\n'
-                 'Check Bolt 316.jpg — confirm bolt material is 316 SS\n'
-                 'Check Dimension Report — compare to Daemco design drawings')
-        if is_gal:
-            guide += '\nFor GAL variant: ensure bolts are Steel (Q235B) material'
-        reqs.append(ev('brt', guide))
-        return reqs
-
-    # ── 4. Category-based matching (for products without a known code prefix) ─
-    # ── Repair Clamps ──────────────────────────────────────────────────
-    if 'repair' in cat or 'repair clamp' in cat:
-        is_gal = 'GAL' in code
-        guide = ('Check Assembly Folder — all checkboxes acceptable\n'
-                 'Check Dimension Report — compare to Daemco REPAIR CLAMP 2023.11.7 drawing\n'
-                 'Check Material Folder — verify 316 stainless steel')
-        if is_gal:
-            guide += '\nFor GAL variant: ensure bolts are Steel (Q235B) material'
-        reqs.append(ev('brt', guide))
-        reqs.append(ev('xrf',
-            'Upload XRF Excel / PDF report.\n'
-            'Verify material is 316 stainless steel. Confirm Pass or Fail.'))
-        return reqs
-
-    # ── Couplings (Gibault and other non-UMC couplings) ────────────────
-    if 'coupling' in cat:
-        reqs.append(ev('brt', 'Review BRT document for acceptability.'))
-        reqs.append(ev('material',
-            'Check material report: chemical and mechanical properties within limits.'))
-        return reqs
-
-    # ── DI Fittings ────────────────────────────────────────────────────
-    if 'di fitting' in cat or ('fitting' in cat and 'di' in cat):
-        reqs.append(ev('brt',
-            'Check DPL Fitting — Casting Inspection Report: all criteria acceptable\n'
-            'Check DPL Fitting — Final Inspection Report: all criteria acceptable'))
-        return reqs
-
-    # ── Blank Flanges / Tapped Flanges ─────────────────────────────────
-    if 'flange' in cat:
-        reqs.append(ev('brt', 'Review BRT document for acceptability.'))
-        reqs.append(ev('material',
-            'Check material report: chemical and mechanical properties within limits.'))
-        return reqs
-
-    # ── Extension Spindles ─────────────────────────────────────────────
-    if 'spindle' in cat:
-        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
-        reqs.append(ev('material',
-            'Check material report: chemical and mechanical properties within limits.'))
-        return reqs
-
-    # ── Stainless Steel Straps ─────────────────────────────────────────
-    if 'strap' in cat:
-        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
-        reqs.append(ev('material',
-            'Check material report: chemical and mechanical properties within limits.'))
-        return reqs
-
-    # ── Gaskets ────────────────────────────────────────────────────────
-    if 'gasket' in cat:
-        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
-        return reqs
-
-    # ── Handwheels ─────────────────────────────────────────────────────
-    if 'handwheel' in cat:
-        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
-        return reqs
-
-    # ── Covers & Lids (all CI/DI cover and lid variants) ───────────────
-    if 'cover' in cat or 'lid' in cat:
-        reqs.append(ev('checklist', 'Inspection checklist must be signed and dated by inspector.'))
-        reqs.append(ev('material',
-            'Check material report: chemical and mechanical properties within limits.\n'
-            'For CI/DI products: compare to Dandong Foundry acceptable limits\n'
-            'for cast iron / ductile iron (chemical composition & mechanical properties).'))
-        return reqs
-
+    for item in evidence_rules.PRODUCT_TYPES[ptype]['evidence']:
+        meta = EVIDENCE_META[item['type']]
+        reqs.append({
+            **meta,
+            'type': item['type'],
+            'label': meta['label'] if en else (meta.get('label_zh') or meta['label']),
+            'checks': [c['en'] if en else c['zh'] for c in item['checks']],
+            'checks_bi': item['checks'],
+            'daq_limits': ([(key, label['en'] if en else label['zh'], limit)
+                            for key, label, limit in evidence_rules.DAQ_LIMITS]
+                           if item['type'] == 'daq' else []),
+        })
     return reqs
 
 
@@ -2498,8 +2311,10 @@ def inspect_form(job_key):
 
     evidence_reqs = get_evidence_requirements(
         job_info.get('Item Code', ''),
-        matched_category or ''
+        job_info.get('Item Description', '')
     )
+    product_kind = product_type_name(product_type_for(job_info.get('Item Code', ''),
+                                                      job_info.get('Item Description', '')))
 
     # Load existing attachments for past inspections
     with db_conn() as conn:
@@ -2524,6 +2339,7 @@ def inspect_form(job_key):
                            auto_inspectors=auto_inspectors,
                            matched_category=matched_category,
                            evidence_reqs=evidence_reqs,
+                           product_kind=product_kind,
                            can_inspect=inspect_permission(job_key)[0],
                            inspect_block_message=inspect_permission(job_key)[1],
                            task=job_task(job_key),
@@ -2628,6 +2444,33 @@ def submit_inspection(job_key):
                     ' file_path, drive_link, result, notes) VALUES (?,?,?,?,?,?,?,?,?)',
                     (job_key, insp_index, etype, orig_name, saved_name,
                      file_path, drive_link or '', ev_result, ev_notes))
+
+    # Check items, DAQ readings and missing evidence against the rule matrix
+    item_code = form.get('item_code', '')
+    item_desc = form.get('item_description', '')
+    ptype = product_type_for(item_code, item_desc)
+    inspection_data['product_type'] = ptype or ''
+    missing = []
+    for req in (evidence_rules.PRODUCT_TYPES[ptype]['evidence'] if ptype else []):
+        etype = req['type']
+        ev = evidence_results.setdefault(etype, {'result': '', 'notes': '', 'files': []})
+        if req['checks']:
+            ev['checks'] = [{'zh': chk['zh'], 'en': chk['en'],
+                             'state': form.get(f'ev_check_{etype}_{i}', '')}
+                            for i, chk in enumerate(req['checks'])]
+        if etype == 'daq':
+            values = {}
+            for key, _label, limit in evidence_rules.DAQ_LIMITS:
+                try:
+                    values[key] = float(form.get(f'daq_{key}', '').strip())
+                except ValueError:
+                    continue
+            if values:
+                ev['daq_values'] = values
+                ev['daq_ok'] = all(values.get(k, 0) >= limit for k, _l, limit in evidence_rules.DAQ_LIMITS)
+        if not ev['files'] and ev.get('result') != 'N/A':
+            missing.append(etype)
+    inspection_data['missing_evidence'] = missing
 
     inspection_data['evidence']    = evidence_results
     inspection_data['file_links']  = all_file_links
@@ -2793,15 +2636,28 @@ EMAIL_ATTACH_TYPES = {
 MAX_EMAIL_TOTAL = 15 * 1024 * 1024      # all attachments together (base64 adds a third)
 
 
-def _original_attachments(job_key, index, links, used=0):
+def applicable_evidence_types(record):
+    """Evidence types the product of this inspection requires (None = no rule,
+    so every evidence file applies)."""
+    ptype = record.get('product_type') or product_type_for(record.get('item_code', ''),
+                                                           record.get('item_description', ''))
+    if not ptype:
+        return None
+    return {item['type'] for item in evidence_rules.PRODUCT_TYPES[ptype]['evidence']}
+
+
+def _original_attachments(job_key, index, links, used=0, allowed_types=None):
     """Original evidence files of one inspection for the HQ e-mail: spreadsheets
     and PDFs are attached while the size budget lasts; photos are already in
     the report and videos are too big, so those are not attached. Returns
     ({'data': [(name, bytes, mime)], 'names': [...]}, [(name, download_url)])."""
     with db_conn() as conn:
         rows = [dict(r) for r in conn.execute(
-            'SELECT id, original_name, saved_name, file_path FROM inspection_attachments '
+            'SELECT id, original_name, saved_name, file_path, evidence_type FROM inspection_attachments '
             'WHERE job_key=? AND insp_index=? ORDER BY id', (job_key, index)).fetchall()]
+    if allowed_types is not None:
+        # only the evidence that applies to this product type
+        rows = [r for r in rows if r['evidence_type'] in allowed_types]
     base = links['pdf'].split('/inspect/')[0]
     out, names, skipped, taken = [], [], [], set()
     for r in rows:
@@ -2864,7 +2720,9 @@ def _send_report_email(log_id, job_key, index, sent_by, links):
                 attachments.append((filename, pdf, 'application/pdf'))
             else:
                 lines.append(f"PDF 过大未附上，请在线下载 PDF too large to attach — download: {links['pdf']}")
-            sent_files, skipped_files = _original_attachments(job_key, index, links, used=len(pdf) if attachments else 0)
+            sent_files, skipped_files = _original_attachments(
+                job_key, index, links, used=len(pdf) if attachments else 0,
+                allowed_types=applicable_evidence_types(rec))
             attachments += sent_files['data']
             if sent_files['names']:
                 lines += ['', '随邮件附上的原始文件 Original files attached:'] + [f"  • {n}" for n in sent_files['names']]
@@ -3037,10 +2895,66 @@ def settings():
     return render_template('settings.html',
                            config=config,
                            modules=MODULES,
+                           evidence_coverage=evidence_rule_coverage(),
                            credentials_exist=google_credentials_configured(),
                            smtp_configured=smtp_configured(),
                            pdf_font_embedded=_pdf_font_embedded(),
                            excel_password_configured=bool(EXCEL_PASSWORD))
+
+@app.route('/settings/reference', methods=['POST'])
+def settings_reference():
+    """Import reference.xlsx (sheets 'ReferenceData' and 'Product Codes'),
+    which classifies products for the required-evidence rules."""
+    f = request.files.get('reference')
+    if not f or _upload_extension(f.filename) != '.xlsx':
+        flash(tr('请选择 .xlsx 产品对照表', 'Choose the .xlsx product reference file'), 'error')
+        return redirect(url_for('settings'))
+    try:
+        items = evidence_rules.parse_reference_workbook(f.read())
+    except Exception:
+        logger.exception('Reference import failed')
+        items = {}
+    if not items:
+        flash(tr('无法读取产品对照表（需要 ReferenceData 或 Product Codes 工作表）',
+                 'Could not read the reference file (needs a ReferenceData or Product Codes sheet)'), 'error')
+        return redirect(url_for('settings'))
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+    with db_conn() as conn:
+        conn.execute('DELETE FROM product_reference')
+        conn.executemany(
+            'INSERT INTO product_reference (code, description, category, sub_category, pc_category, updated_at) '
+            'VALUES (?,?,?,?,?,?)',
+            [(c, v.get('description', ''), v.get('category', ''), v.get('sub_category', ''),
+              v.get('pc_category', ''), now) for c, v in items.items()])
+    flash(tr(f'已导入 {len(items)} 个产品编码', f'Imported {len(items)} product codes'), 'success')
+    return redirect(url_for('settings'))
+
+
+def evidence_rule_coverage():
+    """(reference count, updated, [unclassified (code, description)]) for
+    the items on the current schedule."""
+    with db_conn() as conn:
+        row = conn.execute('SELECT COUNT(*) AS n, MAX(updated_at) AS t FROM product_reference').fetchone()
+        refs = {r['code']: dict(r) for r in conn.execute('SELECT * FROM product_reference')}
+    unknown, seen = [], set()
+    for sheet, rows in load_schedule(CURRENT_FILE).items():
+        if not rows:
+            continue
+        hl = [str(h).lower() for h in rows[0]]
+        if 'item code' not in hl:
+            continue
+        ic = hl.index('item code')
+        dc = hl.index('item description') if 'item description' in hl else None
+        for r in rows[1:]:
+            code = str(r[ic] if ic < len(r) else '').strip()
+            if not code or code.upper() in seen:
+                continue
+            seen.add(code.upper())
+            desc = str(r[dc]) if dc is not None and dc < len(r) else ''
+            if not evidence_rules.classify(code, desc, refs.get(code.upper())):
+                unknown.append((code, desc))
+    return row['n'], row['t'], unknown
+
 
 @app.route('/settings/modules', methods=['POST'])
 def settings_modules():
