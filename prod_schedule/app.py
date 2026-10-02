@@ -2223,6 +2223,11 @@ def _apply_schedule(data, baseline=False):
         if not baseline:
             run_daily_reminders()
 
+        moved = assign_unscheduled_tasks_to_lead()
+        if moved:
+            flash(tr(f'{moved} 个订单已不在排期的未分配任务已自动分配给 Murphy',
+                     f'{moved} unassigned task(s) whose order left the schedule were assigned to Murphy'),
+                  'info')
         updated_note = f'，{tasks_updated} 个任务日期/数量已同步' if tasks_updated else ''
         updated_note_en = f', {tasks_updated} task(s) updated' if tasks_updated else ''
         if new_tasks_created and not baseline:
@@ -4820,6 +4825,46 @@ def _backfill_fully_shipped_history():
 OLD_REPORTS_FIX_FLAG = 'fixed_old_shipped_reports_assignee'
 
 
+def _lead_account(conn):
+    """Murphy's account (username 'murphy'), else the only active lead."""
+    lead = conn.execute(
+        "SELECT id FROM users WHERE LOWER(username)='murphy' AND active=1").fetchone()
+    if not lead:
+        leads = conn.execute("SELECT id FROM users WHERE role='lead' AND active=1").fetchall()
+        lead = leads[0] if len(leads) == 1 else None
+    return lead
+
+
+def assign_unscheduled_tasks_to_lead():
+    """Business rule: an open, unassigned task whose order is no longer on the
+    current schedule goes to Murphy, who decides whether to inspect or close
+    it. Tasks already assigned to someone stay with them. No e-mail is sent.
+    Runs at start-up and after every schedule upload. Returns the count."""
+    current = load_schedule(CURRENT_FILE)
+    if not current:
+        return 0
+    in_schedule = {make_job_key(sheet, r, rows[0])
+                   for sheet, rows in current.items() for r in (rows or [])[1:]}
+    with db_conn() as conn:
+        lead = _lead_account(conn)
+        if not lead:
+            return 0
+        rows = conn.execute(
+            "SELECT id, job_key FROM inspection_tasks WHERE assigned_to IS NULL "
+            "AND IFNULL(status, '') NOT IN ('Completed', 'Closed')").fetchall()
+        ids = [r['id'] for r in rows if r['job_key'] not in in_schedule]
+        for task_id in ids:
+            conn.execute(
+                'UPDATE inspection_tasks SET assigned_to=?, assigned_by=?, assigned_at=?, assign_note=? '
+                'WHERE id=? AND assigned_to IS NULL',
+                (lead['id'], 'system', datetime.now().strftime('%Y-%m-%d %H:%M'),
+                 '订单已不在排期，自动分配给 Murphy / Order left the schedule, assigned to Murphy',
+                 task_id))
+    if ids:
+        logger.info('Assigned %s unscheduled task(s) to Murphy', len(ids))
+    return len(ids)
+
+
 def _assign_old_shipped_reports_to_lead():
     """One-time clean-up (agreed with the business): tasks that already have an
     inspection report but no assignee, and whose order has left the current
@@ -4837,11 +4882,7 @@ def _assign_old_shipped_reports_to_lead():
                    for sheet, rows in current.items() for r in (rows or [])[1:]}
     reported = {k for k, recs in load_json(INSPECTIONS_CACHE, {}).items() if recs}
     with db_conn() as conn:
-        lead = conn.execute(
-            "SELECT id FROM users WHERE LOWER(username)='murphy' AND active=1").fetchone()
-        if not lead:
-            leads = conn.execute("SELECT id FROM users WHERE role='lead' AND active=1").fetchall()
-            lead = leads[0] if len(leads) == 1 else None
+        lead = _lead_account(conn)
         if not lead:
             logger.warning('Old shipped reports not re-assigned: no Murphy / single lead account yet')
             return 0
@@ -4893,6 +4934,11 @@ try:
     _assign_old_shipped_reports_to_lead()
 except Exception:
     logger.exception('Unable to assign old shipped reports')
+
+try:
+    assign_unscheduled_tasks_to_lead()
+except Exception:
+    logger.exception('Unable to assign unscheduled tasks')
 
 try:
     _backfill_fully_shipped_history()

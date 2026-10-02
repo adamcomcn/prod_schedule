@@ -89,5 +89,34 @@ class OldReportsFixTests(unittest.TestCase):
         self.assertEqual(self.assignees()[orphan][0], murphy)
 
 
+class UnscheduledToLeadTests(OldReportsFixTests):
+    """Ongoing rule: open, unassigned tasks whose order left the schedule -> Murphy."""
+
+    def test_only_open_unassigned_unscheduled_tasks_move(self):
+        gone_open = 'MELBOURNE|PO-7|GONE-OPEN'
+        gone_yu = 'MELBOURNE|PO-8|GONE-YU'
+        with db_conn() as conn:
+            conn.execute("INSERT INTO inspection_tasks (job_key, region, status) VALUES (?, 'MELBOURNE', 'Pending')",
+                         (gone_open,))
+            conn.execute("INSERT INTO inspection_tasks (job_key, region, status, assigned_to) "
+                         "VALUES (?, 'MELBOURNE', 'In Progress', ?)", (gone_yu, self.yu))
+            conn.execute("UPDATE inspection_tasks SET status='Pending' WHERE job_key=?", (STILL_ON,))
+            conn.execute("UPDATE inspection_tasks SET status='Closed' WHERE job_key=?", (NO_REPORT,))
+        murphy = self.add_murphy()
+        self.assertEqual(app.assign_unscheduled_tasks_to_lead(), 1)  # only gone_open
+        a = self.assignees()
+        self.assertEqual(a[gone_open], (murphy, 'system'))
+        self.assertEqual(a[gone_yu][0], self.yu)          # already assigned: stays with Yu
+        self.assertEqual(a[STILL_ON], (None, ''))          # still on the schedule
+        self.assertEqual(a[NO_REPORT], (None, ''))         # closed
+        self.assertEqual(a[SHIPPED], (None, ''))           # completed
+        self.assertEqual(app.assign_unscheduled_tasks_to_lead(), 0)  # idempotent
+
+    def test_no_murphy_no_change(self):
+        with db_conn() as conn:
+            conn.execute("INSERT INTO inspection_tasks (job_key, region, status) VALUES ('MELBOURNE|PO-7|X', 'MELBOURNE', 'Pending')")
+        self.assertEqual(app.assign_unscheduled_tasks_to_lead(), 0)
+
+
 if __name__ == '__main__':
     unittest.main()
