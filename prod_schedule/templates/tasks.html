@@ -108,6 +108,39 @@
 .assignee-me { background:#dcfce7; color:#166534; }
 .assign-note { font-size:.72rem; color:#6b7280; max-width:180px; white-space:normal; margin-top:2px; }
 tr.mine td { background:#f0fdf4; }
+
+/* ── phones: each task becomes a card, statistics fold away ── */
+.stats-toggle { display:none; }
+@media (max-width: 760px) {
+  .stats-toggle { display:inline-flex; margin-bottom:12px; }
+  .stats-wrap { display:none; }
+  .stats-wrap.show { display:block; }
+  .filter-bar { flex-wrap:nowrap; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
+  .filter-bar a, .filter-bar select { flex-shrink:0; }
+  .assign-bar select, .assign-bar input[type=text] { flex:1 1 100%; min-width:0; }
+  .task-table thead { display:none; }
+  .task-table, .task-table tbody { display:block; }
+  .task-table tr { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px;
+                   padding:12px 14px; border-bottom:1px solid #e5e7eb; }
+  .task-table td { display:block; padding:0; border:0; background:none !important; }
+  .task-table tr.overdue { background:#fff5f5; }
+  .task-table tr.urgent  { background:#fff8f0; }
+  .task-table tr.mine    { box-shadow:inset 3px 0 0 #16a34a; }
+  .task-table td.c-order  { order:1; font-size:.95rem; }
+  .task-table td.c-item   { order:2; }
+  .task-table td.c-days   { order:3; margin-left:auto; }
+  .task-table td.c-desc   { order:4; flex-basis:100%; max-width:none !important; }
+  .task-table td.c-meta   { order:5; font-size:.76rem !important; color:#6b7280; }
+  .task-table td.c-meta::before { content:attr(data-label) ' '; color:#9ca3af; }
+  .task-table td.c-result { order:6; flex-basis:100%; }
+  .task-table .no-result { display:none; }
+  .task-table td.c-assignee { order:7; }
+  .task-table td.c-status { order:8; margin-left:auto; }
+  .task-table td.c-status select { font-size:.85rem; padding:6px 8px; }
+  .task-table td.c-dot, .task-table td.c-est { display:none; }
+  .task-table td.c-check { order:0; }
+  .task-table td.c-check input { width:20px; height:20px; }
+}
 {% endblock %}
 
 {% block content %}
@@ -125,6 +158,9 @@ tr.mine td { background:#f0fdf4; }
 
   {# ══════════════ STATS SECTION ══════════════ #}
   {% if stats.total > 0 %}
+  <button type="button" class="btn btn-outline btn-sm stats-toggle"
+          onclick="document.querySelector('.stats-wrap').classList.toggle('show')">&#128202; {{ tr('显示 / 隐藏统计', 'Show / hide statistics') }}</button>
+  <div class="stats-wrap">
 
   {# ── Row 1: Status overview + Urgency ── #}
   <div class="stat-grid">
@@ -368,6 +404,7 @@ tr.mine td { background:#f0fdf4; }
   </div>
   {% endif %}
 
+  </div>
   {% endif %}{# end stats.total > 0 #}
 
   {# ══════════════ SCOPE TABS ══════════════ #}
@@ -526,29 +563,29 @@ tr.mine td { background:#f0fdf4; }
               data-result="{{ {'Fail': '1', 'Partial Pass': '2', 'Pass': '3'}.get(last_result, '') }}"
               data-assignee="{{ t.assignee_name or '' }}" data-status="{{ t.status }}">
             {% if g.can_assign %}
-            <td><input type="checkbox" class="task-check" name="task_ids" value="{{ t.id }}" form="assignForm" onchange="updateAssignCount()"></td>
+            <td class="c-check"><input type="checkbox" class="task-check" name="task_ids" value="{{ t.id }}" form="assignForm" onchange="updateAssignCount()"></td>
             {% endif %}
-            <td><span class="urgency-dot urg-{{ urg_cls }}"></span></td>
-            <td><strong>{{ t.region }}</strong></td>
-            <td style="font-size:.82rem; white-space:nowrap;">{{ (t.supplier or '')|trim or '—' }}</td>
-            <td>
+            <td class="c-dot"><span class="urgency-dot urg-{{ urg_cls }}"></span></td>
+            <td class="c-meta" data-label="{{ tr('区域', 'Region') }}"><strong>{{ t.region }}</strong></td>
+            <td class="c-meta" data-label="{{ tr('供应商', 'Supplier') }}" style="font-size:.82rem; white-space:nowrap;">{{ (t.supplier or '')|trim or '—' }}</td>
+            <td class="c-order">
               <a href="{{ url_for('inspect_form', job_key=t.job_key) }}"
                  style="font-weight:600;">{{ t.order_number }}</a>
               {% if t.orphan %}<span class="badge" style="background:#fef3c7;color:#92400e;margin-left:4px;font-size:.66rem;"
                     title="{{ tr('该订单已不在当前排期里（已出货或被移除），可关闭此任务', 'This order is no longer in the current schedule (shipped or removed); you can close the task') }}">&#9888; {{ tr('已不在排期', 'Not in schedule') }}</span>{% endif %}
             </td>
-            <td><span style="font-family:monospace; background:#f3f4f6;
+            <td class="c-item"><span style="font-family:monospace; background:#f3f4f6;
                 padding:2px 6px; border-radius:4px; font-size:.78rem;">
                 {{ t.item_code }}</span></td>
-            <td style="max-width:200px; font-size:.8rem; color:#374151;">
+            <td class="c-desc" style="max-width:200px; font-size:.8rem; color:#374151;">
               {{ t.description or '—' }}</td>
-            <td style="text-align:center;">{{ t.quantity or '—' }}</td>
-            <td style="font-size:.8rem; color:#6b7280; white-space:nowrap;">
+            <td class="c-meta" data-label="{{ tr('数量', 'Qty') }}" style="text-align:center;">{{ t.quantity or '—' }}</td>
+            <td class="c-est" style="font-size:.8rem; color:#6b7280; white-space:nowrap;">
               {{ t.est_completion or '—' }}</td>
-            <td>
+            <td class="c-days">
               <span class="days-badge {{ days_cls }}"{% if est %} title="{{ tr('预计完工', 'Est. completion') }}: {{ est }}"{% endif %}>{{ days_label }}</span>
             </td>
-            <td>
+            <td class="c-result">
               {% if last_result == 'Pass' %}
                 <span class="badge badge-new">&#10003; {{ tr('合格', 'Pass') }}</span>
               {% elif last_result == 'Fail' %}
@@ -562,10 +599,10 @@ tr.mine td { background:#f0fdf4; }
                 <a href="{{ url_for('inspection_report_pdf', job_key=t.job_key) }}" target="_blank"
                    style="font-size:.72rem; margin-left:4px;">&#128196; PDF</a>
               {% else %}
-                <span style="font-size:.75rem; color:#9ca3af;">—</span>
+                <span class="no-result" style="font-size:.75rem; color:#9ca3af;">—</span>
               {% endif %}
             </td>
-            <td style="white-space:nowrap;">
+            <td class="c-assignee" style="white-space:nowrap;">
               {% if t.assigned_to %}
                 <span class="assignee{% if t.assigned_to == g.user_id %} assignee-me{% endif %}"
                       data-time="{{ t.assigned_at|utc_iso }}" data-time-text="{{ t.assigned_at }}"
@@ -575,7 +612,7 @@ tr.mine td { background:#f0fdf4; }
                 <span style="color:#9ca3af; font-size:.78rem;">{{ tr('未分配', 'Unassigned') }}</span>
               {% endif %}
             </td>
-            <td class="status-cell">
+            <td class="status-cell c-status">
               {% if g.can_assign or (t.assigned_to == g.user_id and t.status != 'Closed') %}
               <form method="POST" action="{{ url_for('task_status_update', tid=t.id) }}"
                     style="display:inline;">

@@ -5,6 +5,8 @@
 .dash-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 16px; }
 @media (max-width: 960px) { .dash-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 500px)  { .dash-grid { grid-template-columns: repeat(2, 1fr); } }
+.dash-two { display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:start; }
+@media (max-width: 760px) { .dash-two { grid-template-columns:1fr; } .dash-two > * { min-width:0; } }
 
 .card-note { font-size:.74rem; color:#6b7280; line-height:1.55; margin:-4px 0 12px; }
 .card-note b { color:#374151; }
@@ -126,7 +128,7 @@
     </div>
     <div class="card-note">{{ tr('左：上一次上传的订单数 → 本次排期的订单数；中间是变化来源（已发货离开 / 新增 / 部分发货）。右：本次订单的状态构成与各区域占比。', 'Left: orders in the previous upload → orders in this schedule, with what changed. Right: status mix of this week and per-region split.') }}</div>
 
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:start;">
+    <div class="dash-two">
 
       <!-- Left: flow diagram -->
       <div>

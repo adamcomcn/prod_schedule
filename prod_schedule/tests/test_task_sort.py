@@ -55,4 +55,4 @@ class StatusColumnTests(unittest.TestCase):
             s['user_id'] = uid
         page = c.get('/tasks').get_data(as_text=True)
         self.assertIn('min-width:104px', page)
-        self.assertIn('class="status-cell"', page)
+        self.assertIn('class="status-cell c-status"', page)

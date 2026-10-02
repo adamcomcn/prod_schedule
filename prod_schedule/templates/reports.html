@@ -19,6 +19,17 @@
 .sum-grid { display:flex; flex-wrap:wrap; gap:10px; }
 .sum-card { background:#f8fafc; border-radius:8px; padding:8px 12px; font-size:.78rem; min-width:170px; }
 .sum-card strong { font-size:.9rem; color:#1a3a5c; }
+@media (max-width: 760px) {
+  .rep-filters > div { flex:1 1 45%; }
+  .rep-filters input, .rep-filters select { width:100%; min-width:0; }
+  .sum-card { flex:1 1 100%; }
+  .rep-table thead { display:none; }
+  .rep-table, .rep-table tbody { display:block; }
+  .rep-table tr { display:flex; flex-wrap:wrap; gap:4px 10px; padding:10px 0; border-bottom:1px solid #e5e7eb; }
+  .rep-table td { display:block; padding:0; border:0; }
+  .rep-table td:first-child { flex-basis:100%; }
+  .rep-table td:nth-child(3) { flex-basis:100%; }
+}
 {% endblock %}
 
 {% block content %}
