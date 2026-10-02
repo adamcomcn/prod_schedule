@@ -3426,21 +3426,71 @@ def _email_link_label(url):
     return '打开链接 / Open link'
 
 
-def email_html(body):
-    """HTML version of a plain-text e-mail body: same text, URLs as short
-    labelled links."""
+def _email_inline(text):
+    """Escape one line and turn its URLs into short labelled links."""
     import html as _html
     parts, last = [], 0
-    for match in _URL_RE.finditer(body):
-        parts.append(_html.escape(body[last:match.start()]))
+    for match in _URL_RE.finditer(text):
+        parts.append(_html.escape(text[last:match.start()]))
         url = match.group(0)
         parts.append(f'<a href="{_html.escape(url, quote=True)}" style="color:#1a6fc4;font-weight:600;">'
                      f'{_html.escape(_email_link_label(url))}</a>')
         last = match.end()
-    parts.append(_html.escape(body[last:]))
-    return ('<div style="font-family:-apple-system,\'Segoe UI\',\'Microsoft YaHei\',Arial,sans-serif;'
-            'font-size:14px;line-height:1.6;color:#1f2937;white-space:pre-wrap;">'
-            + ''.join(parts) + '</div>')
+    parts.append(_html.escape(text[last:]))
+    return ''.join(parts)
+
+
+_EMAIL_FONT = "font-family:-apple-system,'Segoe UI','Microsoft YaHei',Arial,sans-serif;"
+_LABEL_RE = re.compile(r'^([^:：]{1,40}?[:：])\s*(.+)$')
+
+
+def email_html(body):
+    """HTML version of a plain-text e-mail body, laid out with real HTML
+    elements (Outlook ignores CSS white-space, so line breaks must be tags):
+    first line as a title, 'Label: value' pairs, numbered items in bold,
+    several fields on one line split into separate lines, and lone URLs as
+    buttons. Inline URLs become short labelled links."""
+    import html as _html
+    out = []
+    first = True
+    for raw in body.split('\n'):
+        stripped = raw.strip()
+        if not stripped:
+            out.append('<div style="height:10px;line-height:10px;">&nbsp;</div>')
+            continue
+        indent = 18 if raw.startswith(' ') else 0
+        if first:
+            out.append(f'<p style="margin:0 0 10px;font-size:17px;font-weight:700;color:#1a3a5c;">'
+                       f'{_email_inline(stripped)}</p>')
+            first = False
+            continue
+        if _URL_RE.fullmatch(stripped):  # a link on its own line -> button
+            url = _html.escape(stripped, quote=True)
+            out.append(f'<p style="margin:6px 0 8px {indent}px;">'
+                       f'<a href="{url}" style="display:inline-block;background:#1a3a5c;color:#ffffff;'
+                       f'text-decoration:none;font-weight:600;padding:6px 14px;border-radius:6px;">'
+                       f'{_html.escape(_email_link_label(stripped))}</a></p>')
+            continue
+        # "描述 Description: X    数量 Qty: 400" -> one field per line
+        for field in re.split(r'\s{3,}', stripped):
+            numbered = re.match(r'^(\d+\.)\s+(.*)$', field)
+            label = None if _URL_RE.match(field) else _LABEL_RE.match(field)
+            if numbered:
+                html_line = (f'<span style="color:#1a3a5c;">{numbered.group(1)}</span> '
+                             f'<strong>{_email_inline(numbered.group(2))}</strong>')
+                style = f'margin:10px 0 2px {indent}px;'
+            elif label and 'http' not in label.group(1).lower():
+                html_line = (f'<span style="color:#6b7280;">{_html.escape(label.group(1))}</span> '
+                             f'<strong>{_email_inline(label.group(2))}</strong>')
+                style = f'margin:2px 0 2px {indent}px;'
+            else:
+                html_line = _email_inline(field)
+                style = f'margin:2px 0 2px {indent}px;'
+            out.append(f'<p style="{style}">{html_line}</p>')
+    return ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
+            '<tr><td style="padding:4px 0;">'
+            f'<div style="{_EMAIL_FONT}font-size:14px;line-height:1.6;color:#1f2937;max-width:680px;">'
+            + ''.join(out) + '</div></td></tr></table>')
 
 
 def _smtp_send(subject, body, recipients, attachments=()):

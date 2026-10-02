@@ -214,6 +214,18 @@ class TaskAssignmentTests(unittest.TestCase):
         visible = re.sub(r'<[^>]+>', '', html)
         self.assertNotIn('http://', visible)  # addresses are not shown as text
 
+    def test_email_html_uses_real_line_breaks(self):
+        html = app.email_html('通知 Title\n负责人 Assigned to: Yu\n\n1. [MEL]  DPL1  X\n'
+                              '    描述 Description: Valve    数量 Qty: 5\n'
+                              '    https://x.example/inspect/A\n结尾 https://x.example/tasks')
+        self.assertNotIn('pre-wrap', html)  # Outlook ignores it
+        self.assertGreaterEqual(html.count('<p '), 7)
+        self.assertIn('>负责人 Assigned to:</span> <strong>Yu</strong>', html)
+        self.assertIn('>描述 Description:</span> <strong>Valve</strong>', html)
+        self.assertIn('>数量 Qty:</span> <strong>5</strong>', html)  # split onto its own line
+        self.assertIn('display:inline-block;background:#1a3a5c', html)  # lone link -> button
+        self.assertIn('结尾 <a href="https://x.example/tasks"', html)  # 'https:' is not a label
+
     def test_email_html_escapes_text(self):
         html = app.email_html('Note: <b>&</b>\nhttps://x.example/inspect/A?b=1&c=2')
         self.assertIn('&lt;b&gt;&amp;&lt;/b&gt;', html)
