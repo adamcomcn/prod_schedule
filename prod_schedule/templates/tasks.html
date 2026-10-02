@@ -490,25 +490,28 @@ tr.mine td { background:#f0fdf4; }
           {% if t.status in ['Completed', 'Closed'] %}
             {% set urg_cls = 'done' %}{% set row_cls = '' %}{% set days_label = '—' %}{% set days_cls = 'days-none' %}
           {% elif days_left is none %}
-            {% set urg_cls = 'ok' %}{% set row_cls = '' %}{% set days_label = est or tr('无截止日', 'No due date') %}{% set days_cls = 'days-none' %}
+            {% set urg_cls = 'ok' %}{% set row_cls = '' %}{% set days_label = tr('无截止日', 'No due date') %}{% set days_cls = 'days-none' %}
           {% elif days_left < 0 %}
             {% set urg_cls = 'overdue' %}{% set row_cls = 'overdue' %}
-            {% set days_label = tr('已逾期', 'Overdue') %}{% set days_cls = 'days-overdue' %}
+            {% set days_label = tr('逾期 ' ~ (0 - days_left) ~ ' 天', (0 - days_left) ~ (' day' if days_left == -1 else ' days') ~ ' overdue') %}{% set days_cls = 'days-overdue' %}
+          {% elif days_left == 0 %}
+            {% set urg_cls = 'overdue' %}{% set row_cls = 'urgent' %}
+            {% set days_label = tr('今天到期', 'Due today') %}{% set days_cls = 'days-overdue' %}
           {% elif days_left <= 7 %}
             {% set urg_cls = 'urgent' %}{% set row_cls = 'urgent' %}
-            {% set days_label = est %}{% set days_cls = 'days-urgent' %}
+            {% set days_label = tr('还剩 ' ~ days_left ~ ' 天', days_left ~ (' day' if days_left == 1 else ' days') ~ ' left') %}{% set days_cls = 'days-urgent' %}
           {% elif days_left <= 14 %}
             {% set urg_cls = 'soon' %}{% set row_cls = '' %}
-            {% set days_label = est %}{% set days_cls = 'days-soon' %}
+            {% set days_label = tr('还剩 ' ~ days_left ~ ' 天', days_left ~ ' days left') %}{% set days_cls = 'days-soon' %}
           {% else %}
             {% set urg_cls = 'ok' %}{% set row_cls = '' %}
-            {% set days_label = est %}{% set days_cls = 'days-ok' %}
+            {% set days_label = tr('还剩 ' ~ days_left ~ ' 天', days_left ~ ' days left') %}{% set days_cls = 'days-ok' %}
           {% endif %}
 
           <tr class="{{ row_cls }}{% if t.assigned_to == g.user_id %} mine{% endif %}"
               data-region="{{ t.region }}" data-order="{{ t.order_number }}" data-item="{{ t.item_code }}"
               data-desc="{{ t.description }}" data-qty="{{ t.quantity }}" data-est="{{ est_iso(t.est_completion) }}"
-              data-days="{{ days_left if days_left is not none else '' }}"
+              data-days="{{ days_left if days_left is not none and t.status not in ['Completed', 'Closed'] else '' }}"
               data-result="{{ {'Fail': '1', 'Partial Pass': '2', 'Pass': '3'}.get(last_result, '') }}"
               data-assignee="{{ t.assignee_name or '' }}" data-status="{{ t.status }}">
             {% if g.can_assign %}
@@ -531,7 +534,7 @@ tr.mine td { background:#f0fdf4; }
             <td style="font-size:.8rem; color:#6b7280; white-space:nowrap;">
               {{ t.est_completion or '—' }}</td>
             <td>
-              <span class="days-badge {{ days_cls }}">{{ days_label }}</span>
+              <span class="days-badge {{ days_cls }}"{% if est %} title="{{ tr('预计完工', 'Est. completion') }}: {{ est }}"{% endif %}>{{ days_label }}</span>
             </td>
             <td>
               {% if last_result == 'Pass' %}
