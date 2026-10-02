@@ -34,6 +34,7 @@
 .filter-bar a { padding:5px 14px; border-radius:20px; font-size:.8rem; font-weight:500;
                 border:1px solid #d0d5dd; color:#374151; text-decoration:none !important; }
 .filter-bar a.active { background:#1a3a5c; color:#fff; border-color:#1a3a5c; }
+.supplier-filter { width:auto; min-width:150px; padding:4px 10px; border-radius:20px; font-size:.8rem; }
 .filter-bar a:hover:not(.active) { background:#f3f4f6; }
 
 /* ── stat cards grid ── */
@@ -402,7 +403,7 @@ tr.mine td { background:#f0fdf4; }
   <form method="POST" action="{{ url_for('task_assign') }}" id="assignForm" class="assign-bar">
     <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
     <label style="margin:0; display:flex; align-items:center; gap:6px; font-weight:600;">
-      <input type="checkbox" id="checkAll" onclick="document.querySelectorAll('.task-check').forEach(c => c.checked = this.checked); updateAssignCount();">
+      <input type="checkbox" id="checkAll" onclick="document.querySelectorAll('.task-check').forEach(c => { if (c.closest('tr').style.display !== 'none') c.checked = this.checked; }); updateAssignCount();">
       {{ tr('全选', 'Select all') }}
     </label>
     <span id="assignCount" class="assign-count">{{ tr('已选 0 项', '0 selected') }}</span>
@@ -424,10 +425,19 @@ tr.mine td { background:#f0fdf4; }
   {% endif %}
 
   {# ══════════════ FILTER BAR ══════════════ #}
+  {% set ns_sup = namespace(names=[]) %}{% for t in tasks %}{% set n = (t.supplier or '')|trim %}{% if n and n not in ns_sup.names %}{% set ns_sup.names = ns_sup.names + [n] %}{% endif %}{% endfor %}{% set supplier_names = ns_sup.names|sort %}
   <div class="filter-bar">
     <span style="font-size:.8rem; color:#6b7280;">
       {{ tr('筛选：', 'Filter:') }}
     </span>
+    {% if supplier_names %}
+    <select id="supplierFilter" class="supplier-filter" onchange="filterSupplier(this.value)"
+            title="{{ tr('按供应商筛选（只影响当前列表）', 'Filter by supplier (this list only)') }}">
+      <option value="*">{{ tr('全部供应商', 'All suppliers') }}</option>
+      {% for name in supplier_names %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+      <option value="">{{ tr('（无供应商）', '(no supplier)') }}</option>
+    </select>
+    {% endif %}
     <a href="{{ url_for('tasks', scope=scope) }}" class="{{ 'active' if not status_filter }}">
       {{ tr('全部', 'All') }}
       <span style="margin-left:4px; opacity:.6;">({{ stats.total if stats else 0 }})</span>
@@ -469,6 +479,7 @@ tr.mine td { background:#f0fdf4; }
             {% if g.can_assign %}<th style="width:28px;"></th>{% endif %}
             <th style="width:12px;"></th>
             <th class="sortable" data-key="region">{{ tr('区域', 'Region') }}</th>
+            <th class="sortable" data-key="supplier">{{ tr('供应商', 'Supplier') }}</th>
             <th class="sortable" data-key="order">{{ tr('订单号', 'Order No.') }}</th>
             <th class="sortable" data-key="item">{{ tr('产品编码', 'Item Code') }}</th>
             <th class="sortable" data-key="desc">{{ tr('描述', 'Description') }}</th>
@@ -509,7 +520,7 @@ tr.mine td { background:#f0fdf4; }
           {% endif %}
 
           <tr class="{{ row_cls }}{% if t.assigned_to == g.user_id %} mine{% endif %}"
-              data-region="{{ t.region }}" data-order="{{ t.order_number }}" data-item="{{ t.item_code }}"
+              data-region="{{ t.region }}" data-supplier="{{ (t.supplier or '')|trim }}" data-order="{{ t.order_number }}" data-item="{{ t.item_code }}"
               data-desc="{{ t.description }}" data-qty="{{ t.quantity }}" data-est="{{ est_iso(t.est_completion) }}"
               data-days="{{ days_left if days_left is not none and t.status not in ['Completed', 'Closed'] else '' }}"
               data-result="{{ {'Fail': '1', 'Partial Pass': '2', 'Pass': '3'}.get(last_result, '') }}"
@@ -519,6 +530,7 @@ tr.mine td { background:#f0fdf4; }
             {% endif %}
             <td><span class="urgency-dot urg-{{ urg_cls }}"></span></td>
             <td><strong>{{ t.region }}</strong></td>
+            <td style="font-size:.82rem; white-space:nowrap;">{{ (t.supplier or '')|trim or '—' }}</td>
             <td>
               <a href="{{ url_for('inspect_form', job_key=t.job_key) }}"
                  style="font-weight:600;">{{ t.order_number }}</a>
@@ -616,6 +628,22 @@ tr.mine td { background:#f0fdf4; }
 </div>
 
 <script>
+function filterSupplier(value) {
+  // Show only the chosen supplier's tasks; untick rows that get hidden so
+  // they are never assigned by accident.
+  document.querySelectorAll('tr[data-supplier]').forEach(function (row) {
+    var show = value === '*' || row.dataset.supplier === value;
+    row.style.display = show ? '' : 'none';
+    if (!show) {
+      var cb = row.querySelector('.task-check');
+      if (cb) cb.checked = false;
+    }
+  });
+  var all = document.getElementById('checkAll');
+  if (all) all.checked = false;
+  updateAssignCount();
+}
+
 function updateAssignCount() {
   var n = document.querySelectorAll('.task-check:checked').length;
   var el = document.getElementById('assignCount');

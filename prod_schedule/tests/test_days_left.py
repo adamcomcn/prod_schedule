@@ -67,5 +67,22 @@ class DaysLeftTests(unittest.TestCase):
         self.assertEqual(self.badge(page, 'SOON5')[0], '5 days left')
 
 
+class SupplierColumnTests(DaysLeftTests):
+    def test_supplier_column_and_filter(self):
+        with db_conn() as conn:
+            conn.execute("UPDATE inspection_tasks SET supplier='Rainbow' WHERE item_code IN ('LATE45', 'SOON5')")
+            conn.execute("UPDATE inspection_tasks SET supplier='  Hebei Foundry ' WHERE item_code='TODAY'")
+            conn.execute("UPDATE inspection_tasks SET supplier=NULL WHERE item_code='NODATE'")
+        self.client.get('/lang/zh')
+        page = self.client.get('/tasks?scope=all').get_data(as_text=True)
+        self.assertIn('data-key="supplier"', page)
+        options = re.findall(r'<option value="([^"]*)">', page.split('id="supplierFilter"')[1].split('</select>')[0])
+        self.assertEqual(options, ['*', 'Hebei Foundry', 'Rainbow', ''])  # trimmed, sorted, no "None"
+        self.assertIn('data-supplier="Rainbow"', page)
+        self.assertIn('data-supplier="Hebei Foundry"', page)
+        row = re.search(r'<tr[^>]*data-item="NODATE".*?</tr>', page, re.S).group(0)
+        self.assertIn('data-supplier=""', row)
+
+
 if __name__ == '__main__':
     unittest.main()
