@@ -129,11 +129,6 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     <a href="{{ url_for('export_comparison_excel') }}" class="btn btn-outline btn-sm">
       {{ tr('导出对比 Excel', 'Export comparison Excel') }}
     </a>
-    {% if g.is_admin and not google_configured %}
-      <a href="{{ url_for('settings') }}" class="btn btn-outline btn-sm">
-        &#9888; {{ tr('配置 Google Sheets/Drive', 'Configure Google Sheets/Drive') }}
-      </a>
-    {% endif %}
     <form method="GET" action="{{ url_for('index') }}" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
       <input type="hidden" name="sheet" value="{{ selected_sheet }}">
       <input type="hidden" name="status" value="{{ status_filter }}">

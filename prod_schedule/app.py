@@ -16,15 +16,6 @@ logger = logging.getLogger(__name__)
 
 _last_error = {'tb': '', 'time': ''}
 
-# Google API imports (graceful fallback if not configured)
-try:
-    from google.oauth2 import service_account
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-    GOOGLE_AVAILABLE = True
-except ImportError:
-    GOOGLE_AVAILABLE = False
-
 app = Flask(__name__)
 # Railway (and most PaaS hosts) sit behind a reverse proxy; trust one hop of
 # X-Forwarded-* so request.remote_addr is the real client, not the proxy.
@@ -66,11 +57,6 @@ EVIDENCE_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.csv', '.jpg', '.jpeg', '.png',
                        '.mp4', '.mov', '.avi', '.mkv'}
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 INVOICE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png'}
-
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive',
-]
 
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_MAX_FAILURES = 5
@@ -370,9 +356,6 @@ def _requested_employee_id(form):
         return form.get('employee_id')
     return str(g.employee_id) if g.employee_id else None
 
-def google_credentials_configured():
-    return bool(os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON_B64'))
-
 def _display_filename(filename):
     """Keep the user's original file name (including Chinese characters) for
     display only; the file itself is always saved under a random name."""
@@ -448,8 +431,6 @@ app.jinja_env.globals['est_iso'] = est_iso
 
 def load_config():
     return load_json(CONFIG_FILE, {
-        'sheet_id': '',
-        'drive_folder_id': '',
         'upload_date': '',
         'valve_prefixes': ['RSV'],
         'office_locations': [],
@@ -1000,76 +981,6 @@ def persist_fully_shipped_jobs(previous, current, shipped_rows, week_label):
 
     return persisted, pending
 
-# ── Google API ────────────────────────────────────────────────────────────────
-
-def get_google_services():
-    encoded = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON_B64', '')
-    if not GOOGLE_AVAILABLE or not encoded:
-        return None, None
-    info = json.loads(base64.b64decode(encoded).decode('utf-8'))
-    creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
-    sheets = build('sheets', 'v4', credentials=creds)
-    drive = build('drive', 'v3', credentials=creds)
-    return sheets, drive
-
-def append_inspection_to_sheet(inspection_data, file_links):
-    config = load_config()
-    sheet_id = config.get('sheet_id', '')
-    if not sheet_id:
-        return False, 'Google Sheet ID not configured'
-    sheets, _ = get_google_services()
-    if not sheets:
-        return False, 'Google credentials not configured'
-
-    row = [
-        inspection_data.get('job_key', ''),
-        inspection_data.get('region', ''),
-        inspection_data.get('order_number', ''),
-        inspection_data.get('item_code', ''),
-        inspection_data.get('item_description', ''),
-        inspection_data.get('supplier', ''),
-        inspection_data.get('quantity_ordered', ''),
-        inspection_data.get('inspector_name', ''),
-        inspection_data.get('inspection_date', ''),
-        inspection_data.get('quantity_inspected', ''),
-        inspection_data.get('result', ''),
-        inspection_data.get('defects', ''),
-        inspection_data.get('notes', ''),
-        ', '.join(file_links),
-        datetime.now().isoformat(),
-    ]
-    body = {'values': [row]}
-    sheets.spreadsheets().values().append(
-        spreadsheetId=sheet_id,
-        range='Inspections!A:O',
-        valueInputOption='USER_ENTERED',
-        body=body,
-    ).execute()
-    return True, 'Saved to Google Sheets'
-
-def upload_file_to_drive(local_path, filename, job_key):
-    config = load_config()
-    folder_id = config.get('drive_folder_id', '')
-    _, drive = get_google_services()
-    if not drive:
-        return None
-
-    # Create sub-folder for this job if needed
-    safe_key = job_key.replace('|', '_').replace('/', '-')
-    query = f"name='{safe_key}' and '{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    res = drive.files().list(q=query, fields='files(id,name)').execute()
-    if res.get('files'):
-        job_folder_id = res['files'][0]['id']
-    else:
-        meta = {'name': safe_key, 'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [folder_id]}
-        job_folder_id = drive.files().create(body=meta, fields='id').execute()['id']
-
-    file_meta = {'name': filename, 'parents': [job_folder_id]}
-    media = MediaFileUpload(local_path, resumable=True)
-    uploaded = drive.files().create(body=file_meta, media_body=media, fields='id,webViewLink').execute()
-    return uploaded.get('webViewLink', '')
-
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @app.route('/healthz')
@@ -1220,7 +1131,6 @@ def index():
                            inspections=inspections,
                            valve_keys=valve_keys,
                            upload_date=config.get('upload_date', ''),
-                           google_configured=bool(config.get('sheet_id') and google_credentials_configured()),
                            outstanding_jobs=outstanding_jobs,
                            outstanding_by_sheet=outstanding_by_sheet,
                            completed_jobs=completed_jobs,
@@ -2413,8 +2323,7 @@ def inspect_form(job_key):
                            inspect_block_message=inspect_permission(job_key)[1],
                            task=job_task(job_key),
                            assignees=_assignable() if g.can_assign else [],
-                           now_date=datetime.now().strftime('%Y-%m-%d'),
-                           google_configured=bool(config.get('sheet_id') and google_credentials_configured()))
+                           now_date=datetime.now().strftime('%Y-%m-%d'))
 
 INSPECTION_RESULTS = {'Pass', 'Fail', 'Partial Pass'}
 
@@ -2503,9 +2412,7 @@ def submit_inspection(job_key):
                 file_path = os.path.join(job_dir, saved_name)
                 all_file_names.append(orig_name)
 
-                drive_link = upload_file_to_drive(file_path, saved_name, job_key)
-                link = drive_link or f'[local] {saved_name}'
-                all_file_links.append(link)
+                all_file_links.append(f'[local] {saved_name}')
                 evidence_results[etype]['files'].append(orig_name)
 
                 conn.execute(
@@ -2513,7 +2420,7 @@ def submit_inspection(job_key):
                     '(job_key, insp_index, evidence_type, original_name, saved_name, '
                     ' file_path, drive_link, result, notes) VALUES (?,?,?,?,?,?,?,?,?)',
                     (job_key, insp_index, etype, orig_name, saved_name,
-                     file_path, drive_link or '', ev_result, ev_notes))
+                     file_path, '', ev_result, ev_notes))
 
     # Check items, DAQ readings and missing evidence against the rule matrix
     item_code = form.get('item_code', '')
@@ -2583,13 +2490,7 @@ def submit_inspection(job_key):
             'UPDATE outstanding_jobs SET completed=1, completed_at=? WHERE job_key=? AND completed=0',
             (datetime.now().isoformat(), job_key))
 
-    # Try Google Sheets
-    ok, msg = append_inspection_to_sheet(inspection_data, all_file_links)
-
-    if ok:
-        flash(tr('检验报告已保存并同步到 Google Sheets', 'Inspection saved to Google Sheets'), 'success')
-    else:
-        flash(tr('检验报告已保存。', 'Inspection saved.') + (tr('（未同步 Google：', ' (Google Sheets not synced: ') + msg + tr('）', ')') if g.is_admin else ''), 'success')
+    flash(tr('检验报告已保存。', 'Inspection saved.'), 'success')
 
     return redirect(url_for('inspect_form', job_key=job_key))
 
@@ -2969,8 +2870,6 @@ def _notify_report_returned(job_key, record, comment):
 def settings():
     config = load_config()
     if request.method == 'POST':
-        config['sheet_id'] = request.form.get('sheet_id', '').strip()
-        config['drive_folder_id'] = request.form.get('drive_folder_id', '').strip()
         raw_prefixes = request.form.get('valve_prefixes', 'RSV')
         config['valve_prefixes'] = [p.strip().upper() for p in raw_prefixes.split(',') if p.strip()]
         config['task_notify_emails'] = ', '.join(_email_list(request.form.get('task_notify_emails', '')))
@@ -2981,8 +2880,8 @@ def settings():
                 for c in re.split(r'[,\n]', request.form['schedule_hidden_columns']) if c.strip()]
         mode = request.form.get('hq_report_mode', 'all')
         config['hq_report_mode'] = mode if mode in HQ_REPORT_MODES else 'all'
-        for legacy_secret in ('smtp_pass', 'smtp_user', 'smtp_host', 'smtp_port'):
-            config.pop(legacy_secret, None)
+        for legacy_key in ('smtp_pass', 'smtp_user', 'smtp_host', 'smtp_port', 'sheet_id', 'drive_folder_id'):
+            config.pop(legacy_key, None)
         save_json(CONFIG_FILE, config)
 
         flash(tr('设置已保存', 'Settings saved'), 'success')
@@ -2992,7 +2891,6 @@ def settings():
                            config=config,
                            modules=MODULES,
                            evidence_coverage=evidence_rule_coverage(),
-                           credentials_exist=google_credentials_configured(),
                            smtp_configured=smtp_configured(),
                            pdf_font_embedded=_pdf_font_embedded(),
                            excel_password_configured=bool(EXCEL_PASSWORD))

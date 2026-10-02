@@ -579,21 +579,12 @@ input[name=result] { display:none; }
           {% if past_attachments.get(pidx) %}
           <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
             {% for att in past_attachments[pidx] %}
-            {% if att.drive_link and att.drive_link.startswith('http') %}
-            <a href="{{ att.drive_link }}" target="_blank"
-               style="font-size:.73rem; padding:2px 7px; border:1px solid #d0d5dd;
-                      border-radius:4px; color:#1a6fc4; text-decoration:none;">
-              {{ {'brt':'📋','checklist':'✅','material':'🔬','daq':'📊','xrf':'⚗️','vtrust':'🎥','spark':'⚡'}.get(att.evidence_type,'📎') }}
-              {{ att.original_name[:28] }}{% if att.original_name|length > 28 %}…{% endif %}
-            </a>
-            {% else %}
             <a href="{{ url_for('serve_attachment', aid=att.id) }}"
                style="font-size:.73rem; padding:2px 7px; border:1px solid #d0d5dd;
                       border-radius:4px; color:#1a6fc4; text-decoration:none;">
               {{ {'brt':'📋','checklist':'✅','material':'🔬','daq':'📊','xrf':'⚗️','vtrust':'🎥','spark':'⚡'}.get(att.evidence_type,'📎') }}
               {{ att.original_name[:28] }}{% if att.original_name|length > 28 %}…{% endif %}
             </a>
-            {% endif %}
             {% endfor %}
           </div>
           {% endif %}
@@ -614,16 +605,6 @@ input[name=result] { display:none; }
           {% endif %}
         </div>
         {% endfor %}
-      </div>
-      {% endif %}
-
-      {% if not google_configured %}
-      <div class="card" style="border:1px solid #fcd34d; background:#fffbeb;">
-        <div style="font-size:.85rem; color:#92400e;">
-          <strong>&#9888; {{ tr('未配置 Google', 'Google not configured') }}</strong><br>
-          {{ tr('检验记录仅保存在本系统。', 'Inspections are saved locally only.') }}
-          {% if g.is_admin %}<a href="{{ url_for('settings') }}">{{ tr('配置 Google Drive', 'Configure Google Drive') }}</a>{% endif %}
-        </div>
       </div>
       {% endif %}
     </div>

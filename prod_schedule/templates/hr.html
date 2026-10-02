@@ -179,7 +179,7 @@
           <td>{{ r.checkin_time or '—' }}</td>
           <td>
             {% if r.checkin_lat and r.checkin_lng %}
-              <a href="https://maps.google.com/?q={{ r.checkin_lat }},{{ r.checkin_lng }}"
+              <a href="https://uri.amap.com/marker?position={{ r.checkin_lng }},{{ r.checkin_lat }}&amp;coordinate=wgs84"
                  target="_blank"
                  style="font-family:monospace; font-size:.82rem; color:#0369a1; white-space:nowrap;">
                 {{ '%.5f'|format(r.checkin_lat) }}, {{ '%.5f'|format(r.checkin_lng) }}
@@ -196,7 +196,7 @@
           <td>{{ r.checkout_time or '—' }}</td>
           <td>
             {% if r.checkout_lat and r.checkout_lng %}
-              <a href="https://maps.google.com/?q={{ r.checkout_lat }},{{ r.checkout_lng }}"
+              <a href="https://uri.amap.com/marker?position={{ r.checkout_lng }},{{ r.checkout_lat }}&amp;coordinate=wgs84"
                  target="_blank"
                  style="font-family:monospace; font-size:.82rem; color:#0369a1; white-space:nowrap;">
                 {{ '%.5f'|format(r.checkout_lat) }}, {{ '%.5f'|format(r.checkout_lng) }}

@@ -48,18 +48,8 @@
     </div>
 
     <div class="settings-grid">
-      <!-- Google config form -->
       <div class="card">
-        <div class="card-title">&#9881; {{ tr('常规与 Google 集成', 'General & Google Integration') }}</div>
-
-        <div style="margin-bottom: 14px; font-size: .85rem; line-height:1.8;">
-          <span class="status-dot {{ 'dot-green' if credentials_exist else 'dot-red' }}"></span>
-          {{ tr('服务账号环境变量', 'Service account environment variable') }}: <strong>{{ tr('已配置', 'Configured') if credentials_exist else tr('未配置', 'Not configured') }}</strong><br>
-          <span class="status-dot {{ 'dot-green' if config.sheet_id else 'dot-red' }}"></span>
-          Google Sheet: <strong>{{ tr('已配置', 'Configured') if config.sheet_id else tr('未设置', 'Not set') }}</strong><br>
-          <span class="status-dot {{ 'dot-green' if config.drive_folder_id else 'dot-red' }}"></span>
-          Drive {{ tr('文件夹', 'Folder') }}: <strong>{{ tr('已配置', 'Configured') if config.drive_folder_id else tr('未设置', 'Not set') }}</strong>
-        </div>
+        <div class="card-title">&#9881; {{ tr('常规设置', 'General') }}</div>
 
         <form method="POST">
           <div class="form-group">
@@ -108,47 +98,8 @@
             </div>
           </div>
 
-          <div class="form-group">
-            <label>Google Sheets ID</label>
-            <input type="text" name="sheet_id" value="{{ config.sheet_id }}"
-                   placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
-            <div style="font-size:.78rem; color:#6b7280; margin-top:4px;">
-              {{ tr('表格网址中的这一段', 'Found in the spreadsheet URL') }}: /spreadsheets/d/<strong>SHEET_ID</strong>/edit
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Google Drive {{ tr('文件夹 ID', 'Folder ID') }}</label>
-            <input type="text" name="drive_folder_id" value="{{ config.drive_folder_id }}"
-                   placeholder="1a2b3c4d5e6f7g8h9i0j">
-            <div style="font-size:.78rem; color:#6b7280; margin-top:4px;">
-              {{ tr('文件夹网址中的这一段', 'Found in the folder URL') }}: /drive/folders/<strong>FOLDER_ID</strong>
-            </div>
-          </div>
-
           <button type="submit" class="btn btn-primary">{{ tr('保存设置', 'Save Settings') }}</button>
         </form>
-      </div>
-
-      <!-- Setup guide -->
-      <div class="card">
-        <div class="card-title">&#128218; {{ tr('Google 配置指引', 'Google Setup Guide') }}</div>
-        <p style="font-size:.8rem; color:#92400e; background:#fffbeb; border-radius:6px; padding:8px 10px; margin-bottom:12px;">
-          {{ tr('注意：Google 服务在中国大陆无法直接访问。附件始终保存在本系统中，Google 同步仅供总部使用。',
-                'Note: Google services are blocked in mainland China. Attachments are always stored in this system; Google sync is for HQ only.') }}
-        </p>
-        <ol class="steps">
-          <li><div>{{ tr('在 console.cloud.google.com 创建项目。', 'Create a project at console.cloud.google.com.') }}</div></li>
-          <li><div>{{ tr('启用 Google Sheets API 和 Google Drive API。', 'Enable the Google Sheets API and Google Drive API.') }}</div></li>
-          <li><div>{{ tr('在 IAM & Admin → Service Accounts 创建服务账号并下载 JSON 密钥，在 Railway 中保存为', 'In IAM & Admin → Service Accounts create a service account, download the JSON key and store it in Railway as') }}
-            <span class="code">GOOGLE_SERVICE_ACCOUNT_JSON_B64</span>.</div></li>
-          <li><div>{{ tr('新建 Google 表格，添加名为 Inspections 的工作表，并以“编辑者”身份共享给服务账号邮箱。', 'Create a Google Sheet with a tab called Inspections and share it with the service account email as Editor.') }}</div></li>
-          <li><div>{{ tr('新建用于存放附件的 Drive 文件夹，同样共享给服务账号，并把文件夹 ID 填到左侧。', 'Create a Drive folder for attachments, share it with the same service account, and paste its ID on the left.') }}</div></li>
-          <li><div>{{ tr('在 Inspections 表第 1 行添加表头：', 'Add these headers in row 1 of the Inspections sheet:') }}<br>
-              <span class="code">Job Key, Region, Order #, Item Code,
-              Description, Supplier, Qty Ordered, Inspector,
-              Date, Qty Inspected, Result, Defects, Notes, Files, Submitted At</span></div></li>
-        </ol>
       </div>
     </div>
 
