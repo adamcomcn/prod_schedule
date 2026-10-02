@@ -77,8 +77,24 @@ class PdfReportTests(unittest.TestCase):
         first = self.client.get(f'/inspect/{JOB}/report.pdf?i=0')
         second = self.client.get(f'/inspect/{JOB}/report.pdf?i=1')
         self.assertEqual(first.status_code, 200)
-        self.assertIn('-1_', first.headers['Content-Disposition'])
-        self.assertIn('-2_', second.headers['Content-Disposition'])
+        self.assertIn('filename=QC-20261009-DPL9-RSV0100FL-1.pdf', first.headers['Content-Disposition'])
+        self.assertIn('filename=QC-20261009-DPL9-RSV0100FL-2.pdf', second.headers['Content-Disposition'])
+        records = app.load_json(app.INSPECTIONS_CACHE)[JOB]
+        self.assertEqual([r['report_no'] for r in records],
+                         ['QC-20261009-DPL9-RSV0100FL-1', 'QC-20261009-DPL9-RSV0100FL-2'])
+
+    def test_old_reports_keep_their_original_number(self):
+        old = {'job_key': JOB, 'order_number': 'DPL9', 'item_code': 'RSV0100FL', 'result': 'Pass',
+               'inspector_name': 'x', 'inspection_date': '2026-09-01', 'submitted_at': '2026-09-01T10:00:00'}
+        app.save_json(app.INSPECTIONS_CACHE, {JOB: [old]})   # submitted before report_no existed
+        number = app.report_number(JOB, old, 0)
+        self.assertRegex(number, r'^QC-20260901-[0-9A-F]{6}-1$')
+        response = self.client.get(f'/inspect/{JOB}/report.pdf')
+        self.assertIn(f'filename={number}_DPL9_RSV0100FL.pdf', response.headers['Content-Disposition'])
+
+    def test_readable_number_is_safe(self):
+        rec = {'inspection_date': '2026-10-01', 'order_number': 'DPL 2627/A', 'item_code': 'es-0300 '}
+        self.assertEqual(app.readable_report_number(rec, 2), 'QC-20261001-DPL2627A-ES0300-3')
 
     def test_missing_report_is_404(self):
         self.assertEqual(self.client.get(f'/inspect/{JOB}/report.pdf').status_code, 404)

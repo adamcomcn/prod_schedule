@@ -2411,6 +2411,7 @@ def submit_inspection(job_key):
     # Determine which insp_index this will be
     cache = load_json(INSPECTIONS_CACHE, {})
     insp_index = len(cache.get(job_key, []))
+    inspection_data['report_no'] = readable_report_number(inspection_data, insp_index)
 
     # Evidence type names from form (ev_result_brt, ev_result_daq, …)
     ev_types = [k[10:] for k in form if k.startswith('ev_result_')]
@@ -2523,7 +2524,28 @@ def submit_inspection(job_key):
 
     return redirect(url_for('inspect_form', job_key=job_key))
 
+def _report_part(value):
+    """Order number / item code as a safe part of a report number."""
+    return re.sub(r'[^A-Za-z0-9]+', '', str(value or '').upper())
+
+
+def readable_report_number(record, index):
+    """QC-<inspection date>-<order number>-<item code>-<n>, e.g.
+    QC-20261001-DPL2627-ES0300-1. Stored on the report when it is submitted."""
+    day = (record.get('inspection_date') or record.get('submitted_at') or '')[:10].replace('-', '')
+    order = _report_part(record.get('order_number')) or _report_part(
+        (record.get('job_key') or '').split('|')[1] if '|' in (record.get('job_key') or '') else '')
+    parts = ['QC', day or 'NODATE', order or 'NOORDER', _report_part(record.get('item_code')) or 'NOITEM',
+             str(index + 1)]
+    return '-'.join(parts)
+
+
 def report_number(job_key, record, index):
+    """The report's number. Reports submitted since the readable format was
+    introduced carry it ('report_no'); older reports keep their original
+    QC-<date>-<job hash>-<n> number so references already sent stay valid."""
+    if record.get('report_no'):
+        return record['report_no']
     day = (record.get('inspection_date') or record.get('submitted_at') or '')[:10].replace('-', '')
     return f"QC-{day or 'NODATE'}-{hashlib.sha1(job_key.encode('utf-8')).hexdigest()[:6].upper()}-{index + 1}"
 
@@ -2593,8 +2615,12 @@ def build_report_pdf(job_key, index, generated_by=''):
         checklist=_latest_checklist(job_key),
         logo_path=os.path.join(BASE_DIR, 'static', 'daemco_logo.png'),
         generated_by=generated_by, review=dict(review) if review else None)
-    safe = re.sub(r'[^A-Za-z0-9._-]+', '_', f"{record.get('order_number') or ''}_{record.get('item_code') or ''}")
-    return pdf, report_no, f'{report_no}_{safe}.pdf'.replace('__', '_'), record
+    if record.get('report_no'):
+        filename = f'{report_no}.pdf'          # already contains order and item
+    else:
+        safe = re.sub(r'[^A-Za-z0-9._-]+', '_', f"{record.get('order_number') or ''}_{record.get('item_code') or ''}")
+        filename = f'{report_no}_{safe}.pdf'.replace('__', '_')
+    return pdf, report_no, filename, record
 
 
 @app.route('/inspect/<path:job_key>/report.pdf')
