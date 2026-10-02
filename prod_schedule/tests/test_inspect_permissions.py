@@ -70,6 +70,20 @@ class InspectPermissionTests(unittest.TestCase):
         self.assertEqual(self.submit(yu, MINE, inspector='Fake Name').status_code, 302)
         self.assertEqual(self.records(MINE)[0]['inspector_name'], 'Mr. Yu')
 
+    def test_progress_upload_gets_redirect_as_json(self):
+        yu = self.client_for('yu')
+        page = yu.get(f'/inspect/{MINE}').get_data(as_text=True)
+        self.assertIn('id="upload-progress"', page)
+        response = yu.post(f'/inspect/{MINE}/submit', headers={'X-Upload': '1'}, data={
+            '_csrf_token': 'tok', 'region': 'MELBOURNE', 'order_number': 'DPL', 'item_code': 'X',
+            'inspection_date': '2026-10-09', 'quantity_inspected': '5', 'result': 'Pass'},
+            content_type='multipart/form-data')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('/inspect/MELBOURNE%7CPO-1', response.get_json()['redirect'])
+        self.assertEqual(len(self.records(MINE)), 1)
+        # the flash message is still waiting for the page the browser opens next
+        self.assertIn('检验报告已保存', yu.get(f'/inspect/{MINE}').get_data(as_text=True))
+
     def test_inspector_only_views_other_and_unassigned_jobs(self):
         yu = self.client_for('yu')
         for job in (OTHERS, FREE):

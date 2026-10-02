@@ -125,6 +125,8 @@ class EvidenceFlowTests(unittest.TestCase):
         self.assertIn('name="daq_t3"', page)
         self.assertIn('data-limit="2.4"', page)
         self.assertNotIn('data-ev="spark"', page)             # DN100: no spark test
+        self.assertIn('id="ev-cam-brt" accept="image/*" capture="environment"', page)  # phone camera
+        self.assertIn('id="ev-vid-vtrust" accept="video/*"', page)
 
     def test_submit_records_checks_daq_and_missing(self):
         yu = self.client_for('yu')

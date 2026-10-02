@@ -79,6 +79,14 @@ input[name=result] { display:none; }
            font-size:.8rem; color:#6b7280; }
 .ev-drop:hover, .ev-drop.drag-over { border-color:#1a6fc4; background:#eff6ff; }
 .ev-file-list { margin-top:8px; display:flex; flex-direction:column; gap:5px; }
+.ev-capture-row { display:flex; gap:8px; margin-top:8px; }
+.ev-capture-row .btn { flex:1; padding:10px; font-size:.9rem; }
+@media (hover: hover) and (pointer: fine) { .ev-capture-row { display:none; } }  /* desktop: no camera */
+.ev-file-busy { font-size:.77rem; color:#92400e; padding:4px 9px; }
+.ev-file-saved { color:#059669; }
+#upload-progress { display:none; margin-top:10px; font-size:.82rem; color:#374151; }
+#upload-progress .bar { height:8px; background:#e5e7eb; border-radius:4px; overflow:hidden; margin-top:4px; }
+#upload-progress .bar div { height:100%; width:0; background:#16a34a; transition:width .2s; }
 .ev-file-item { display:flex; align-items:center; gap:8px; padding:5px 9px;
                 background:#f3f4f6; border-radius:5px; font-size:.77rem; }
 .ev-file-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -329,7 +337,7 @@ input[name=result] { display:none; }
                      ondragover="evDragOver(event,'{{ ev.type }}')"
                      ondragleave="evDragLeave(event,'{{ ev.type }}')"
                      ondrop="evDrop(event,'{{ ev.type }}')">
-                  <div>&#128193; <strong>{{ tr('点击拍照或选择文件', 'Tap to take a photo or choose files') }}</strong></div>
+                  <div>&#128193; <strong>{{ tr('点击从相册或文件中选择', 'Tap to choose from gallery or files') }}</strong></div>
                   <div style="margin-top:4px; font-size:.72rem; color:#9ca3af;">
                     {{ ev.accepts }}
                   </div>
@@ -340,6 +348,22 @@ input[name=result] { display:none; }
                          style="display:none"
                          onchange="evHandleFiles(this.files,'{{ ev.type }}')">
                 </div>
+                {% if 'image' in ev.accepts or 'video' in ev.accepts %}
+                <div class="ev-capture-row">
+                  {% if 'image' in ev.accepts %}
+                  <button type="button" class="btn btn-outline"
+                          onclick="document.getElementById('ev-cam-{{ ev.type }}').click()">&#128247; {{ tr('拍照', 'Take photo') }}</button>
+                  <input type="file" id="ev-cam-{{ ev.type }}" accept="image/*" capture="environment" style="display:none"
+                         onchange="evHandleFiles(this.files,'{{ ev.type }}'); this.value='';">
+                  {% endif %}
+                  {% if 'video' in ev.accepts %}
+                  <button type="button" class="btn btn-outline"
+                          onclick="document.getElementById('ev-vid-{{ ev.type }}').click()">&#127909; {{ tr('录像', 'Record video') }}</button>
+                  <input type="file" id="ev-vid-{{ ev.type }}" accept="video/*" capture="environment" style="display:none"
+                         onchange="evHandleFiles(this.files,'{{ ev.type }}'); this.value='';">
+                  {% endif %}
+                </div>
+                {% endif %}
                 <div id="ev-list-{{ ev.type }}" class="ev-file-list"></div>
 
                 <!-- Pass / Fail -->
@@ -456,6 +480,10 @@ input[name=result] { display:none; }
               &#10003; {{ tr('提交检验报告', 'Submit Inspection Report') }}
             </button>
             <button type="reset" class="btn btn-outline" onclick="clearAll()">{{ tr('清空', 'Clear') }}</button>
+          </div>
+          <div id="upload-progress">
+            <span id="upload-progress-text"></span>
+            <div class="bar"><div id="upload-progress-bar"></div></div>
           </div>
         </form>
       </div>
@@ -643,11 +671,64 @@ function evGetDT(etype) {
   return evDTs[etype];
 }
 
+// ── Photo compression ──────────────────────────────────────────────────────
+// Phone photos are 3–8 MB and factory networks are slow: large JPEG / PNG /
+// WebP photos are scaled to 2000 px on the long edge and saved as JPEG
+// (about 300–600 KB) before upload. Other files are sent unchanged.
+const PHOTO_MAX_EDGE = 2000, PHOTO_QUALITY = 0.82, PHOTO_MIN_BYTES = 800 * 1024;
+const evPending = {};
+const evOriginalSize = new WeakMap();
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode')); };
+    img.src = url;
+  });
+}
+
+function compressPhoto(file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < PHOTO_MIN_BYTES) return Promise.resolve(file);
+  return loadImage(file).then(img => {
+    // browsers apply the photo's EXIF rotation when drawing an <img>
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(w, h));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';                        // transparent PNG -> white
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return new Promise(resolve => canvas.toBlob(blob => {
+      if (!blob || blob.size >= file.size) return resolve(file);
+      const out = new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg',
+                           {type: 'image/jpeg', lastModified: file.lastModified});
+      evOriginalSize.set(out, file.size);
+      resolve(out);
+    }, 'image/jpeg', PHOTO_QUALITY));
+  }).catch(() => file);
+}
+
+function evBusy() {
+  return Object.values(evPending).some(n => n > 0);
+}
+
 function evHandleFiles(files, etype) {
-  const dt = evGetDT(etype);
-  Array.from(files).forEach(f => dt.items.add(f));
+  const picked = Array.from(files || []);
+  if (!picked.length) return;
+  evPending[etype] = (evPending[etype] || 0) + 1;
   evRenderList(etype);
-  document.getElementById('ev-file-' + etype).files = dt.files;
+  Promise.all(picked.map(compressPhoto)).then(ready => {
+    const dt = evGetDT(etype);
+    ready.forEach(f => dt.items.add(f));
+    document.getElementById('ev-file-' + etype).files = dt.files;
+  }).finally(() => {
+    evPending[etype] -= 1;
+    evRenderList(etype);
+  });
 }
 
 function evDragOver(e, etype) {
@@ -673,15 +754,21 @@ function evRemoveFile(etype, idx) {
   document.getElementById('ev-file-' + etype).files = dt.files;
 }
 
+function fmtSize(bytes) {
+  return bytes > 1048576 ? (bytes/1048576).toFixed(1)+' MB' : (bytes/1024).toFixed(0)+' KB';
+}
+
 function evRenderList(etype) {
   const list = document.getElementById('ev-list-' + etype);
-  list.innerHTML = '';
+  list.innerHTML = evPending[etype] > 0
+    ? '<div class="ev-file-busy">⏳ ' + {{ tr('正在压缩照片…', 'Compressing photos…')|tojson }} + '</div>' : '';
   Array.from(evGetDT(etype).files).forEach((f, i) => {
     const icon = f.type.startsWith('image') ? '🖼️'
                : f.type.startsWith('video') ? '🎥'
                : f.name.endsWith('.pdf')    ? '📄'
                : f.name.match(/\.xlsx?$/i)  ? '📊' : '📎';
-    const sz = f.size > 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(0)+' KB';
+    const before = evOriginalSize.get(f);
+    const sz = before ? fmtSize(before) + ' → <span class="ev-file-saved">' + fmtSize(f.size) + '</span>' : fmtSize(f.size);
     list.innerHTML += `<div class="ev-file-item">
       <span>${icon}</span>
       <span class="ev-file-name">${escapeHtml(f.name)}</span>
@@ -812,9 +899,57 @@ if (inspectForm) {
 }
 
 // ── Pre-submit checks (the server validates too) ────────────────────────────
-let permissionChecked = false;
 let missingConfirmed = false;
+const SUBMIT_LABEL = {{ tr('提交检验报告', 'Submit Inspection Report')|tojson }};
+
+function showProgress(text, ratio) {
+  document.getElementById('upload-progress').style.display = 'block';
+  document.getElementById('upload-progress-text').textContent = text;
+  if (ratio !== undefined) document.getElementById('upload-progress-bar').style.width = Math.round(ratio * 100) + '%';
+}
+
+function uploadFailed(btn, message) {
+  if (btn) { btn.disabled = false; btn.textContent = SUBMIT_LABEL; }
+  document.getElementById('upload-progress').style.display = 'none';
+  saveDraft();
+  alert(message);
+}
+
+// Upload with XMLHttpRequest so inspectors see progress on slow networks; if
+// it fails the photos stay selected and they can simply press Submit again.
+function uploadWithProgress(form, btn) {
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', form.action);
+  xhr.setRequestHeader('X-Upload', '1');
+  xhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return;
+    showProgress({{ tr('上传中', 'Uploading')|tojson }} + ' ' + Math.round(e.loaded / e.total * 100) + '%  ('
+                 + fmtSize(e.loaded) + ' / ' + fmtSize(e.total) + ')', e.loaded / e.total);
+  };
+  xhr.upload.onload = () => showProgress({{ tr('上传完成，正在保存…', 'Uploaded, saving…')|tojson }}, 1);
+  xhr.onload = () => {
+    let data = null;
+    try { data = JSON.parse(xhr.responseText); } catch (err) {}
+    if (xhr.status === 200 && data && data.redirect) {
+      window.location.href = data.redirect;
+    } else if (xhr.status === 200) {
+      document.open(); document.write(xhr.responseText); document.close();
+    } else {
+      uploadFailed(btn, (xhr.responseText || '').replace(/<[^>]+>/g, ' ').trim().slice(0, 300) || ('HTTP ' + xhr.status));
+    }
+  };
+  xhr.onerror = () => uploadFailed(btn, {{ tr('网络中断，上传失败。照片仍保留在页面上，请检查网络后再次点击“提交”。',
+                                            'Network error, upload failed. Your photos are still selected; check the connection and press Submit again.')|tojson }});
+  showProgress({{ tr('上传中', 'Uploading')|tojson }} + ' 0%', 0);
+  xhr.send(new FormData(form));
+}
+
 if (inspectForm) inspectForm.addEventListener('submit', function (e) {
+  if (evBusy()) {
+    e.preventDefault();
+    alert({{ tr('照片还在压缩中，请稍等几秒再提交。', 'Photos are still being compressed. Please wait a few seconds.')|tojson }});
+    return;
+  }
   if (!missingConfirmed) {
     const missing = missingEvidence();
     if (missing.length && !confirm({{ tr('以下所需证据尚未上传文件：', 'These required evidence items have no files:')|tojson }}
@@ -841,33 +976,22 @@ if (inspectForm) inspectForm.addEventListener('submit', function (e) {
     return;
   }
   const btn = this.querySelector('button[type=submit]');
-  if (!permissionChecked) {
-    // Ask the server first: if the task was reassigned meanwhile, stop here
-    // so the selected photos and entries stay on the page.
-    e.preventDefault();
-    const form = this;
-    if (btn) { btn.disabled = true; btn.textContent = {{ tr('检查中…', 'Checking…')|tojson }}; }
-    fetch({{ url_for('inspect_can_submit', job_key=job.job_key)|tojson }}, {credentials: 'same-origin'})
-      .then(r => r.json())
-      .then(res => {
-        if (!res.ok) {
-          if (btn) { btn.disabled = false; btn.textContent = {{ tr('提交检验报告', 'Submit Inspection Report')|tojson }}; }
-          saveDraft();
-          alert(res.message);
-          return;
-        }
-        permissionChecked = true;
-        if (btn) btn.textContent = {{ tr('提交中…', 'Submitting…')|tojson }};
-        HTMLFormElement.prototype.submit.call(form);
-      })
-      .catch(() => {
-        // Network hiccup: let the server decide (it re-checks the permission).
-        permissionChecked = true;
-        HTMLFormElement.prototype.submit.call(form);
-      });
-    return;
-  }
-  if (btn) { btn.disabled = true; btn.textContent = {{ tr('提交中…', 'Submitting…')|tojson }}; }
+  // Ask the server first: if the task was reassigned meanwhile, stop here
+  // so the selected photos and entries stay on the page.
+  e.preventDefault();
+  const form = this;
+  if (btn) { btn.disabled = true; btn.textContent = {{ tr('检查中…', 'Checking…')|tojson }}; }
+  const upload = () => {
+    if (btn) btn.textContent = {{ tr('提交中…', 'Submitting…')|tojson }};
+    uploadWithProgress(form, btn);
+  };
+  fetch({{ url_for('inspect_can_submit', job_key=job.job_key)|tojson }}, {credentials: 'same-origin'})
+    .then(r => r.json())
+    .then(res => {
+      if (!res.ok) { uploadFailed(btn, res.message); return; }
+      upload();
+    })
+    .catch(upload);   // network hiccup: let the server decide (it re-checks the permission)
 });
 </script>
 {% endblock %}

@@ -5363,13 +5363,27 @@ def security_headers(response):
     response.headers['Referrer-Policy'] = 'same-origin'
     response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(self)'
     response.headers['Content-Security-Policy'] = (
-        "default-src 'self'; img-src 'self' data: https:; "
+        "default-src 'self'; img-src 'self' data: blob: https:; "
         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
         "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     )
     if IS_PRODUCTION:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
+
+@app.after_request
+def redirect_as_json_for_uploads(response):
+    """The inspection form uploads with XMLHttpRequest (to show progress);
+    hand it the redirect target as JSON so the browser navigates there itself
+    and the flash message survives."""
+    if request.headers.get('X-Upload') == '1' and response.status_code in (301, 302, 303):
+        target = response.headers.get('Location', '')
+        response.status_code = 200
+        response.headers.pop('Location', None)
+        response.set_data(json.dumps({'redirect': target}))
+        response.mimetype = 'application/json'
+    return response
+
 
 @app.errorhandler(413)
 def upload_too_large(_error):
