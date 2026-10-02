@@ -2881,6 +2881,177 @@ def _notify_report_returned(job_key, record, comment):
                           url_for('inspect_form', job_key=job_key, _external=True)]), recipients)
 
 
+
+# ── Inspection report list and Excel export ──────────────────────────────────
+
+REVIEW_STATES = ('approved', 'rejected', 'pending')
+REPORT_FILTERS = ('date_from', 'date_to', 'supplier', 'inspector', 'result', 'review', 'q')
+
+
+def inspection_report_rows():
+    """Every submitted inspection report as a flat row, newest first."""
+    cache = load_json(INSPECTIONS_CACHE, {})
+    with db_conn() as conn:
+        reviews = {(r['job_key'], r['insp_index']): dict(r)
+                   for r in conn.execute('SELECT * FROM inspection_reviews')}
+        suppliers = {r['job_key']: r['supplier'] for r in conn.execute(
+            "SELECT job_key, supplier FROM inspection_tasks WHERE IFNULL(supplier, '') != ''")}
+    rows = []
+    for job_key, records in cache.items():
+        for index, rec in enumerate(records or []):
+            review = reviews.get((job_key, index)) or {}
+            evidence = rec.get('evidence') or {}
+            rows.append({
+                'job_key': job_key,
+                'index': index,
+                'report_no': report_number(job_key, rec, index),
+                'date': (rec.get('inspection_date') or rec.get('submitted_at') or '')[:10],
+                'submitted_at': rec.get('submitted_at') or '',
+                'region': rec.get('region') or (job_key.split('|')[0] if '|' in job_key else ''),
+                'order_number': rec.get('order_number') or '',
+                'item_code': rec.get('item_code') or '',
+                'item_description': rec.get('item_description') or '',
+                'supplier': (rec.get('supplier') or suppliers.get(job_key) or '').strip(),
+                'product_type': product_type_name(rec.get('product_type')) if rec.get('product_type') else '',
+                'inspector': rec.get('inspector_name') or rec.get('submitted_by') or '',
+                'quantity_inspected': rec.get('quantity_inspected') or '',
+                'quantity_passed': rec.get('quantity_passed') or '',
+                'result': rec.get('result') or '',
+                'defect_codes': ', '.join(rec.get('defect_codes') or []),
+                'defects': rec.get('defects') or '',
+                'evidence': '; '.join(f"{EVIDENCE_META.get(t, {}).get('label', t)}: {e.get('result') or '—'}"
+                                      for t, e in evidence.items() if isinstance(e, dict)),
+                'missing_evidence': ', '.join(EVIDENCE_META.get(t, {}).get('label', t)
+                                              for t in rec.get('missing_evidence') or []),
+                'notes': rec.get('notes') or '',
+                'review': review.get('status') or 'pending',
+                'reviewer': review.get('reviewer_name') or review.get('reviewer') or '',
+                'reviewed_at': review.get('reviewed_at') or '',
+                'review_comment': review.get('comment') or '',
+            })
+    rows.sort(key=lambda r: (r['date'], r['submitted_at']), reverse=True)
+    return rows
+
+
+def filter_report_rows(rows, args):
+    f = {key: (args.get(key) or '').strip() for key in REPORT_FILTERS}
+    q = f['q'].lower()
+    out = []
+    for r in rows:
+        if f['date_from'] and r['date'] < f['date_from']:
+            continue
+        if f['date_to'] and r['date'] > f['date_to']:
+            continue
+        if f['supplier'] and r['supplier'] != f['supplier']:
+            continue
+        if f['inspector'] and r['inspector'] != f['inspector']:
+            continue
+        if f['result'] and r['result'] != f['result']:
+            continue
+        if f['review'] and r['review'] != f['review']:
+            continue
+        if q and q not in ' '.join((r['report_no'], r['order_number'], r['item_code'],
+                                    r['item_description'])).lower():
+            continue
+        out.append(r)
+    return out, f
+
+
+def _xl_safe(value):
+    """Stop spreadsheet formula injection from typed-in text."""
+    if isinstance(value, str) and value[:1] in ('=', '+', '-', '@', '\t', '\r'):
+        return "'" + value
+    return value
+
+
+def report_summary(rows):
+    """Pass / fail counts per supplier (the dashboard of the export)."""
+    by_supplier = {}
+    for r in rows:
+        s = by_supplier.setdefault(r['supplier'] or '—', {'total': 0, 'Pass': 0, 'Fail': 0, 'Partial Pass': 0})
+        s['total'] += 1
+        if r['result'] in s:
+            s[r['result']] += 1
+    out = []
+    for name, s in sorted(by_supplier.items(), key=lambda kv: -kv[1]['total']):
+        out.append({'supplier': name, **s,
+                    'pass_rate': round(s['Pass'] / s['total'] * 100, 1) if s['total'] else 0})
+    return out
+
+
+@app.route('/reports')
+def reports():
+    all_rows = inspection_report_rows()
+    rows, filters = filter_report_rows(all_rows, request.args)
+    return render_template('reports.html', rows=rows[:500], total=len(rows), filters=filters,
+                           summary=report_summary(rows),
+                           suppliers=sorted({r['supplier'] for r in all_rows if r['supplier']}),
+                           inspectors=sorted({r['inspector'] for r in all_rows if r['inspector']}),
+                           export_args={k: v for k, v in filters.items() if v})
+
+
+@app.route('/reports/export.xlsx')
+def reports_export():
+    rows, _filters = filter_report_rows(inspection_report_rows(), request.args)
+    columns = [
+        ('report_no', '报告编号 Report No.', 30), ('date', '检验日期 Date', 12),
+        ('region', '区域 Region', 12), ('order_number', '订单号 Order', 14),
+        ('item_code', '物料编码 Item code', 18), ('item_description', '描述 Description', 36),
+        ('supplier', '供应商 Supplier', 20), ('product_type', '产品类别 Product type', 22),
+        ('inspector', '检验员 Inspector', 14), ('quantity_inspected', '检验数量 Qty inspected', 12),
+        ('quantity_passed', '合格数量 Qty passed', 12), ('result', '结果 Result', 12),
+        ('defect_codes', '缺陷代码 Defect codes', 16), ('defects', '缺陷描述 Defects', 30),
+        ('evidence', '证据结果 Evidence results', 40), ('missing_evidence', '缺少证据 Missing evidence', 24),
+        ('review', '审核 Review', 11), ('reviewer', '审核人 Reviewer', 14),
+        ('reviewed_at', '审核时间 Reviewed (UTC)', 17), ('review_comment', '审核意见 Review comment', 24),
+        ('notes', '备注 Notes', 30), ('submitted_at', '提交时间 Submitted (UTC)', 17),
+    ]
+    header_fill = openpyxl.styles.PatternFill('solid', fgColor='1A3A5C')
+    header_font = openpyxl.styles.Font(color='FFFFFF', bold=True)
+    result_fills = {'Pass': 'D1FAE5', 'Fail': 'FEE2E2', 'Partial Pass': 'FEF3C7'}
+
+    workbook = openpyxl.Workbook()
+    ws = workbook.active
+    ws.title = 'Inspections'
+    ws.append([label for _key, label, _w in columns])
+    for (_key, _label, width), cell in zip(columns, ws[1]):
+        cell.fill, cell.font = header_fill, header_font
+        cell.alignment = openpyxl.styles.Alignment(wrap_text=True, vertical='top')
+        ws.column_dimensions[cell.column_letter].width = width
+    result_col = [key for key, _l, _w in columns].index('result') + 1
+    for r in rows:
+        values = []
+        for key, _label, _w in columns:
+            value = r[key]
+            if key in ('submitted_at', 'reviewed_at'):
+                dt = parse_server_time(value)
+                value = dt.strftime('%Y-%m-%d %H:%M') if dt else value
+            values.append(_xl_safe(value))
+        ws.append(values)
+        fill = result_fills.get(r['result'])
+        if fill:
+            ws.cell(row=ws.max_row, column=result_col).fill = openpyxl.styles.PatternFill('solid', fgColor=fill)
+    ws.freeze_panes = 'B2'
+    ws.auto_filter.ref = ws.dimensions
+
+    summary = workbook.create_sheet('Summary')
+    summary.append(['供应商 Supplier', '报告数 Reports', '合格 Pass', '不合格 Fail',
+                    '部分合格 Partial', '合格率 Pass rate %'])
+    for cell in summary[1]:
+        cell.fill, cell.font = header_fill, header_font
+    for s in report_summary(rows):
+        summary.append([_xl_safe(s['supplier']), s['total'], s['Pass'], s['Fail'], s['Partial Pass'], s['pass_rate']])
+    for letter, width in zip('ABCDEF', (28, 12, 10, 12, 14, 16)):
+        summary.column_dimensions[letter].width = width
+
+    buf = io.BytesIO()
+    workbook.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True,
+                     download_name=f'inspection-reports-{china_today().isoformat()}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
     config = load_config()

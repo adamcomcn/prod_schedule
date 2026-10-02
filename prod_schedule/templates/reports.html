@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('检验报告', 'Inspection Reports') }}{% endblock %}
+
+{% block extra_style %}
+.rep-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+.rep-filters label { display:block; font-size:.72rem; color:#6b7280; margin-bottom:3px; }
+.rep-filters input, .rep-filters select { width:auto; min-width:120px; }
+.rep-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+.rep-table th { background:#f8fafc; text-align:left; padding:7px 8px; border-bottom:1px solid #e2e8f0;
+                white-space:nowrap; color:#374151; }
+.rep-table td { padding:7px 8px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+.res { display:inline-block; padding:1px 8px; border-radius:10px; font-size:.72rem; font-weight:600; white-space:nowrap; }
+.res-Pass { background:#d1fae5; color:#065f46; }
+.res-Fail { background:#fee2e2; color:#991b1b; }
+.res-Partial { background:#fef3c7; color:#92400e; }
+.rv-approved { color:#059669; }
+.rv-rejected { color:#dc2626; }
+.rv-pending { color:#9ca3af; }
+.sum-grid { display:flex; flex-wrap:wrap; gap:10px; }
+.sum-card { background:#f8fafc; border-radius:8px; padding:8px 12px; font-size:.78rem; min-width:170px; }
+.sum-card strong { font-size:.9rem; color:#1a3a5c; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1400px; margin:0 auto;">
+
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+    <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">{{ tr('检验报告', 'Inspection Reports') }}</h1>
+    <a href="{{ url_for('reports_export', **export_args) }}" class="btn btn-primary btn-sm">
+      &#11015; {{ tr('导出 Excel', 'Export Excel') }} ({{ total }})
+    </a>
+  </div>
+
+  <div class="card">
+    <form method="GET" action="{{ url_for('reports') }}" class="rep-filters">
+      <div><label>{{ tr('检验日期 从', 'Date from') }}</label><input type="date" name="date_from" value="{{ filters.date_from }}"></div>
+      <div><label>{{ tr('到', 'to') }}</label><input type="date" name="date_to" value="{{ filters.date_to }}"></div>
+      <div><label>{{ tr('供应商', 'Supplier') }}</label>
+        <select name="supplier"><option value="">{{ tr('全部', 'All') }}</option>
+          {% for s in suppliers %}<option value="{{ s }}" {% if s == filters.supplier %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select></div>
+      <div><label>{{ tr('检验员', 'Inspector') }}</label>
+        <select name="inspector"><option value="">{{ tr('全部', 'All') }}</option>
+          {% for s in inspectors %}<option value="{{ s }}" {% if s == filters.inspector %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select></div>
+      <div><label>{{ tr('结果', 'Result') }}</label>
+        <select name="result"><option value="">{{ tr('全部', 'All') }}</option>
+          {% for v, zh in [('Pass', '合格'), ('Fail', '不合格'), ('Partial Pass', '部分合格')] %}
+          <option value="{{ v }}" {% if v == filters.result %}selected{% endif %}>{{ tr(zh, v) }}</option>{% endfor %}
+        </select></div>
+      <div><label>{{ tr('审核', 'Review') }}</label>
+        <select name="review"><option value="">{{ tr('全部', 'All') }}</option>
+          {% for v, zh, en in [('pending', '待审核', 'Pending'), ('approved', '已通过', 'Approved'), ('rejected', '已退回', 'Returned')] %}
+          <option value="{{ v }}" {% if v == filters.review %}selected{% endif %}>{{ tr(zh, en) }}</option>{% endfor %}
+        </select></div>
+      <div><label>{{ tr('搜索', 'Search') }}</label>
+        <input type="text" name="q" value="{{ filters.q }}" placeholder="{{ tr('报告号 / 订单 / 物料', 'Report / order / item') }}"></div>
+      <div style="display:flex; gap:6px;">
+        <button type="submit" class="btn btn-primary btn-sm">{{ tr('筛选', 'Filter') }}</button>
+        <a href="{{ url_for('reports') }}" class="btn btn-outline btn-sm">{{ tr('重置', 'Reset') }}</a>
+      </div>
+    </form>
+  </div>
+
+  {% if summary %}
+  <div class="card">
+    <div style="font-size:.85rem; font-weight:600; color:#374151; margin-bottom:8px;">{{ tr('按供应商统计', 'By supplier') }}</div>
+    <div class="sum-grid">
+      {% for s in summary[:12] %}
+      <div class="sum-card">
+        <div style="font-weight:600; margin-bottom:2px;">{{ s.supplier }}</div>
+        <strong>{{ s.pass_rate }}%</strong> {{ tr('合格率', 'pass rate') }}
+        <div style="color:#6b7280;">{{ s.total }} {{ tr('份', 'reports') }} · {{ tr('不合格', 'Fail') }} {{ s.Fail }} · {{ tr('部分', 'Partial') }} {{ s['Partial Pass'] }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card" style="overflow-x:auto;">
+    {% if rows %}
+    <table class="rep-table">
+      <thead><tr>
+        <th>{{ tr('报告编号', 'Report No.') }}</th><th>{{ tr('日期', 'Date') }}</th>
+        <th>{{ tr('订单 / 物料', 'Order / item') }}</th><th>{{ tr('供应商', 'Supplier') }}</th>
+        <th>{{ tr('检验员', 'Inspector') }}</th><th>{{ tr('结果', 'Result') }}</th>
+        <th>{{ tr('缺少证据', 'Missing evidence') }}</th><th>{{ tr('审核', 'Review') }}</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td style="font-family:monospace; white-space:nowrap;">
+            <a href="{{ url_for('inspect_form', job_key=r.job_key) }}">{{ r.report_no }}</a></td>
+          <td style="white-space:nowrap;">{{ r.date }}</td>
+          <td><strong>{{ r.order_number }}</strong> {{ r.item_code }}
+            <div style="color:#6b7280; font-size:.74rem;">{{ r.item_description[:60] }}</div></td>
+          <td>{{ r.supplier or '—' }}</td>
+          <td>{{ r.inspector }}</td>
+          <td><span class="res res-{{ r.result.split(' ')[0] }}">{{ {'Pass': tr('合格', 'Pass'), 'Fail': tr('不合格', 'Fail'), 'Partial Pass': tr('部分合格', 'Partial Pass')}.get(r.result, r.result or '—') }}</span></td>
+          <td style="color:#b45309; font-size:.74rem;">{{ r.missing_evidence }}</td>
+          <td class="rv-{{ r.review }}" style="white-space:nowrap;">
+            {{ {'approved': tr('已通过', 'Approved'), 'rejected': tr('已退回', 'Returned'), 'pending': tr('待审核', 'Pending')}[r.review] if r.review in ['approved', 'rejected', 'pending'] else r.review }}
+            {% if r.reviewer %}<div style="color:#6b7280; font-size:.72rem;">{{ r.reviewer }}</div>{% endif %}</td>
+          <td><a href="{{ url_for('inspection_report_pdf', job_key=r.job_key, i=r.index) }}" target="_blank">PDF</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if total > rows|length %}
+    <div style="font-size:.78rem; color:#6b7280; margin-top:8px;">
+      {{ tr('仅显示最新 ' ~ rows|length ~ ' 条，共 ' ~ total ~ ' 条；导出 Excel 包含全部。', 'Showing the newest ' ~ rows|length ~ ' of ' ~ total ~ '; the Excel export contains all.') }}
+    </div>
+    {% endif %}
+    {% else %}
+    <p style="color:#9ca3af; font-size:.85rem;">{{ tr('没有符合条件的检验报告', 'No inspection reports match these filters') }}</p>
+    {% endif %}
+  </div>
+
+</div>
+</div>
+{% endblock %}

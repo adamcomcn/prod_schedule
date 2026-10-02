@@ -121,6 +121,7 @@ textarea { resize: vertical; min-height: 80px; }
   {% endif %}
   {{ navlink('index', '排期', 'Schedule', ep in ['index', 'upload_preview']) }}
   {{ navlink('tasks', '检验任务', 'Tasks', ep == 'tasks') }}
+  {{ navlink('reports', '检验报告', 'Reports', ep == 'reports') }}
   {% if module_enabled('forms') %}
   {{ navlink('form_templates_page', '检验模板', 'Forms', ep in ['form_templates_page', 'inspect_checklist']) }}
   {% endif %}
