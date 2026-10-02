@@ -79,6 +79,16 @@
           </div>
 
           <div class="form-group">
+            <label>&#128190; {{ tr('每日备份邮箱', 'Daily backup e-mails') }}</label>
+            <input type="text" name="backup_emails" value="{{ config.get('backup_emails', '') }}"
+                   placeholder="it@example.com">
+            <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
+              {{ tr('每天自动把核心数据（数据库、检验记录、排期历史，不含照片）打包发送到这些邮箱。备份含账号信息，请只填公司内部邮箱。留空则不发送。',
+                    'Every day the core data (database, inspection records, schedule history; no photos) is zipped and e-mailed here. It contains account data, so use internal company addresses only. Leave empty to turn off.') }}
+            </div>
+          </div>
+
+          <div class="form-group">
             <label>&#9776; {{ tr('排期表默认隐藏的列', 'Schedule columns hidden by default') }}</label>
             <textarea name="schedule_hidden_columns" rows="3">{{ hidden_schedule_columns()|join(', ') }}</textarea>
             <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
@@ -104,7 +114,7 @@
     </div>
 
     <!-- Email notification config -->
-    <div class="card" style="margin-top:0;">
+    <div class="card" style="margin-top:0;" id="email">
       <div class="card-title">&#128231; {{ tr('邮件通知', 'E-mail notifications') }}</div>
       <p style="font-size:.85rem; color:#6b7280; margin-bottom:16px;">
         {{ tr('新任务和任务分配通知发送到上方“任务通知邮箱”（未填写时发给员工档案中有邮箱的在职员工）。支持 587（STARTTLS）和 465（SSL）端口，适用于阿里云、腾讯企业邮等。',
@@ -116,6 +126,44 @@
       </div>
       <p style="font-size:.82rem;color:#6b7280;">{{ tr('在 Railway 中配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_PASSWORD 和 SMTP_FROM。密码不会保存到应用配置文件。',
         'Set SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD and SMTP_FROM in Railway. The password is never stored in the app config.') }}</p>
+      <form method="POST" action="{{ url_for('settings_test_email') }}"
+            style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+        <input type="email" name="to" value="{{ my_email }}" required placeholder="you@example.com" style="max-width:280px;">
+        <button type="submit" class="btn btn-outline btn-sm">&#9993; {{ tr('发送测试邮件', 'Send test e-mail') }}</button>
+      </form>
+    </div>
+
+    <!-- Backups -->
+    <div class="card" style="margin-top:0;" id="backup">
+      <div class="card-title">&#128190; {{ tr('数据备份', 'Backups') }}</div>
+      <p style="font-size:.85rem; color:#6b7280; margin-bottom:12px;">
+        {{ tr('所有数据都保存在 Railway 的同一个磁盘上。建议每周下载一次完整备份，保存到公司电脑或 OneDrive。备份含账号信息（密码已加密），请妥善保管。',
+              'All data lives on one Railway disk. Download a full backup weekly and keep it on a company PC or OneDrive. Backups contain account data (passwords are hashed); keep them safe.') }}
+      </p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        <form method="POST" action="{{ url_for('settings_backup') }}">
+          <input type="hidden" name="scope" value="data">
+          <button type="submit" class="btn btn-outline btn-sm">&#11015; {{ tr('下载数据备份（不含照片）', 'Download data backup (no photos)') }}</button>
+        </form>
+        <form method="POST" action="{{ url_for('settings_backup') }}">
+          <input type="hidden" name="scope" value="full">
+          <button type="submit" class="btn btn-primary btn-sm">&#11015; {{ tr('下载完整备份（含照片附件）', 'Download full backup (with photos)') }}</button>
+        </form>
+        <form method="POST" action="{{ url_for('settings_backup_email') }}">
+          <button type="submit" class="btn btn-outline btn-sm">&#9993; {{ tr('立即发送备份邮件', 'E-mail backup now') }}</button>
+        </form>
+      </div>
+      <div style="font-size:.82rem;">
+        {% if not config.get('backup_emails') %}
+          <span class="status-dot dot-red"></span>{{ tr('每日备份邮件：未设置备份邮箱（在上方“常规设置”中填写）', 'Daily backup e-mail: no address set (see General settings above)') }}
+        {% elif config.get('backup_last_at') %}
+          <span class="status-dot {{ 'dot-green' if config.get('backup_last_status') == 'ok' else 'dot-red' }}"></span>
+          {{ tr('上次备份邮件', 'Last backup e-mail') }}: {{ config.backup_last_at|localtime }} —
+          {{ tr('成功', 'sent') if config.get('backup_last_status') == 'ok' else config.get('backup_last_status') }}
+        {% else %}
+          <span class="status-dot dot-green"></span>{{ tr('每日备份邮件已开启，将在今天第一次有人访问网站时发送', 'Daily backup e-mail is on; it goes out with the first visit of the day') }}
+        {% endif %}
+      </div>
     </div>
 
     {% if module_enabled('hr') %}

@@ -64,7 +64,8 @@ _login_failures = defaultdict(deque)
 
 ADMIN_ENDPOINTS = {
     'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings',
-    'settings_modules', 'settings_reference', 'office_location_add',
+    'settings_modules', 'settings_reference', 'settings_backup', 'settings_backup_email',
+    'settings_test_email', 'office_location_add',
     'office_location_delete', 'supplier_new', 'supplier_edit', 'suppliers_import',
     'supplier_delete', 'category_new', 'category_delete', 'inspector_add',
     'inspector_delete', 'product_new', 'product_edit', 'product_delete',
@@ -2874,6 +2875,7 @@ def settings():
         config['valve_prefixes'] = [p.strip().upper() for p in raw_prefixes.split(',') if p.strip()]
         config['task_notify_emails'] = ', '.join(_email_list(request.form.get('task_notify_emails', '')))
         config['hq_report_emails'] = ', '.join(_email_list(request.form.get('hq_report_emails', '')))
+        config['backup_emails'] = ', '.join(_email_list(request.form.get('backup_emails', '')))
         if 'schedule_hidden_columns' in request.form:
             config['schedule_hidden_columns'] = [
                 ' '.join(c.split()).lower()
@@ -2893,7 +2895,155 @@ def settings():
                            evidence_coverage=evidence_rule_coverage(),
                            smtp_configured=smtp_configured(),
                            pdf_font_embedded=_pdf_font_embedded(),
-                           excel_password_configured=bool(EXCEL_PASSWORD))
+                           excel_password_configured=bool(EXCEL_PASSWORD),
+                           my_email=_current_user_email())
+
+
+def _current_user_email():
+    with db_conn() as conn:
+        row = conn.execute('SELECT email FROM users WHERE id=?', (g.user_id,)).fetchone()
+    return (row['email'] if row else '') or ''
+
+
+# ── Backups ──────────────────────────────────────────────────────────────────
+# Everything lives on one Railway volume, so admins can download a copy and a
+# daily copy of the core data (database + JSON records, no photos) is e-mailed
+# to the backup addresses in Settings.
+
+def _sqlite_snapshot(dest):
+    """Consistent copy of the live SQLite database (safe while it is in use)."""
+    import sqlite3
+    from db import DB_PATH
+    src, dst = sqlite3.connect(DB_PATH), sqlite3.connect(dest)
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+
+
+def _remove_quietly(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def build_backup_zip(include_files=False):
+    """Write a backup zip to a temporary file and return its path (the caller
+    deletes it). Core data: database snapshot + data/*.json + weekly history.
+    include_files adds inspection attachments, invoices and product images."""
+    fd, path = tempfile.mkstemp(prefix='qc-backup-', suffix='.zip')
+    os.close(fd)
+    snapshot = path + '.db'
+    try:
+        _sqlite_snapshot(snapshot)
+        with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.write(snapshot, 'data/app.db')
+            for root, _dirs, files in os.walk(DATA_DIR):
+                for name in files:
+                    if name.startswith('app.db'):        # live database, -wal, -journal
+                        continue
+                    full = os.path.join(root, name)
+                    zf.write(full, os.path.relpath(full, APP_DATA_DIR))
+            if include_files:
+                for base in (UPLOAD_DIR, PRODUCT_IMG_DIR):
+                    for root, _dirs, files in os.walk(base):
+                        for name in files:
+                            full = os.path.join(root, name)
+                            # photos / videos / PDFs are already compressed
+                            zf.write(full, os.path.relpath(full, APP_DATA_DIR), compress_type=zipfile.ZIP_STORED)
+    except Exception:
+        _remove_quietly(path)
+        raise
+    finally:
+        _remove_quietly(snapshot)
+    return path
+
+
+def _backup_day():
+    return datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
+
+
+def send_backup_email(force=False):
+    """E-mail the core-data backup to Settings → backup e-mails, once a day
+    (force=True sends again). Returns (ok, message)."""
+    config = load_config()
+    recipients = _email_list(config.get('backup_emails', ''))
+    if not recipients:
+        return False, tr('未设置备份邮箱', 'No backup e-mail configured')
+    day = _backup_day()
+    if not force and config.get('backup_last_day') == day:
+        return False, tr('今天已发送', 'Already sent today')
+    path = build_backup_zip(include_files=False)
+    try:
+        size = os.path.getsize(path)
+        name = f'qc-backup-data-{day}.zip'
+        lines = [f'质检系统每日数据备份 / Daily QC data backup — {day}',
+                 f'文件 File: {name} ({size / 1024 / 1024:.1f} MB)',
+                 '内容：数据库（用户、任务、审核）、检验记录、排期历史；不含照片和附件。',
+                 'Contents: database (users, tasks, reviews), inspection records and schedule history; '
+                 'photos and attachments are not included.',
+                 '',
+                 '请妥善保管：备份中包含账号信息（密码已加密）。',
+                 'Keep it safe: it contains account data (passwords are hashed).']
+        attachments = []
+        if size <= MAX_EMAIL_ATTACHMENT:
+            with open(path, 'rb') as fh:
+                attachments.append((name, fh.read(), 'application/zip'))
+        else:
+            lines += ['', '备份文件太大，无法作为附件发送，请在“设置 → 数据备份”中下载。',
+                      'The backup is too large to attach; download it from Settings → Backups.']
+        ok, msg = _smtp_send(f'【数据备份】QC data backup {day}', '\n'.join(lines), recipients, attachments)
+    finally:
+        _remove_quietly(path)
+    config = load_config()
+    config['backup_last_day'] = day
+    config['backup_last_at'] = datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M')
+    config['backup_last_status'] = 'ok' if ok else msg
+    save_json(CONFIG_FILE, config)
+    return ok, msg
+
+
+@app.route('/settings/backup', methods=['POST'])
+def settings_backup():
+    full = request.form.get('scope') == 'full'
+    path = build_backup_zip(include_files=full)
+    stamp = datetime.now(_tz.utc).strftime('%Y%m%d-%H%M')
+    response = send_file(path, mimetype='application/zip', as_attachment=True,
+                         download_name=f"qc-backup-{'full' if full else 'data'}-{stamp}.zip")
+    response.call_on_close(lambda: _remove_quietly(path))
+    return response
+
+
+@app.route('/settings/backup/email', methods=['POST'])
+def settings_backup_email():
+    ok, msg = send_backup_email(force=True)
+    flash(msg if not ok else tr('备份邮件已发送', 'Backup e-mail sent'), 'success' if ok else 'error')
+    return redirect(url_for('settings') + '#backup')
+
+
+@app.route('/settings/test-email', methods=['POST'])
+def settings_test_email():
+    """Send a test message so admins can check the SMTP settings at once."""
+    recipients = _email_list(request.form.get('to', ''))
+    if not recipients:
+        flash(tr('请填写有效的邮箱地址', 'Enter a valid e-mail address'), 'error')
+        return redirect(url_for('settings') + '#email')
+    sender = os.environ.get('SMTP_FROM', os.environ.get('SMTP_USERNAME', ''))
+    body = '\n'.join([
+        '这是质检系统发出的测试邮件。收到说明邮件设置正确。',
+        'This is a test e-mail from the QC system. If you received it, e-mail is set up correctly.',
+        '',
+        f'发件人 Sender: {sender}',
+        f'时间 Time: {dual_zone_time()}',
+        '',
+        url_for('settings', _external=True),
+    ])
+    ok, msg = _smtp_send('【测试邮件】QC system test e-mail', body, recipients)
+    flash(msg, 'success' if ok else 'error')
+    return redirect(url_for('settings') + '#email')
+
 
 @app.route('/settings/reference', methods=['POST'])
 def settings_reference():
@@ -5125,6 +5275,11 @@ def _run_reminders_in_background(base_url):
                 run_daily_reminders()
         except Exception:
             logger.exception('Due-date reminder run failed')
+        try:
+            with app.test_request_context(base_url=base_url):
+                send_backup_email()
+        except Exception:
+            logger.exception('Daily backup e-mail failed')
     import threading
     threading.Thread(target=work, daemon=True).start()
 
@@ -5136,7 +5291,8 @@ def cron_reminders():
     supplied = request.headers.get('X-Cron-Token', '') or request.args.get('token', '')
     if not token or not hmac.compare_digest(supplied, token):
         abort(404)
-    return {'reminders_sent': send_due_reminders(), 'review_reminders_sent': send_review_reminders()}
+    return {'reminders_sent': send_due_reminders(), 'review_reminders_sent': send_review_reminders(),
+            'backup': send_backup_email()[1]}
 
 
 @app.route('/lang/<code>')
