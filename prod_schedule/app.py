@@ -3401,8 +3401,46 @@ def smtp_configured():
                 and os.environ.get('SMTP_PASSWORD'))
 
 
+# Short link labels for the HTML version of e-mails. Corporate mail filters
+# (e.g. Microsoft 365 Safe Links) rewrite every URL into a very long one, so
+# links are shown as short labels instead of the address itself.
+_EMAIL_LINK_LABELS = (
+    ('/report.pdf', '下载 PDF 报告 / PDF report'),
+    ('/attachments/', '下载附件 / Download attachment'),
+    ('/inspect/', '打开检验页面 / Open inspection'),
+    ('/tasks', '查看任务 / Open tasks'),
+)
+_URL_RE = re.compile(r'https?://[^\s<>"]+')
+
+
+def _email_link_label(url):
+    path = url.split('?', 1)[0]
+    for marker, label in _EMAIL_LINK_LABELS:
+        if marker in path:
+            return label
+    return '打开链接 / Open link'
+
+
+def email_html(body):
+    """HTML version of a plain-text e-mail body: same text, URLs as short
+    labelled links."""
+    import html as _html
+    parts, last = [], 0
+    for match in _URL_RE.finditer(body):
+        parts.append(_html.escape(body[last:match.start()]))
+        url = match.group(0)
+        parts.append(f'<a href="{_html.escape(url, quote=True)}" style="color:#1a6fc4;font-weight:600;">'
+                     f'{_html.escape(_email_link_label(url))}</a>')
+        last = match.end()
+    parts.append(_html.escape(body[last:]))
+    return ('<div style="font-family:-apple-system,\'Segoe UI\',\'Microsoft YaHei\',Arial,sans-serif;'
+            'font-size:14px;line-height:1.6;color:#1f2937;white-space:pre-wrap;">'
+            + ''.join(parts) + '</div>')
+
+
 def _smtp_send(subject, body, recipients, attachments=()):
-    """Send a plain-text UTF-8 e-mail. Returns (ok, message).
+    """Send a UTF-8 e-mail (plain text plus an HTML version with short link
+    labels). Returns (ok, message).
     attachments: [(filename, bytes, 'maintype/subtype'), ...]
 
     Port 465 uses implicit TLS (common for Chinese corporate mail such as
@@ -3423,15 +3461,18 @@ def _smtp_send(subject, body, recipients, attachments=()):
     from email.mime.application import MIMEApplication
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
+    content = MIMEMultipart('alternative')
+    content.attach(MIMEText(body, 'plain', 'utf-8'))
+    content.attach(MIMEText(email_html(body), 'html', 'utf-8'))
     if attachments:
-        msg = MIMEMultipart()
-        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        msg = MIMEMultipart('mixed')
+        msg.attach(content)
         for filename, data, mimetype in attachments:
             part = MIMEApplication(data, _subtype=mimetype.split('/', 1)[-1])
             part.add_header('Content-Disposition', 'attachment', filename=('utf-8', '', filename))
             msg.attach(part)
     else:
-        msg = MIMEText(body, 'plain', 'utf-8')
+        msg = content
     msg['Subject'] = str(Header(subject, 'utf-8'))
     msg['From']    = sender
     msg['To']      = ', '.join(recipients)

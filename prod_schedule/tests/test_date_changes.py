@@ -58,7 +58,7 @@ class NotifyTests(unittest.TestCase):
         _, rcpt, raw = FakeSMTP.sent[0]
         self.assertEqual(rcpt, ['murphy@example.test', 'yu@example.test'])
         import email
-        body = email.message_from_string(raw).get_payload(decode=True).decode()
+        body = next(p for p in email.message_from_string(raw).walk() if p.get_content_type() == 'text/plain').get_payload(decode=True).decode()
         self.assertIn('提前 7 天', body)
 
     @mock.patch.dict(os.environ, SMTP_ENV)

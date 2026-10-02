@@ -1,5 +1,6 @@
 """Lead inspector assigns tasks; e-mail notification; 'My tasks' view."""
 import email
+import re
 import os
 import sys
 import tempfile
@@ -99,7 +100,7 @@ class TaskAssignmentTests(unittest.TestCase):
         subject = str(make_header(decode_header(msg['Subject'])))
         self.assertIn('Mr. Yu', subject)
         self.assertIn('2', subject)
-        body = msg.get_payload(decode=True).decode('utf-8')
+        body = next(p for p in msg.walk() if p.get_content_type() == 'text/plain').get_payload(decode=True).decode('utf-8')
         self.assertIn('DPL0', body)
         self.assertIn('DPL1', body)
         self.assertNotIn('DPL2', body)
@@ -200,6 +201,23 @@ class TaskAssignmentTests(unittest.TestCase):
         with db_conn() as conn:
             row = conn.execute("SELECT role, email, display_name FROM users WHERE username='lead2'").fetchone()
         self.assertEqual(tuple(row), ('lead', 'lead2@example.test', 'Lead Two'))
+
+    @mock.patch.dict(os.environ, SMTP_ENV)
+    @mock.patch('smtplib.SMTP_SSL', FakeSMTP)
+    def test_email_html_shows_short_link_labels(self):
+        self.assign(self.client_for('murphy'), self.tasks[:1], self.ids['yu'])
+        msg = email.message_from_string(FakeSMTP.sent[0][2])
+        html = next(p for p in msg.walk() if p.get_content_type() == 'text/html').get_payload(decode=True).decode()
+        self.assertIn('>打开检验页面 / Open inspection</a>', html)
+        self.assertIn('>查看任务 / Open tasks</a>', html)
+        self.assertIn('href="http://localhost/inspect/MELBOURNE%7CPO-0%7CITEM0"', html)
+        visible = re.sub(r'<[^>]+>', '', html)
+        self.assertNotIn('http://', visible)  # addresses are not shown as text
+
+    def test_email_html_escapes_text(self):
+        html = app.email_html('Note: <b>&</b>\nhttps://x.example/inspect/A?b=1&c=2')
+        self.assertIn('&lt;b&gt;&amp;&lt;/b&gt;', html)
+        self.assertIn('href="https://x.example/inspect/A?b=1&amp;c=2"', html)
 
     def test_notify_email_setting_is_cleaned(self):
         self.assertEqual(app._email_list('a@x.com; bad, A@X.com  b@y.org'), ['a@x.com', 'b@y.org'])
