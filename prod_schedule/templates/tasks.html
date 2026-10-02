@@ -568,6 +568,7 @@ tr.mine td { background:#f0fdf4; }
             <td style="white-space:nowrap;">
               {% if t.assigned_to %}
                 <span class="assignee{% if t.assigned_to == g.user_id %} assignee-me{% endif %}"
+                      data-time="{{ t.assigned_at|utc_iso }}" data-time-text="{{ t.assigned_at }}"
                       title="{{ tr('分配人', 'Assigned by') }}: {{ t.assigned_by }} · {{ t.assigned_at }}{% if t.assign_note %} · {{ t.assign_note }}{% endif %}">
                   {{ t.assignee_name }}</span>
               {% else %}

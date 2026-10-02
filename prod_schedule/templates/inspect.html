@@ -144,7 +144,7 @@ input[name=result] { display:none; }
       &#128100; {{ tr('负责人', 'Assigned to') }}:
       {% if task and task.assigned_to %}
         <strong>{{ task.assignee_name }}</strong>
-        <span class="assign-meta">· {{ task.status|status_label }}{% if task.assigned_by %} · {{ tr('分配人', 'by') }} {{ task.assigned_by }} {{ task.assigned_at }}{% endif %}</span>
+        <span class="assign-meta">· {{ task.status|status_label }}{% if task.assigned_by %} · {{ tr('分配人', 'by') }} {{ task.assigned_by }} {{ task.assigned_at|localtime }}{% endif %}</span>
         {% if task.assign_note %}<div class="assign-meta">{{ tr('备注', 'Note') }}: {{ task.assign_note }}</div>{% endif %}
       {% else %}
         <strong style="color:#b45309;">{{ tr('未分配', 'Unassigned') }}</strong>
@@ -523,9 +523,9 @@ input[name=result] { display:none; }
           {% set rv = reviews.get(pidx) %}
           <div class="hq-mail">
             {% if rv and rv.status == 'approved' %}
-              <span class="hq-ok">&#10004; {{ tr('已审核通过', 'Approved') }} · {{ rv.reviewer_name }}{% if rv.self_review %} ({{ tr('自审', 'self-review') }}){% endif %} · {{ rv.reviewed_at }}{% if rv.comment %} — {{ rv.comment }}{% endif %}</span>
+              <span class="hq-ok">&#10004; {{ tr('已审核通过', 'Approved') }} · {{ rv.reviewer_name }}{% if rv.self_review %} ({{ tr('自审', 'self-review') }}){% endif %} · {{ rv.reviewed_at|localtime }}{% if rv.comment %} — {{ rv.comment }}{% endif %}</span>
             {% elif rv %}
-              <span class="hq-fail">&#8617; {{ tr('已退回', 'Returned') }} · {{ rv.reviewer_name }} · {{ rv.reviewed_at }} — {{ rv.comment }}</span>
+              <span class="hq-fail">&#8617; {{ tr('已退回', 'Returned') }} · {{ rv.reviewer_name }} · {{ rv.reviewed_at|localtime }} — {{ rv.comment }}</span>
             {% else %}
               <span class="{{ 'hq-fail' if p.result != 'Pass' else 'hq-pending' }}" style="{{ 'font-weight:700;' if p.result != 'Pass' else '' }}">&#9203; {{ tr('待审核', 'Pending review') }}{% if p.result != 'Pass' %} — {{ tr('不合格/部分合格报告，总部尚未收到', 'failed/partial report, HQ has not received it') }}{% endif %}</span>
             {% endif %}
@@ -541,7 +541,7 @@ input[name=result] { display:none; }
           {% if em or g.can_assign %}
           <div class="hq-mail">
             {% if em and em.status == 'sent' %}
-              <span class="hq-ok" title="{{ em.detail }}">&#9993; {{ tr('已发送总部', 'Sent to HQ') }} · {{ em.created_at[:16] }}</span>
+              <span class="hq-ok" title="{{ em.detail }}">&#9993; {{ tr('已发送总部', 'Sent to HQ') }} · {{ em.created_at|localtime }}</span>
             {% elif em and em.status == 'pending' %}
               <span class="hq-pending">&#9993; {{ tr('正在发送给总部…（刷新查看）', 'Sending to HQ… (refresh to check)') }}</span>
             {% elif em %}

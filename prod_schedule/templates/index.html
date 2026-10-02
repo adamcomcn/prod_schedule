@@ -124,7 +124,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     </form>
     {% endif %}
     {% if upload_date %}
-      <span class="upload-info">{{ tr('最近上传：', 'Last uploaded:') }} <strong>{{ upload_date }}</strong></span>
+      <span class="upload-info">{{ tr('最近上传：', 'Last uploaded:') }} <strong>{{ upload_date|localtime }}</strong></span>
     {% endif %}
     <a href="{{ url_for('export_comparison_excel') }}" class="btn btn-outline btn-sm">
       {{ tr('导出对比 Excel', 'Export comparison Excel') }}

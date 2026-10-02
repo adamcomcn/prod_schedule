@@ -217,7 +217,7 @@
           <span style="font-size:.78rem; color:#9ca3af; margin-left:8px;">DPL: {{ resp.dpl_number }}</span>
           {% endif %}
         </div>
-        <span style="font-size:.72rem; color:#9ca3af;">{{ resp.submitted_at[:16] }}</span>
+        <span style="font-size:.72rem; color:#9ca3af;">{{ resp.submitted_at|localtime }}</span>
       </div>
       {% if resp.summary %}
       <div style="margin-top:6px; font-size:.82rem; color:#374151;">{{ resp.summary }}</div>

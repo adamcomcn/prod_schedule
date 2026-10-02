@@ -265,6 +265,75 @@ def header_label(header):
 
 app.jinja_env.filters['header_label'] = header_label
 
+# ── Time display ─────────────────────────────────────────────────────────────
+# The server runs in UTC and stores naive UTC timestamps. Web pages show them
+# in each viewer's own time zone (converted in the browser); e-mails and PDFs
+# have no browser, so they show China and Melbourne time side by side.
+from datetime import timezone as _tz
+from zoneinfo import ZoneInfo
+from markupsafe import Markup, escape as _escape
+
+REPORT_ZONES = (('北京', 'Asia/Shanghai'), ('Melbourne', 'Australia/Melbourne'))
+_TIME_FORMATS = ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%d %b %Y %H:%M')
+
+
+def parse_server_time(value):
+    """A stored timestamp (ISO, 'YYYY-MM-DD HH:MM[:SS]' or 'DD Mon YYYY HH:MM')
+    as an aware UTC datetime, or None (dates without a time are not converted)."""
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value or '').strip()
+        if len(text) < 16:
+            return None
+        dt = None
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            for fmt in _TIME_FORMATS:
+                try:
+                    dt = datetime.strptime(text, fmt)
+                    break
+                except ValueError:
+                    continue
+        if dt is None:
+            return None
+    return dt.replace(tzinfo=_tz.utc) if dt.tzinfo is None else dt.astimezone(_tz.utc)
+
+
+def local_time(value):
+    """<time> element converted to the viewer's time zone by base.html."""
+    dt = parse_server_time(value)
+    if dt is None:
+        return _escape(value or '')
+    utc_text = dt.strftime('%Y-%m-%d %H:%M')
+    return Markup(f'<time class="js-local" datetime="{dt.isoformat()}">{utc_text} UTC</time>')
+
+
+def utc_iso(value):
+    dt = parse_server_time(value)
+    return dt.isoformat() if dt else ''
+
+
+def dual_zone_time(value=None):
+    """'2026-10-02 08:52 北京 / 10:52 Melbourne' for e-mails and PDFs."""
+    dt = parse_server_time(value) if value is not None else datetime.now(_tz.utc)
+    if dt is None:
+        return str(value or '')
+    parts, first_day = [], None
+    for label, zone in REPORT_ZONES:
+        local = dt.astimezone(ZoneInfo(zone))
+        day = local.strftime('%Y-%m-%d')
+        parts.append(f"{local.strftime('%H:%M') if day == first_day else local.strftime('%Y-%m-%d %H:%M')} {label}")
+        first_day = first_day or day
+    return ' / '.join(parts)
+
+
+app.jinja_env.filters['localtime'] = local_time
+app.jinja_env.filters['utc_iso'] = utc_iso
+app.jinja_env.filters['dual_zone_time'] = dual_zone_time
+
+
 # ── Optional modules (hidden during the pilot, can be enabled in Settings) ──
 MODULES = {
     'hr':        {'zh': '人事（考勤/请假/报销）', 'en': 'HR (attendance / leave / expenses)',
@@ -2614,7 +2683,8 @@ def build_report_pdf(job_key, index, generated_by=''):
         evidence_labels={k: (v.get('label_zh') or v['label'], v['label']) for k, v in EVIDENCE_META.items()},
         checklist=_latest_checklist(job_key),
         logo_path=os.path.join(BASE_DIR, 'static', 'daemco_logo.png'),
-        generated_by=generated_by, review=dict(review) if review else None)
+        generated_by=generated_by, review=dict(review) if review else None,
+        time_text=dual_zone_time)
     if record.get('report_no'):
         filename = f'{report_no}.pdf'          # already contains order and item
     else:
@@ -3717,7 +3787,7 @@ def _send_assignment_email(tasks, assignee, note=''):
     lines = [
         f"检验任务分配通知 Inspection task assignment",
         f"负责人 Assigned to: {name}",
-        f"分配人 Assigned by: {by}    时间 Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"分配人 Assigned by: {by}    时间 Time: {dual_zone_time()}",
     ]
     if note:
         lines.append(f"备注 Note: {note}")

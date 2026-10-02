@@ -151,7 +151,8 @@ def _photo(path, max_w, max_h):
 
 
 def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=None,
-                         evidence_labels=None, checklist=None, logo_path=None, generated_by='', review=None):
+                         evidence_labels=None, checklist=None, logo_path=None, generated_by='', review=None,
+                         time_text=None):
     """Return the PDF as bytes.
 
     job:        job details dict (schedule columns + region)
@@ -170,7 +171,12 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
     page_w, page_h = A4
     margin = 15 * mm
     content_w = page_w - 2 * margin
-    generated_at = datetime.now().strftime('%Y-%m-%d %H:%M')
+    # time_text(value) formats server (UTC) timestamps for readers in several
+    # time zones; time_text(None) means "now".
+    if time_text is None:
+        def time_text(value=None):
+            return (value or datetime.now().isoformat())[:16].replace('T', ' ')
+    generated_at = time_text(None)
 
     def decorate(canvas, doc):
         canvas.saveState()
@@ -251,7 +257,7 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
         (_bi('总体结果', 'Result'), _result_text(result)),
         (_bi('包装状况', 'Packing'), record.get('packing_condition')),
         (_bi('标识标签', 'Marking'), record.get('marking')),
-        (_bi('提交时间', 'Submitted'), (record.get('submitted_at') or '')[:16].replace('T', ' ')),
+        (_bi('提交时间', 'Submitted'), time_text(record.get('submitted_at')) if record.get('submitted_at') else ''),
     ], st, widths))
 
     # ── Evidence ────────────────────────────────────────────────────────────
@@ -382,11 +388,11 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
         note = f"\n{review['comment']}" if review['comment'] else ''
         reviewer_cell = (_bi('审核', 'Reviewed by') + f"\n\n{review['reviewer_name']}{tag}\n"
                          f"已审核通过 Approved{note}")
-        date_cell = _bi('审核日期', 'Review date') + f"\n\n{(review['reviewed_at'] or '')[:16]}"
+        date_cell = _bi('审核日期', 'Review date') + f"\n\n{time_text(review['reviewed_at']) if review['reviewed_at'] else ''}"
     elif review and review['status'] == 'rejected':
         reviewer_cell = (_bi('审核', 'Reviewed by') + f"\n\n{review['reviewer_name']}\n"
                          f"已退回 Returned\n{review['comment']}")
-        date_cell = _bi('审核日期', 'Review date') + f"\n\n{(review['reviewed_at'] or '')[:16]}"
+        date_cell = _bi('审核日期', 'Review date') + f"\n\n{time_text(review['reviewed_at']) if review['reviewed_at'] else ''}"
     else:
         reviewer_cell = _bi('审核', 'Reviewed by') + '\n\n待审核 Pending review'
         date_cell = _bi('审核日期', 'Review date') + '\n\n—'

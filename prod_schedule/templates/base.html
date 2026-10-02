@@ -175,6 +175,27 @@ textarea { resize: vertical; min-height: 80px; }
 {% block content %}{% endblock %}
 
 <script>
+// Show server (UTC) timestamps in the viewer's own time zone.
+(function () {
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function fmt(d) {
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+           pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  var zone = '';
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+  document.querySelectorAll('time.js-local[datetime]').forEach(function (el) {
+    var d = new Date(el.getAttribute('datetime'));
+    if (isNaN(d)) return;
+    el.title = el.textContent + (zone ? ' → ' + zone : '');
+    el.textContent = fmt(d);
+  });
+  document.querySelectorAll('[data-time][data-time-text]').forEach(function (el) {
+    var d = new Date(el.getAttribute('data-time'));
+    if (!isNaN(d) && el.title) el.title = el.title.replace(el.getAttribute('data-time-text'), fmt(d));
+  });
+})();
+
 // Attach CSRF protection to every server-rendered POST form.
 document.querySelectorAll('form[method="POST"], form[method="post"]').forEach(function (form) {
   if (!form.querySelector('input[name="_csrf_token"]')) {

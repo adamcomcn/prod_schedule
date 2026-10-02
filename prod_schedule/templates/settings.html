@@ -250,7 +250,7 @@
       <div style="font-size:.85rem; margin-bottom:10px;">
         <span class="status-dot {{ 'dot-green' if ref_count else 'dot-red' }}"></span>
         {% if ref_count %}
-          {{ tr('已导入 ' ~ ref_count ~ ' 个产品编码', ref_count ~ ' product codes imported') }}{% if ref_updated %} · {{ ref_updated }}{% endif %}
+          {{ tr('已导入 ' ~ ref_count ~ ' 个产品编码', ref_count ~ ' product codes imported') }}{% if ref_updated %} · {{ ref_updated|localtime }}{% endif %}
         {% else %}
           {{ tr('尚未导入（只能按编码前缀判断，部分产品可能无法识别）', 'Not imported yet (only code prefixes are used; some products may not be recognised)') }}
         {% endif %}

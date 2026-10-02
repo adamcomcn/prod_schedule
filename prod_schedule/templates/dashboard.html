@@ -69,7 +69,7 @@
   <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:16px;">
     <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">{{ tr('仪表板', 'Dashboard') }}</h1>
     {% if upload_date %}
-    <span style="font-size:.8rem; color:#9ca3af;">{{ tr('本周上传：', 'Week uploaded:') }} {{ upload_date }}</span>
+    <span style="font-size:.8rem; color:#9ca3af;">{{ tr('本周上传：', 'Week uploaded:') }} {{ upload_date|localtime }}</span>
     {% endif %}
   </div>
 

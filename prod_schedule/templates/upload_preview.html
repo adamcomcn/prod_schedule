@@ -30,11 +30,11 @@ details.pv summary { cursor:pointer; font-weight:600; }
     {{ tr('确认排期上传', 'Confirm schedule upload') }}
   </h2>
   <p class="muted" style="margin-bottom:16px;">
-    {{ pending.filename }} · {{ pending.uploaded_by }} · {{ pending.uploaded_at }}<br>
+    {{ pending.filename }} · {{ pending.uploaded_by }} · {{ pending.uploaded_at|localtime }}<br>
     {{ tr('网站数据尚未改变。请核对以下差异，再选择应用或取消。', 'Nothing has changed yet. Review the differences, then apply or cancel.') }}
     {% if config.upload_date %}
       {{ tr('对比对象：上次上传的排期', 'Compared with the schedule uploaded on') }}
-      {{ config.upload_date }}
+      {{ config.upload_date|localtime }}
     {% endif %}
   </p>
 
