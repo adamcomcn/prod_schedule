@@ -4776,6 +4776,51 @@ def _backfill_fully_shipped_history():
             'Backfilled %s fully shipped job(s); %s require QA BRT reports',
             persisted, pending)
 
+OLD_REPORTS_FIX_FLAG = 'fixed_old_shipped_reports_assignee'
+
+
+def _assign_old_shipped_reports_to_lead():
+    """One-time clean-up (agreed with the business): tasks that already have an
+    inspection report but no assignee, and whose order has left the current
+    schedule (fully shipped), are recorded as Murphy's. These reports were
+    submitted before tasks had to be assigned first. Runs once; retried on
+    the next start if Murphy's account does not exist yet."""
+    config = load_config()
+    if config.get(OLD_REPORTS_FIX_FLAG):
+        return 0
+    current = load_schedule(CURRENT_FILE)
+    if not current:
+        return 0  # no schedule yet: cannot tell what has shipped
+    reconcile_tasks_with_inspections()  # make sure every report has its task
+    in_schedule = {make_job_key(sheet, r, rows[0])
+                   for sheet, rows in current.items() for r in (rows or [])[1:]}
+    reported = {k for k, recs in load_json(INSPECTIONS_CACHE, {}).items() if recs}
+    with db_conn() as conn:
+        lead = conn.execute(
+            "SELECT id FROM users WHERE LOWER(username)='murphy' AND active=1").fetchone()
+        if not lead:
+            leads = conn.execute("SELECT id FROM users WHERE role='lead' AND active=1").fetchall()
+            lead = leads[0] if len(leads) == 1 else None
+        if not lead:
+            logger.warning('Old shipped reports not re-assigned: no Murphy / single lead account yet')
+            return 0
+        rows = conn.execute(
+            'SELECT id, job_key FROM inspection_tasks WHERE assigned_to IS NULL').fetchall()
+        ids = [r['id'] for r in rows if r['job_key'] in reported and r['job_key'] not in in_schedule]
+        for task_id in ids:
+            conn.execute(
+                'UPDATE inspection_tasks SET assigned_to=?, assigned_by=?, assigned_at=?, assign_note=? '
+                'WHERE id=? AND assigned_to IS NULL',
+                (lead['id'], 'system', datetime.now().strftime('%Y-%m-%d %H:%M'),
+                 '历史检验记录，统一归属 Murphy（一次性整理） / Historical report, assigned to Murphy',
+                 task_id))
+    config = load_config()
+    config[OLD_REPORTS_FIX_FLAG] = datetime.now().strftime('%Y-%m-%d %H:%M')
+    save_json(CONFIG_FILE, config)
+    logger.info('Assigned %s old shipped report task(s) to Murphy', len(ids))
+    return len(ids)
+
+
 def _purge_ignored_sheet_records():
     """Remove alerts / open tasks / chart points created from reference sheets
     (TOOLING, LEADTIMES) by uploads made before those sheets were skipped.
@@ -4802,6 +4847,11 @@ try:
     _purge_ignored_sheet_records()
 except Exception:
     logger.exception('Unable to purge reference-sheet records')
+
+try:
+    _assign_old_shipped_reports_to_lead()
+except Exception:
+    logger.exception('Unable to assign old shipped reports')
 
 try:
     _backfill_fully_shipped_history()
