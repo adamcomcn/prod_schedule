@@ -64,19 +64,19 @@ class NotifyTests(unittest.TestCase):
     @mock.patch.dict(os.environ, SMTP_ENV)
     @mock.patch('smtplib.SMTP_SSL', FakeSMTP)
     def test_reminder_within_two_weeks_sent_once_and_rearmed_on_change(self):
-        soon = (date.today() + timedelta(days=10)).isoformat()
+        soon = (app.china_today() + timedelta(days=10)).isoformat()
         self.add(soon + ' ready for ship')
         with app.app.test_request_context():
             self.assertEqual(app.send_due_reminders(), 1)
             self.assertEqual(app.send_due_reminders(), 0)
             with db_conn() as conn:
                 conn.execute('UPDATE inspection_tasks SET est_completion=?',
-                             ((date.today() + timedelta(days=5)).isoformat(),))
+                             ((app.china_today() + timedelta(days=5)).isoformat(),))
             self.assertEqual(app.send_due_reminders(), 1)
         self.assertEqual(len(FakeSMTP.sent), 2)
 
     def test_failed_send_does_not_consume_reminder(self):
-        self.add((date.today() + timedelta(days=3)).isoformat())
+        self.add((app.china_today() + timedelta(days=3)).isoformat())
         with app.app.test_request_context():
             with mock.patch.object(app, '_smtp_send', return_value=(False, 'boom')):
                 self.assertEqual(app.send_due_reminders(), 0)
@@ -84,7 +84,7 @@ class NotifyTests(unittest.TestCase):
                 self.assertEqual(app.send_due_reminders(), 1)
 
     def test_far_date_not_reminded(self):
-        self.add((date.today() + timedelta(days=40)).isoformat())
+        self.add((app.china_today() + timedelta(days=40)).isoformat())
         with app.app.test_request_context():
             self.assertEqual(app.send_due_reminders(), 0)
 

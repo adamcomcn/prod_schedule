@@ -18,7 +18,7 @@ from db import db_conn
 class DaysLeftTests(unittest.TestCase):
     def setUp(self):
         app.app.config.update(TESTING=True)
-        today = date.today()
+        today = app.china_today()
         self.cases = {
             'LATE45': ((today - timedelta(days=45)).isoformat(), 'Pending'),
             'LATE1': ((today - timedelta(days=1)).isoformat(), 'Pending'),

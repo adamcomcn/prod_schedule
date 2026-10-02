@@ -19,7 +19,7 @@ H = ['Order Number', 'Daemco Purchase Order', 'Item Code', 'Quantity', 'Estimate
 class OrphanTaskTests(unittest.TestCase):
     def setUp(self):
         app.app.config.update(TESTING=True)
-        soon = (date.today() + timedelta(days=3)).isoformat()
+        soon = (app.china_today() + timedelta(days=3)).isoformat()
         with db_conn() as conn:
             conn.execute('DELETE FROM users'); conn.execute('DELETE FROM inspection_tasks')
             for u, role in (('lead', 'lead'), ('insp', 'inspector')):

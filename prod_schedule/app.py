@@ -302,6 +302,20 @@ def utc_iso(value):
     return dt.isoformat() if dt else ''
 
 
+# Business dates ("today", due / overdue, default inspection date, attendance)
+# follow the factories in China, not the server clock (UTC) or the viewer.
+BUSINESS_TZ = ZoneInfo('Asia/Shanghai')
+
+
+def china_now():
+    """Current wall-clock time in China (naive)."""
+    return datetime.now(BUSINESS_TZ).replace(tzinfo=None)
+
+
+def china_today():
+    return china_now().date()
+
+
 def dual_zone_time(value=None):
     """'2026-10-02 08:52 北京 / 10:52 Melbourne' for e-mails and PDFs."""
     dt = parse_server_time(value) if value is not None else datetime.now(_tz.utc)
@@ -1054,7 +1068,7 @@ def index():
                 valve_keys.add(make_job_key(sheet_name, row, headers))
 
     # Load outstanding jobs (shipped but inspection incomplete) + completed history
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = china_today().isoformat()
     with db_conn() as conn:
         outstanding_jobs = conn.execute(
             'SELECT * FROM outstanding_jobs WHERE completed=0 ORDER BY est_completion ASC, shipped_at ASC'
@@ -1896,7 +1910,7 @@ def _apply_schedule(data, baseline=False):
 
     # ── Save weekly snapshot for trend chart ─────────────────────────
     _snap_label = config['upload_date']
-    _snap_date  = datetime.now().strftime('%Y-%m-%d')
+    _snap_date  = china_today().isoformat()
     with db_conn() as conn:
         for _sheet, _rows in data.items():
             _count = count_unique_jobs(_sheet, _rows)
@@ -2324,7 +2338,7 @@ def inspect_form(job_key):
                            inspect_block_message=inspect_permission(job_key)[1],
                            task=job_task(job_key),
                            assignees=_assignable() if g.can_assign else [],
-                           now_date=datetime.now().strftime('%Y-%m-%d'))
+                           now_date=china_today().isoformat())
 
 INSPECTION_RESULTS = {'Pass', 'Fail', 'Partial Pass'}
 
@@ -2962,7 +2976,7 @@ def build_backup_zip(include_files=False):
 
 
 def _backup_day():
-    return datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
+    return china_today().isoformat()
 
 
 def send_backup_email(force=False):
@@ -3624,7 +3638,7 @@ def _send_task_email(new_tasks):
     if not recipients:
         return False, tr('未设置通知邮箱', 'No notification e-mail configured')
 
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = china_today().isoformat()
     lines = [
         f"生产排期已更新 Production schedule updated — {today}",
         f"本次新增 {len(new_tasks)} 个检验任务，请登录系统分配检验员。",
@@ -3738,7 +3752,7 @@ def _send_date_change_email(changes, edited_by=''):
     recipients = _task_recipients(changes)
     if not recipients:
         return False, tr('未设置通知邮箱', 'No notification e-mail configured')
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = china_today().isoformat()
     lines = [f"预计完成日变动 Completion date changes — {today}",
              f"{len(changes)} 个未完成任务的日期有变动 / {len(changes)} open task(s) changed.", '']
     if edited_by:
@@ -3772,7 +3786,7 @@ REMINDER_DAYS = 14
 def send_due_reminders():
     """Once per task and completion date: e-mail when an open task is within
     two weeks of its estimated completion date. A changed date re-arms it."""
-    today = date.today()
+    today = china_today()
     with db_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM inspection_tasks WHERE IFNULL(status,'') NOT IN ('Completed', 'Closed')").fetchall()
@@ -3924,7 +3938,7 @@ def tasks():
     scope = request.args.get('scope') or ('all' if g.can_assign or g.is_hq else 'mine')
     if scope not in ('mine', 'unassigned', 'all'):
         scope = 'all'
-    today = datetime.now().date()
+    today = china_today()
     reconcile_tasks_with_inspections()
 
     with db_conn() as conn:
@@ -4306,7 +4320,7 @@ def inspect_checklist(job_key):
                            past_responses=past_responses,
                            can_inspect=inspect_permission(job_key)[0],
                            inspect_block_message=inspect_permission(job_key)[1],
-                           now_date=datetime.now().strftime('%Y-%m-%d'))
+                           now_date=china_today().isoformat())
 
 
 # ── Knowledge Base routes ─────────────────────────────────────────────────────
@@ -4620,8 +4634,8 @@ def region_delete(rid):
 @app.route('/hr')
 def hr_portal():
     tab = request.args.get('tab', 'attendance')
-    today = datetime.now().strftime('%Y-%m-%d')
-    month = request.args.get('month', datetime.now().strftime('%Y-%m'))
+    today = china_today().isoformat()
+    month = request.args.get('month', china_now().strftime('%Y-%m'))
     leave_filter = request.args.get('leave_filter', 'Pending')
     expense_filter = request.args.get('expense_filter', 'Pending')
 
@@ -4680,7 +4694,7 @@ def hr_portal():
         expenses = [r for r in expenses if r['employee_id'] == employee_id]
 
     return render_template('hr.html',
-                           tab=tab, today=today, now_time=datetime.now().strftime('%H:%M'),
+                           tab=tab, today=today, now_time=china_now().strftime('%H:%M'),
                            emp_list=emp_list, today_records=today_records,
                            view_date=view_date,
                            stats_rows=stats_rows, month=month,
@@ -4730,8 +4744,8 @@ def hr_checkin():
         flash(msg, 'error')
         return redirect(url_for('hr_portal', tab='attendance'))
 
-    work_date = f.get('work_date', datetime.now().strftime('%Y-%m-%d'))
-    checkin_time = f.get('checkin_time', datetime.now().strftime('%H:%M'))
+    work_date = f.get('work_date', china_today().isoformat())
+    checkin_time = f.get('checkin_time', china_now().strftime('%H:%M'))
     location = f.get('checkin_location', '').strip()
     notes = f.get('notes', '').strip()
     status = 'Normal'
@@ -4770,8 +4784,8 @@ def hr_checkout():
         flash(msg, 'error')
         return redirect(url_for('hr_portal', tab='attendance'))
 
-    work_date = f.get('work_date', datetime.now().strftime('%Y-%m-%d'))
-    checkout_time = f.get('checkout_time', datetime.now().strftime('%H:%M'))
+    work_date = f.get('work_date', china_today().isoformat())
+    checkout_time = f.get('checkout_time', china_now().strftime('%H:%M'))
     location = f.get('checkout_location', '').strip()
     overtime_mins = int(f.get('overtime_mins', 0) or 0)
     with db_conn() as conn:
@@ -5253,8 +5267,8 @@ def _auth_check():
     g.can_review = user['role'] in ('admin', 'lead', 'hq')
     g.can_see_prices = user['role'] in ('admin', 'hq')
     g.can_view_dashboard = user['role'] in ('admin', 'hq')
-    if not app.config.get('TESTING') and _last_reminder_day['day'] != date.today():
-        _last_reminder_day['day'] = date.today()
+    if not app.config.get('TESTING') and _last_reminder_day['day'] != china_today():
+        _last_reminder_day['day'] = china_today()
         _run_reminders_in_background(request.host_url)
     g.display_name = user['display_name'] or user['username']
     if request.endpoint == 'dashboard' and not g.can_view_dashboard:

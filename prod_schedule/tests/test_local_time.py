@@ -23,6 +23,24 @@ class LocalTimeTests(unittest.TestCase):
         self.assertEqual(app.dual_zone_time('2026-10-02 15:30'), '2026-10-02 23:30 北京 / 2026-10-03 01:30 Melbourne')
         self.assertEqual(app.dual_zone_time('02 Oct 2026 00:52'), '2026-10-02 08:52 北京 / 10:52 Melbourne')
 
+    def test_business_today_follows_china(self):
+        from datetime import datetime as real_datetime, timezone
+        # 17:30 UTC on 1 Oct is already 01:30 on 2 Oct in China
+        fixed = real_datetime(2026, 10, 1, 17, 30, tzinfo=timezone.utc)
+
+        class FakeDatetime(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
+
+        original = app.datetime
+        app.datetime = FakeDatetime
+        try:
+            self.assertEqual(app.china_today().isoformat(), '2026-10-02')
+            self.assertEqual(app.china_now().strftime('%H:%M'), '01:30')
+        finally:
+            app.datetime = original
+
     def test_local_time_markup(self):
         html = str(app.local_time('2026-10-02 00:52'))
         self.assertIn('datetime="2026-10-02T00:52:00+00:00"', html)
