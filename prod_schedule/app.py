@@ -3736,6 +3736,10 @@ def email_html(body):
             + ''.join(out) + '</div></td></tr></table>')
 
 
+# Ports that use implicit TLS from the first byte (465 standard, 994 NetEase).
+SMTP_SSL_PORTS = (465, 994)
+
+
 def smtp_sender():
     """(envelope address, From header). SMTP_FROM_NAME is the display name
     shown in the recipient's inbox, e.g. 'DAEMCO-QC <qc@example.com>'."""
@@ -3784,19 +3788,32 @@ def _smtp_send(subject, body, recipients, attachments=()):
     msg['Subject'] = str(Header(subject, 'utf-8'))
     msg['From']    = from_header
     msg['To']      = ', '.join(recipients)
+    # Steps are named so a failure says where it stopped (connect / login / send).
+    stage = 'connect'
     try:
-        if port == 465:
-            with smtplib.SMTP_SSL(host, port, timeout=15) as srv:
-                srv.login(user, pwd)
-                srv.sendmail(sender, recipients, msg.as_string())
+        if port in SMTP_SSL_PORTS:
+            srv = smtplib.SMTP_SSL(host, port, timeout=15)
         else:
-            with smtplib.SMTP(host, port, timeout=15) as srv:
-                srv.ehlo(); srv.starttls(); srv.login(user, pwd)
-                srv.sendmail(sender, recipients, msg.as_string())
+            srv = smtplib.SMTP(host, port, timeout=15)
+            srv.ehlo()
+            stage = 'starttls'
+            srv.starttls()
+        with srv:
+            stage = 'login'
+            srv.login(user, pwd)
+            stage = 'send'
+            srv.sendmail(sender, recipients, msg.as_string())
         return True, tr(f'邮件已发送至 {", ".join(recipients)}', f'E-mail sent to {", ".join(recipients)}')
     except Exception as exc:
-        logger.exception('E-mail delivery failed')
-        return False, tr('邮件发送失败', 'E-mail delivery failed') + f' ({type(exc).__name__})'
+        detail = ' '.join(str(exc).split())[:200]
+        # one log line with everything except the password (Railway splits tracebacks)
+        logger.error('E-mail delivery failed at %s: %s: %s (host=%s port=%s user=%s)',
+                     stage, type(exc).__name__, detail, host, port, user)
+        logger.debug('E-mail delivery traceback', exc_info=True)
+        stage_text = {'connect': tr('连接服务器', 'connecting'), 'starttls': tr('加密握手', 'TLS handshake'),
+                      'login': tr('登录', 'login'), 'send': tr('发送', 'sending')}[stage]
+        return False, (tr('邮件发送失败', 'E-mail delivery failed') + f' [{stage_text}] ({type(exc).__name__}'
+                       + (f': {detail}' if detail else '') + ')')
 
 
 def _task_lines(t):

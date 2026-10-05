@@ -123,3 +123,25 @@ class SenderNameTests(unittest.TestCase):
             address, header = app.smtp_sender()
             self.assertEqual(address, 'qc@example.com')
             self.assertTrue(header.startswith('=?utf-8?') and header.endswith('<qc@example.com>'))
+
+
+class SmtpErrorTests(unittest.TestCase):
+    def test_failure_names_the_step_and_server_reply(self):
+        import smtplib
+        env = {'SMTP_HOST': 'smtp.example.com', 'SMTP_PORT': '465', 'SMTP_USERNAME': 'qc@example.com',
+               'SMTP_PASSWORD': 'secret-code', 'SMTP_FROM': '', 'SMTP_FROM_NAME': ''}
+
+        class FakeSSL:
+            def __init__(self, *a, **k): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def login(self, *a): raise smtplib.SMTPServerDisconnected('Connection unexpectedly closed')
+
+        with mock.patch.dict(os.environ, env), mock.patch('smtplib.SMTP_SSL', FakeSSL), \
+                app.app.test_request_context(), self.assertLogs(app.logger, 'ERROR') as logs:
+            ok, msg = app._smtp_send('s', 'b', ['to@example.com'])
+        self.assertFalse(ok)
+        self.assertIn('SMTPServerDisconnected: Connection unexpectedly closed', msg)
+        self.assertIn('登录', msg)                                     # failed at the login step
+        self.assertIn('host=smtp.example.com port=465 user=qc@example.com', logs.output[0])
+        self.assertNotIn('secret-code', logs.output[0] + msg)
