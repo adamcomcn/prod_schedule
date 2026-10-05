@@ -159,8 +159,11 @@ tr.mine td { background:#f0fdf4; }
     <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">
       {{ tr('检验任务跟踪', 'Inspection Task Tracker') }}
     </h1>
-    <span style="font-size:.8rem; color:#9ca3af;">
-      {{ tr('今日：', 'Today:') }} {{ today }}
+    <span style="display:flex; gap:12px; align-items:center;">
+      <a id="taskExport" class="btn btn-outline btn-sm"
+         href="{{ url_for('tasks_export', scope=scope, status=status_filter or None, orphan='1' if orphan_only else None) }}"
+         title="{{ tr('按当前筛选导出', 'Exports what the current filters show') }}">&#11015; {{ tr('导出 Excel', 'Export Excel') }}</a>
+      <span style="font-size:.8rem; color:#9ca3af;">{{ tr('今日：', 'Today:') }} {{ today }}</span>
     </span>
   </div>
 
@@ -675,6 +678,14 @@ tr.mine td { background:#f0fdf4; }
 
 <script>
 function filterSupplier(value) {
+  // the export follows the supplier filter too
+  var exp = document.getElementById('taskExport');
+  if (exp) {
+    var url = new URL(exp.href, location.href);
+    if (value === '*') url.searchParams.delete('supplier');
+    else url.searchParams.set('supplier', value === '' ? '__none__' : value);
+    exp.href = url.pathname + url.search;
+  }
   // Show only the chosen supplier's tasks; untick rows that get hidden so
   // they are never assigned by accident.
   document.querySelectorAll('tr[data-supplier]').forEach(function (row) {

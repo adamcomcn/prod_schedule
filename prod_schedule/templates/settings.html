@@ -63,6 +63,15 @@
           </div>
 
           <div class="form-group">
+            <label style="display:flex; gap:8px; align-items:center; font-weight:500;">
+              <input type="checkbox" name="weekly_summary" value="1" style="width:auto;"
+                     {% if config.get('weekly_summary', True) %}checked{% endif %}>
+              &#128197; {{ tr('每周一（北京时间）给任务通知邮箱发送任务汇总：逾期、14 天内到期（按负责人）、未分配、待审核报告',
+                              'Every Monday (China time) e-mail the task notification addresses a summary: overdue, due in 14 days by inspector, unassigned, reports to review') }}
+            </label>
+          </div>
+
+          <div class="form-group">
             <label>&#128196; {{ tr('总部报告邮箱', 'HQ report e-mails') }}</label>
             <input type="text" name="hq_report_emails" value="{{ config.get('hq_report_emails', '') }}"
                    placeholder="qa@hq.example.com, manager@hq.example.com">
@@ -130,6 +139,9 @@
             style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
         <input type="email" name="to" value="{{ my_email }}" required placeholder="you@example.com" style="max-width:280px;">
         <button type="submit" class="btn btn-outline btn-sm">&#9993; {{ tr('发送测试邮件', 'Send test e-mail') }}</button>
+      </form>
+      <form method="POST" action="{{ url_for('settings_weekly_summary') }}" style="margin-top:8px;">
+        <button type="submit" class="btn btn-outline btn-sm">&#128197; {{ tr('立即发送每周汇总', 'Send the weekly summary now') }}</button>
       </form>
     </div>
 

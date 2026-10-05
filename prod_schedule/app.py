@@ -65,7 +65,7 @@ _login_failures = defaultdict(deque)
 ADMIN_ENDPOINTS = {
     'debug_info', 'upload_excel', 'upload_preview', 'upload_confirm', 'upload_cancel', 'settings',
     'settings_modules', 'settings_reference', 'settings_backup', 'settings_backup_email',
-    'settings_test_email', 'office_location_add',
+    'settings_test_email', 'settings_weekly_summary', 'office_location_add',
     'office_location_delete', 'supplier_new', 'supplier_edit', 'suppliers_import',
     'supplier_delete', 'category_new', 'category_delete', 'inspector_add',
     'inspector_delete', 'product_new', 'product_edit', 'product_delete',
@@ -3313,6 +3313,7 @@ def settings():
         config['task_notify_emails'] = ', '.join(_email_list(request.form.get('task_notify_emails', '')))
         config['hq_report_emails'] = ', '.join(_email_list(request.form.get('hq_report_emails', '')))
         config['backup_emails'] = ', '.join(_email_list(request.form.get('backup_emails', '')))
+        config['weekly_summary'] = request.form.get('weekly_summary') == '1'
         if 'schedule_hidden_columns' in request.form:
             config['schedule_hidden_columns'] = [
                 ' '.join(c.split()).lower()
@@ -4383,29 +4384,12 @@ def employee_delete(eid):
 def tasks():
     from collections import defaultdict
     from datetime import timedelta
-    status_filter = request.args.get('status', '')
-    # Inspectors land on their own tasks; the lead / admin on everything.
-    scope = request.args.get('scope') or ('all' if g.can_assign or g.is_hq else 'mine')
-    if scope not in ('mine', 'unassigned', 'all'):
-        scope = 'all'
     today = china_today()
     reconcile_tasks_with_inspections()
-
+    every_task, all_tasks, rows, scope, status_filter, orphan_only = task_listing(
+        {k: v for k, v in request.args.items() if k != 'supplier'})
     with db_conn() as conn:
-        every_task = [dict(r) for r in conn.execute(
-            "SELECT t.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS assignee_name "
-            'FROM inspection_tasks t LEFT JOIN users u ON u.id = t.assigned_to '
-            'ORDER BY t.est_completion ASC, t.created_at ASC'
-        ).fetchall()]
         assignees = assignable_users(conn)
-
-    # Open tasks whose order is no longer in the current schedule (shipped or removed)
-    in_schedule = set()
-    for sheet, sheet_rows in load_schedule(CURRENT_FILE).items():
-        for r in (sheet_rows or [])[1:]:
-            in_schedule.add(make_job_key(sheet, r, sheet_rows[0]))
-    for t in every_task:
-        t['orphan'] = t['status'] not in DONE_STATUSES and t['job_key'] not in in_schedule
 
     scope_counts = {
         'mine': sum(1 for t in every_task if t['assigned_to'] == g.user_id
@@ -4414,24 +4398,8 @@ def tasks():
                           and t['status'] not in DONE_STATUSES),
         'all': len(every_task),
     }
-    if scope == 'mine':
-        all_tasks = [t for t in every_task if t['assigned_to'] == g.user_id]
-    elif scope == 'unassigned':
-        all_tasks = [t for t in every_task if not t['assigned_to']]
-    else:
-        all_tasks = every_task
-
     inspections = load_json(INSPECTIONS_CACHE, {})
-
-    # Filtered view for the table
-    orphan_only = request.args.get('orphan') == '1'
     orphan_count = sum(1 for t in all_tasks if t['orphan'])
-    if orphan_only:
-        rows = [t for t in all_tasks if t['orphan']]
-    elif status_filter:
-        rows = [t for t in all_tasks if t['status'] == status_filter]
-    else:
-        rows = all_tasks
 
     # ── Stats (always over ALL tasks) ─────────────────────────────────────
     total = len(all_tasks)
@@ -4513,6 +4481,189 @@ def tasks():
                            today=today, status_filter=status_filter, stats=stats,
                            orphan_only=orphan_only, orphan_count=orphan_count,
                            scope=scope, scope_counts=scope_counts, assignees=assignees)
+
+
+
+def task_listing(args):
+    """Tasks for the task page and its Excel export, using the page's filters
+    (scope, status, orphan; supplier for the export).
+    Returns (every_task, scope_tasks, rows, scope, status_filter, orphan_only)."""
+    status_filter = args.get('status', '')
+    # Inspectors land on their own tasks; the lead / admin on everything.
+    scope = args.get('scope') or ('all' if g.can_assign or g.is_hq else 'mine')
+    if scope not in ('mine', 'unassigned', 'all'):
+        scope = 'all'
+    with db_conn() as conn:
+        every_task = [dict(r) for r in conn.execute(
+            "SELECT t.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS assignee_name "
+            'FROM inspection_tasks t LEFT JOIN users u ON u.id = t.assigned_to '
+            'ORDER BY t.est_completion ASC, t.created_at ASC'
+        ).fetchall()]
+    # Open tasks whose order is no longer in the current schedule (shipped or removed)
+    in_schedule = set()
+    for sheet, sheet_rows in load_schedule(CURRENT_FILE).items():
+        for r in (sheet_rows or [])[1:]:
+            in_schedule.add(make_job_key(sheet, r, sheet_rows[0]))
+    for t in every_task:
+        t['orphan'] = t['status'] not in DONE_STATUSES and t['job_key'] not in in_schedule
+    if scope == 'mine':
+        scope_tasks = [t for t in every_task if t['assigned_to'] == g.user_id]
+    elif scope == 'unassigned':
+        scope_tasks = [t for t in every_task if not t['assigned_to']]
+    else:
+        scope_tasks = every_task
+    orphan_only = args.get('orphan') == '1'
+    if orphan_only:
+        rows = [t for t in scope_tasks if t['orphan']]
+    elif status_filter:
+        rows = [t for t in scope_tasks if t['status'] == status_filter]
+    else:
+        rows = scope_tasks
+    supplier = args.get('supplier')
+    if supplier is not None and supplier != '*':
+        wanted = '' if supplier == '__none__' else supplier
+        rows = [t for t in rows if (t['supplier'] or '').strip() == wanted]
+    return every_task, scope_tasks, rows, scope, status_filter, orphan_only
+
+
+@app.route('/tasks/export.xlsx')
+def tasks_export():
+    reconcile_tasks_with_inspections()
+    _every, _scope_tasks, rows, scope, _status, _orphan = task_listing(request.args)
+    inspections = load_json(INSPECTIONS_CACHE, {})
+    today = china_today()
+    columns = [
+        ('区域 Region', 12), ('供应商 Supplier', 14), ('订单号 Order', 12), ('采购单号 PO', 12),
+        ('产品编码 Item code', 18), ('描述 Description', 36), ('数量 Qty', 8),
+        ('预计完工 Est. completion', 16), ('最迟出货 Must ship', 14), ('距今天数 Days left', 10),
+        ('检验结果 Result', 12), ('报告编号 Report No.', 30), ('负责人 Assigned to', 14),
+        ('分配时间 Assigned (UTC)', 17), ('分配备注 Note', 24), ('任务状态 Status', 12),
+        ('备注 Remarks', 22),
+    ]
+    header_fill = openpyxl.styles.PatternFill('solid', fgColor='1A3A5C')
+    header_font = openpyxl.styles.Font(color='FFFFFF', bold=True)
+    fills = {'overdue': 'FEE2E2', 'week': 'FFEDD5', 'Pass': 'D1FAE5', 'Fail': 'FEE2E2',
+             'Partial Pass': 'FEF3C7'}
+    workbook = openpyxl.Workbook()
+    ws = workbook.active
+    ws.title = 'Tasks'
+    ws.append([label for label, _w in columns])
+    for (_label, width), cell in zip(columns, ws[1]):
+        cell.fill, cell.font = header_fill, header_font
+        cell.alignment = openpyxl.styles.Alignment(wrap_text=True, vertical='top')
+        ws.column_dimensions[cell.column_letter].width = width
+    for t in rows:
+        records = inspections.get(t['job_key']) or []
+        last = records[-1] if records else {}
+        done = t['status'] in DONE_STATUSES
+        days = None if done else days_until(t['est_completion'], today)
+        remarks = []
+        if t['orphan']:
+            remarks.append('订单已不在排期 / not in current schedule')
+        ws.append([_xl_safe(v) for v in (
+            t['region'], (t['supplier'] or '').strip(), t['order_number'],
+            t['job_key'].split('|')[1] if t['job_key'].count('|') >= 2 else '',
+            t['item_code'], t['description'], t['quantity'], t['est_completion'], t['must_ship'],
+            days, last.get('result', ''),
+            report_number(t['job_key'], last, len(records) - 1) if records else '',
+            t['assignee_name'] or '', t['assigned_at'] or '', t['assign_note'] or '',
+            status_label(t['status'] or 'Pending'), '; '.join(remarks))])
+        line = ws.max_row
+        urgency = 'overdue' if days is not None and days <= 0 else 'week' if days is not None and days <= 7 else ''
+        if urgency:
+            ws.cell(row=line, column=10).fill = openpyxl.styles.PatternFill('solid', fgColor=fills[urgency])
+        if last.get('result') in fills:
+            ws.cell(row=line, column=11).fill = openpyxl.styles.PatternFill('solid', fgColor=fills[last['result']])
+    ws.freeze_panes = 'D2'
+    ws.auto_filter.ref = ws.dimensions
+    buf = io.BytesIO()
+    workbook.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True,
+                     download_name=f'inspection-tasks-{scope}-{today.isoformat()}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+# ── Monday summary for the lead inspector ────────────────────────────────────
+
+def send_weekly_summary(force=False):
+    """Monday (China date) e-mail to the task notification addresses: overdue
+    tasks, tasks due in the next 14 days by inspector, unassigned tasks and
+    reports waiting for review. Returns (ok, message)."""
+    config = load_config()
+    if not force and not config.get('weekly_summary', True):
+        return False, tr('每周汇总已关闭', 'Weekly summary is off')
+    recipients = _email_list(config.get('task_notify_emails', ''))
+    if not recipients:
+        return False, tr('未设置任务通知邮箱', 'No task notification e-mail configured')
+    today = china_today()
+    week = today.isoformat()
+    if not force and (today.weekday() != 0 or config.get('weekly_summary_last') == week):
+        return False, tr('今天不发送', 'Not due today')
+    reconcile_tasks_with_inspections()
+    with db_conn() as conn:
+        tasks = [dict(r) for r in conn.execute(
+            "SELECT t.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS assignee_name "
+            'FROM inspection_tasks t LEFT JOIN users u ON u.id = t.assigned_to '
+            "WHERE IFNULL(t.status, '') NOT IN ('Completed', 'Closed')")]
+    for t in tasks:
+        t['days'] = days_until(t['est_completion'], today)
+    overdue = sorted((t for t in tasks if t['days'] is not None and t['days'] < 0), key=lambda t: t['days'])
+    soon = [t for t in tasks if t['days'] is not None and 0 <= t['days'] <= 14]
+    unassigned = [t for t in tasks if not t['assigned_to']]
+    reviews = pending_reviews()
+
+    def line(t):
+        when = (tr(f'逾期 {-t["days"]} 天', f'{-t["days"]} days overdue') if t['days'] < 0
+                else tr('今天到期', 'due today') if t['days'] == 0
+                else tr(f'还剩 {t["days"]} 天', f'{t["days"]} days left')) if t['days'] is not None else '—'
+        return (f"  [{t['region']}] {t['order_number']} {t['item_code']} · {when} · "
+                f"{t['assignee_name'] or '未分配 unassigned'}")
+
+    lines = [f'每周检验任务汇总 Weekly inspection summary — {week}', '',
+             f'逾期 Overdue: {len(overdue)}    14 天内到期 Due in 14 days: {len(soon)}    '
+             f'未分配 Unassigned: {len(unassigned)}    待审核报告 Reports to review: {len(reviews)}', '']
+    if overdue:
+        lines.append(f'■ 逾期任务 Overdue ({len(overdue)})')
+        lines += [line(t) for t in overdue[:30]]
+        if len(overdue) > 30:
+            lines.append(f'  … +{len(overdue) - 30}')
+        lines.append('')
+    if soon:
+        lines.append(f'■ 14 天内到期（按负责人）Due in the next 14 days, by inspector ({len(soon)})')
+        by_person = defaultdict(list)
+        for t in sorted(soon, key=lambda t: t['days']):
+            by_person[t['assignee_name'] or '未分配 Unassigned'].append(t)
+        for person, items in sorted(by_person.items()):
+            lines.append(f'  {person} ({len(items)})')
+            lines += ['  ' + line(t) for t in items[:20]]
+        lines.append('')
+    if unassigned:
+        lines.append(f'■ 未分配任务 Unassigned ({len(unassigned)})')
+        lines += [line(t) for t in sorted(unassigned, key=lambda t: (t['days'] is None, t['days'] or 0))[:20]]
+        lines.append('    ' + url_for('tasks', scope='unassigned', _external=True))
+        lines.append('')
+    if reviews:
+        lines.append(f'■ 待审核报告 Reports waiting for review ({len(reviews)})')
+        for q in reviews[:15]:
+            rec = q['record']
+            lines.append(f"  {rec.get('order_number', '')} {rec.get('item_code', '')} · {rec.get('result', '')} · "
+                         f"{rec.get('inspector_name', '')} · {int(q['hours'])} h")
+        lines.append('')
+    lines.append(url_for('tasks', _external=True))
+    ok, msg = _smtp_send(f'【每周汇总】检验任务 {week} / Weekly inspection summary', '\n'.join(lines), recipients)
+    if ok and not force:
+        config = load_config()
+        config['weekly_summary_last'] = week
+        save_json(CONFIG_FILE, config)
+    return ok, msg
+
+
+@app.route('/settings/weekly-summary', methods=['POST'])
+def settings_weekly_summary():
+    ok, msg = send_weekly_summary(force=True)
+    flash(msg, 'success' if ok else 'error')
+    return redirect(url_for('settings') + '#email')
 
 
 @app.route('/tasks/close', methods=['POST'])
@@ -5746,6 +5897,11 @@ def _run_reminders_in_background(base_url):
                 send_backup_email()
         except Exception:
             logger.exception('Daily backup e-mail failed')
+        try:
+            with app.test_request_context(base_url=base_url):
+                send_weekly_summary()
+        except Exception:
+            logger.exception('Weekly summary e-mail failed')
     import threading
     threading.Thread(target=work, daemon=True).start()
 
@@ -5758,7 +5914,7 @@ def cron_reminders():
     if not token or not hmac.compare_digest(supplied, token):
         abort(404)
     return {'reminders_sent': send_due_reminders(), 'review_reminders_sent': send_review_reminders(),
-            'backup': send_backup_email()[1]}
+            'backup': send_backup_email()[1], 'weekly_summary': send_weekly_summary()[1]}
 
 
 @app.route('/lang/<code>')
