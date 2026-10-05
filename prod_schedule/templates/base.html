@@ -154,8 +154,10 @@ textarea { resize: vertical; min-height: 80px; }
   {{ navlink('users_admin', '账号', 'Users', ep.startswith('user')) }}
   {% endif %}
   <div class="nav-user">
+    {% if g.can_switch_lang %}
     <a class="lang-btn" href="{{ url_for('set_language', code='en' if current_lang() == 'zh' else 'zh', next=request.full_path.rstrip('?')) }}"
        title="{{ tr('Switch to English', '切换到中文') }}">{{ 'EN' if current_lang() == 'zh' else '中文' }}</a>
+    {% endif %}
     <span style="color:rgba(255,255,255,.5);font-size:.8rem;margin-left:12px;white-space:nowrap;">{{ g.username }}</span>
     <form method="POST" action="{{ url_for('logout') }}" style="margin-left:10px;">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

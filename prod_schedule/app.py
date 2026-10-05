@@ -144,6 +144,11 @@ def _lang_from_cookie():
     lang = request.cookies.get('lang', '')
     return lang if lang in LANGUAGES else DEFAULT_LANGUAGE
 
+# Fixed interface language per role: the China team works in Chinese, HQ in
+# English. Only admins switch.
+ROLE_LANGUAGE = {'inspector': 'zh', 'lead': 'zh', 'hq': 'en'}
+
+
 def current_lang():
     try:
         return g.get('lang') or DEFAULT_LANGUAGE
@@ -5702,6 +5707,8 @@ def _auth_check():
         return redirect(url_for('login'))
     if user['language'] in LANGUAGES:
         g.lang = user['language']
+    g.lang = ROLE_LANGUAGE.get(user['role'], g.lang)
+    g.can_switch_lang = user['role'] not in ROLE_LANGUAGE
     g.user_id = user['id']
     g.username = user['username']
     g.role = user['role']
@@ -5762,7 +5769,9 @@ def set_language(code):
     user_id = session.get('user_id')
     if user_id:
         with db_conn() as conn:
-            conn.execute('UPDATE users SET language=? WHERE id=?', (code, user_id))
+            # roles with a fixed language (ROLE_LANGUAGE) keep it
+            conn.execute('UPDATE users SET language=? WHERE id=? AND role NOT IN (%s)'
+                         % ','.join('?' * len(ROLE_LANGUAGE)), (code, user_id, *ROLE_LANGUAGE))
     response = redirect(_safe_next_url(request.args.get('next')) or url_for('index'))
     response.set_cookie('lang', code, max_age=365 * 24 * 3600, samesite='Lax',
                         secure=IS_PRODUCTION, httponly=True)
