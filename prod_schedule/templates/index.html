@@ -11,8 +11,11 @@
            font-size: .85rem; font-weight: 500; color: #6b7280;
            border-bottom: 3px solid transparent; margin-bottom: -2px;
            white-space: nowrap; transition: color .15s; }
-.tab-btn:hover { color: #1a3a5c; }
-.tab-btn.active { color: #1a3a5c; border-bottom-color: #1a3a5c; }
+.tab-btn:hover { color: #1a3a5c; background: #f1f5f9; text-decoration: none; }
+/* selected region: filled, bold, unmistakable */
+.tab-btn.active { color: #fff; background: #1a3a5c; border-bottom-color: #f59e0b; font-weight: 700;
+                  border-radius: 8px 8px 0 0; text-decoration: none; }
+.tab-btn.active:hover { color: #fff; background: #1a3a5c; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
