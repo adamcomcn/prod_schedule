@@ -124,8 +124,8 @@
         <span class="status-dot {{ 'dot-green' if smtp_configured else 'dot-red' }}"></span>
         {{ tr('邮件通知', 'E-mail') }}: <strong>{{ tr('已配置', 'Configured') if smtp_configured else tr('未配置', 'Not configured') }}</strong>
       </div>
-      <p style="font-size:.82rem;color:#6b7280;">{{ tr('在 Railway 中配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_PASSWORD 和 SMTP_FROM。密码不会保存到应用配置文件。',
-        'Set SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD and SMTP_FROM in Railway. The password is never stored in the app config.') }}</p>
+      <p style="font-size:.82rem;color:#6b7280;">{{ tr('在 Railway 中配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_PASSWORD 和 SMTP_FROM；SMTP_FROM_NAME（可选）是收件箱里显示的发件人名称。密码不会保存到应用配置文件。',
+        'Set SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD and SMTP_FROM in Railway; SMTP_FROM_NAME (optional) is the sender name shown in the inbox. The password is never stored in the app config.') }}</p>
       <form method="POST" action="{{ url_for('settings_test_email') }}"
             style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
         <input type="email" name="to" value="{{ my_email }}" required placeholder="you@example.com" style="max-width:280px;">

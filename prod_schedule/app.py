@@ -3215,7 +3215,7 @@ def settings_test_email():
     if not recipients:
         flash(tr('请填写有效的邮箱地址', 'Enter a valid e-mail address'), 'error')
         return redirect(url_for('settings') + '#email')
-    sender = os.environ.get('SMTP_FROM', os.environ.get('SMTP_USERNAME', ''))
+    sender = smtp_sender()[1]
     body = '\n'.join([
         '这是质检系统发出的测试邮件。收到说明邮件设置正确。',
         'This is a test e-mail from the QC system. If you received it, e-mail is set up correctly.',
@@ -3736,6 +3736,16 @@ def email_html(body):
             + ''.join(out) + '</div></td></tr></table>')
 
 
+def smtp_sender():
+    """(envelope address, From header). SMTP_FROM_NAME is the display name
+    shown in the recipient's inbox, e.g. 'DAEMCO-QC <qc@example.com>'."""
+    from email.utils import formataddr, parseaddr
+    raw = os.environ.get('SMTP_FROM', '').strip() or os.environ.get('SMTP_USERNAME', '').strip()
+    raw_name, address = parseaddr(raw)
+    name = os.environ.get('SMTP_FROM_NAME', '').strip() or raw_name
+    return address, formataddr((name, address), charset='utf-8') if name else address
+
+
 def _smtp_send(subject, body, recipients, attachments=()):
     """Send a UTF-8 e-mail (plain text plus an HTML version with short link
     labels). Returns (ok, message).
@@ -3748,7 +3758,7 @@ def _smtp_send(subject, body, recipients, attachments=()):
     port = int(os.environ.get('SMTP_PORT', '587'))
     user = os.environ.get('SMTP_USERNAME', '').strip()
     pwd  = os.environ.get('SMTP_PASSWORD', '')
-    sender = os.environ.get('SMTP_FROM', user).strip()
+    sender, from_header = smtp_sender()
     if not all([host, user, pwd]):
         return False, tr('邮件服务未配置', 'SMTP not configured')
     if not recipients:
@@ -3772,7 +3782,7 @@ def _smtp_send(subject, body, recipients, attachments=()):
     else:
         msg = content
     msg['Subject'] = str(Header(subject, 'utf-8'))
-    msg['From']    = sender
+    msg['From']    = from_header
     msg['To']      = ', '.join(recipients)
     try:
         if port == 465:

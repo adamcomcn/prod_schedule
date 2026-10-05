@@ -108,3 +108,18 @@ class BackupTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SenderNameTests(unittest.TestCase):
+    def test_from_header_uses_display_name(self):
+        env = {'SMTP_USERNAME': 'qc@example.com', 'SMTP_FROM': '', 'SMTP_FROM_NAME': 'DAEMCO-QC'}
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(app.smtp_sender(), ('qc@example.com', 'DAEMCO-QC <qc@example.com>'))
+        with mock.patch.dict(os.environ, {'SMTP_USERNAME': 'qc@example.com', 'SMTP_FROM': 'noreply@example.com',
+                                          'SMTP_FROM_NAME': ''}):
+            self.assertEqual(app.smtp_sender(), ('noreply@example.com', 'noreply@example.com'))
+        with mock.patch.dict(os.environ, {'SMTP_USERNAME': 'qc@example.com', 'SMTP_FROM': '',
+                                          'SMTP_FROM_NAME': '质检系统'}):
+            address, header = app.smtp_sender()
+            self.assertEqual(address, 'qc@example.com')
+            self.assertTrue(header.startswith('=?utf-8?') and header.endswith('<qc@example.com>'))
