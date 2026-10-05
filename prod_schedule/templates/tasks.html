@@ -102,6 +102,14 @@
 .scope-tabs a.active .scope-count { background:rgba(255,255,255,.25); }
 .assign-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; background:#eff6ff;
               border:1px solid #bfdbfe; border-radius:10px; padding:10px 14px; margin-bottom:12px; }
+/* stays on screen while scrolling the list, so ticked tasks can be assigned at once */
+.assign-bar { position:sticky; top:0; z-index:30; box-shadow:0 4px 10px rgba(15,23,42,.08); }
+.assign-bar.has-sel { border-color:#3b82f6; background:#dbeafe; }
+@media (max-width: 760px) {
+  /* keep the bar short on phones until something is ticked */
+  .assign-bar { gap:6px; padding:8px 10px; }
+  .assign-bar:not(.has-sel) .assign-extra { display:none; }
+}
 .assign-count { font-size:.8rem; color:#1e40af; }
 .assignee { display:inline-block; background:#e0e7ff; color:#3730a3; border-radius:12px;
             padding:2px 10px; font-size:.78rem; font-weight:600; }
@@ -451,10 +459,10 @@ tr.mine td { background:#f0fdf4; }
       {% endfor %}
       <option value="">— {{ tr('取消分配', 'Unassign') }} —</option>
     </select>
-    <input type="text" name="note" maxlength="500" placeholder="{{ tr('备注（选填，会写入邮件）', 'Note (optional, included in the e-mail)') }}"
+    <input type="text" name="note" class="assign-extra" maxlength="500" placeholder="{{ tr('备注（选填，会写入邮件）', 'Note (optional, included in the e-mail)') }}"
            style="flex:1; min-width:180px;">
     <button type="submit" class="btn btn-primary btn-sm">&#9993; {{ tr('分配并发邮件', 'Assign & e-mail') }}</button>
-    <button type="submit" class="btn btn-outline btn-sm" formaction="{{ url_for('task_close') }}" formnovalidate
+    <button type="submit" class="btn btn-outline btn-sm assign-extra" formaction="{{ url_for('task_close') }}" formnovalidate
             onclick="return confirm({{ tr('关闭所选任务？关闭后不再统计、不再提醒（可在状态下拉里重新打开）。', 'Close the selected tasks? They stop counting and no reminders are sent (reopen from the status menu).')|tojson }});">
       {{ tr('关闭所选', 'Close selected') }}
     </button>
@@ -686,6 +694,8 @@ function updateAssignCount() {
   var n = document.querySelectorAll('.task-check:checked').length;
   var el = document.getElementById('assignCount');
   if (el) el.textContent = {{ tr('已选 ', '')|tojson }} + n + {{ tr(' 项', ' selected')|tojson }};
+  var bar = document.querySelector('.assign-bar');
+  if (bar) bar.classList.toggle('has-sel', n > 0);
 }
 </script>
 <script>
