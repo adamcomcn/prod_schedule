@@ -528,6 +528,23 @@ input[name=result] { display:none; }
         {% endif %}
       </div>
 
+      {% if related_reports %}
+      <div class="card" style="border:1px solid #c7d2fe; background:#eef2ff;">
+        <div class="section-title">&#8644; {{ tr('同 PO + 产品在其他地区的检验报告', 'Reports for the same PO + item in other regions') }} ({{ related_reports|length }})</div>
+        <p style="font-size:.78rem; color:#4338ca; margin-bottom:8px;">
+          {{ tr('供应商把这个订单的部分或全部数量转到了其他地区。是同一批货，这些报告同样适用。',
+                'The supplier moved some or all of this order line between regions. It is the same production batch, so these reports apply here too.') }}</p>
+        {% for r in related_reports|reverse %}
+        <div style="font-size:.82rem; padding:4px 0; border-top:1px solid #e0e7ff;">
+          <strong>{{ r.region }}</strong> ·
+          <a href="{{ url_for('inspect_form', job_key=r.job_key) }}">{{ r.report_no }}</a> ·
+          {{ r.record.inspection_date }} · {{ r.record.result|status_label }} · {{ r.record.inspector_name }}
+          · <a href="{{ url_for('inspection_report_pdf', job_key=r.job_key, i=r.index) }}" target="_blank">PDF</a>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
       {% if past_inspections %}
       <div class="card">
         <div class="section-title">&#128196; {{ tr('历史检验', 'Past Inspections') }} ({{ past_inspections|length }})</div>

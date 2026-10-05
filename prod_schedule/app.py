@@ -161,14 +161,14 @@ _STATUS_LABELS = {
     'Pending': '待检验', 'In Progress': '进行中', 'Completed': '已完成', 'On Hold': '暂停', 'Closed': '已关闭',
     'Pass': '合格', 'Fail': '不合格', 'Partial Pass': '部分合格', 'N/A': '不适用',
     'new': '新增', 'not_shipped': '未出货', 'partially_shipped': '部分出货',
-    'shipped': '已出货', 'typo': '疑似笔误',
+    'shipped': '已出货', 'typo': '疑似笔误', 'moved_in': '转入', 'partially_moved': '部分转出',
     'Ready to Ship': '待出货', 'In Production': '生产中', 'Shipped': '已出货',
     'Casting arrived': '铸件已到', 'Raw Castings': '毛坯铸件', 'Conditional Pass': '有条件合格',
     'Approved': '已批准', 'Rejected': '已拒绝',
 }
 _STATUS_LABELS_EN = {
     'new': 'New', 'not_shipped': 'Not shipped', 'partially_shipped': 'Partially shipped',
-    'shipped': 'Shipped', 'typo': 'Possible typo',
+    'shipped': 'Shipped', 'typo': 'Possible typo', 'moved_in': 'Moved in', 'partially_moved': 'Partly moved out',
 }
 
 def status_label(value):
@@ -776,7 +776,181 @@ def _parse_qty(val):
     except (ValueError, TypeError):
         return None
 
-def compute_changes(previous, current):
+
+# ── Region moves ─────────────────────────────────────────────────────────────
+# The supplier sometimes moves an order line (same PO + item code) to another
+# region sheet, in full or in part. The job key includes the sheet, so without
+# this the old row looked "shipped" and the new one "new". Inspection reports
+# are shared across regions: the goods are one production batch wherever they
+# are shipped.
+
+def _job_tail(job_key):
+    """'PO|ITEM' part of a 'SHEET|PO|ITEM' job key."""
+    return job_key.split('|', 1)[1] if '|' in job_key else job_key
+
+
+def detect_region_moves(prev_keys, curr_keys, prev_qty, curr_qty):
+    """Order lines that appeared on a new sheet while leaving (or shrinking on)
+    another one. also_shipped: the total quantity went down as well, so part
+    of it shipped and the usual shipped / QA BRT rules still apply."""
+    groups = defaultdict(lambda: ({}, {}))
+    for k in prev_keys:
+        groups[_job_tail(k)][0][k.split('|', 1)[0]] = prev_qty.get(k)
+    for k in curr_keys:
+        groups[_job_tail(k)][1][k.split('|', 1)[0]] = curr_qty.get(k)
+    moves = []
+    for tail, (before, after) in sorted(groups.items()):
+        if not before or not after:
+            continue
+        to = sorted(s for s in after if s not in before)
+        if not to:
+            continue
+        gone = sorted(s for s in before if s not in after)
+        reduced = sorted(s for s in before if s in after and before[s] is not None
+                         and after[s] is not None and after[s] < before[s])
+        if not gone and not reduced:
+            continue                       # extra quantity for a new region, nothing left the old one
+        known = all(v is not None for v in list(before.values()) + list(after.values()))
+        total_before = sum(v or 0 for v in before.values())
+        total_after = sum(v or 0 for v in after.values())
+        po, item = tail.split('|', 1)
+        moves.append({
+            'po': po, 'item': item,
+            'kind': 'partial' if any(s in after for s in before) else 'full',
+            'also_shipped': known and total_after < total_before - 1e-9,
+            'from': [{'sheet': s, 'before': before[s], 'after': after.get(s)} for s in gone + reduced],
+            'to': [{'sheet': s, 'qty': after[s]} for s in to],
+            'gone_keys': [f'{s}|{tail}' for s in gone],
+            'reduced_keys': [f'{s}|{tail}' for s in reduced],
+            'to_keys': [f'{s}|{tail}' for s in to],
+            'total_before': total_before, 'total_after': total_after,
+        })
+    return moves
+
+
+def _qty_text(value):
+    if value is None:
+        return '?'
+    return str(int(value)) if value == int(value) else str(value)
+
+
+def move_text(m):
+    """'DI FITTING 48 → FIJI 36 (DI FITTING keeps 15)' style description."""
+    src = ', '.join(f"{f['sheet']} {_qty_text(f['before'])}" for f in m['from'])
+    dst = ', '.join(f"{t['sheet']} {_qty_text(t['qty'])}" for t in m['to'])
+    kept = [f"{f['sheet']} {_qty_text(f['after'])}" for f in m['from'] if f['after'] is not None]
+    text = f'{src} → {dst}'
+    if kept:
+        text += tr(f"（{', '.join(kept)} 保留）", f" ({', '.join(kept)} kept)")
+    if m.get('also_shipped'):
+        text += tr('；总数减少，部分已出货', '; total went down, part shipped')
+    return text
+
+
+class SharedReports(dict):
+    """Inspection reports by job key; a job without reports of its own falls
+    back to the reports of the same PO + item in another region."""
+
+    def __init__(self, data):
+        super().__init__(data or {})
+        self._by_tail = defaultdict(list)
+        for key, records in self.items():
+            if records:
+                self._by_tail[_job_tail(key)].extend(records)
+
+    def get(self, key, default=None):
+        own = super().get(key)
+        if own:
+            return own
+        shared = self._by_tail.get(_job_tail(key))
+        if shared:
+            return shared
+        return own if own is not None else default
+
+
+def migrate_job_key(conn, old, new):
+    """Move a job — task, reports, attachments, reviews, e-mails, date
+    corrections — to its new key after the whole order line moved region.
+    Refused (False) when the new key already has reports of its own."""
+    cache = load_json(INSPECTIONS_CACHE, {})
+    if cache.get(new):
+        return False
+    sheet = new.split('|', 1)[0]
+    tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+    for table in tables:
+        cols = [c[1] for c in conn.execute(f'PRAGMA table_info("{table}")')]
+        if 'job_key' in cols:
+            conn.execute(f'UPDATE OR IGNORE "{table}" SET job_key=? WHERE job_key=?', (new, old))
+    conn.execute('UPDATE inspection_tasks SET region=? WHERE job_key=?', (sheet, new))
+    if old in cache:
+        records = cache.pop(old)
+        for record in records:
+            record['job_key'] = new
+            record['region'] = sheet
+        cache[new] = records
+        save_json(INSPECTIONS_CACHE, cache)
+    return True
+
+
+def handle_region_moves(conn, moves, existing_keys, week_label):
+    """Record the moves; a whole line that moved takes its task (and reports)
+    along; a split-off part gets a new task for the same inspector.
+    Returns (followed, inherit): followed = [(move, old_key, new_key)],
+    inherit = {new_key: (source task row, move)}."""
+    followed, inherit = [], {}
+    for m in moves:
+        for f in m['from']:
+            for t in m['to']:
+                conn.execute(
+                    'INSERT INTO region_moves (po, item_code, from_sheet, to_sheet, from_before, '
+                    'from_after, to_qty, kind, also_shipped, week_label) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                    (m['po'], m['item'], f['sheet'], t['sheet'], f['before'], f['after'], t['qty'],
+                     m['kind'], 1 if m['also_shipped'] else 0, week_label))
+        sources = [conn.execute('SELECT * FROM inspection_tasks WHERE job_key=?',
+                                (f"{f['sheet']}|{m['po']}|{m['item']}",)).fetchone() for f in m['from']]
+        source = next((t for t in sources if t and t['assigned_to']), None)
+        targets = list(m['to_keys'])
+        if m['kind'] == 'full' and not m['also_shipped'] and len(m['gone_keys']) == 1 and targets:
+            old, new = m['gone_keys'][0], targets[0]
+            if old in existing_keys and new not in existing_keys and migrate_job_key(conn, old, new):
+                existing_keys.discard(old)
+                existing_keys.add(new)
+                followed.append((m, old, new))
+                targets = targets[1:]
+        if source:
+            for key in targets:
+                inherit[key] = (source, m)
+    return followed, inherit
+
+
+def _send_region_move_email(followed, inherited):
+    """Tell the lead and the inspectors concerned which orders changed region."""
+    tasks = [dict(task) for _m, task in followed] + [dict(t) for t in inherited]
+    recipients = _task_recipients(tasks)
+    if not recipients:
+        return False, tr('未设置通知邮箱', 'No notification e-mail configured')
+    lines = ['订单转区通知 Region transfer', '供应商把以下订单（同一 PO + 产品）转到了其他地区。'
+             ' The supplier moved these order lines (same PO + item) to another region.', '']
+    i = 0
+    for m, task in followed:
+        i += 1
+        lines.append(f"{i}. {task['order_number']}  {m['po']}  {m['item']}")
+        lines.append(f"    {move_text(m)}")
+        lines.append(f"    整单转区：任务和检验报告已随订单转到 {task['region']}，负责人不变 ({task.get('assignee_name') or '—'})。"
+                     f" Whole line moved: the task and its reports moved with it.")
+        lines.append('    ' + url_for('inspect_form', job_key=task['job_key'], _external=True))
+    for t in inherited:
+        i += 1
+        lines.append(f"{i}. {t['order_number']}  {t['item_code']}  → {t['region']}")
+        lines.append(f"    {t['move_text']}")
+        lines.append(f"    部分转区：已为 {t['region']} 新建任务，自动分配给 {t.get('assignee_name') or '—'}。"
+                     f" Part moved: a new task was created for the same inspector.")
+        lines.append('    ' + url_for('inspect_form', job_key=t['job_key'], _external=True))
+    subject = f'【订单转区】{i} 个订单转到其他地区 / {i} order line(s) moved region'
+    return _smtp_send(subject, '\n'.join(lines), recipients)
+
+
+def compute_changes(previous, current, moves_out=None):
     """Compare two week datasets.
 
     Same order+item can appear as multiple rows (split production lots) or
@@ -837,6 +1011,16 @@ def compute_changes(previous, current):
     genuine_new     = curr_keys - prev_keys
     genuine_shipped = prev_keys - curr_keys
 
+    # ── region moves: the same PO + item now (also) on another sheet ─────────
+    moves = detect_region_moves(prev_keys, curr_keys, prev_qty, curr_qty)
+    moved_in_keys = {k for m in moves for k in m['to_keys']}
+    moved_out_keys = {k for m in moves if not m['also_shipped'] for k in m['gone_keys']}
+    reduced_by_move = {k for m in moves if not m['also_shipped'] for k in m['reduced_keys']}
+    genuine_new -= moved_in_keys
+    genuine_shipped -= moved_out_keys
+    if moves_out is not None:
+        moves_out['moves'] = moves
+
     # ── typo detection ────────────────────────────────────────────────────────
     THRESHOLD = 0.75
     typo_flags        = []
@@ -879,7 +1063,9 @@ def compute_changes(previous, current):
     # ── statuses for current-week rows ───────────────────────────────────────
     statuses = {}
     for k in curr_keys:
-        if k in typo_new_keys:
+        if k in moved_in_keys:
+            statuses[k] = 'moved_in'
+        elif k in typo_new_keys:
             statuses[k] = 'typo'
         elif k not in prev_keys:
             statuses[k] = 'new'
@@ -887,7 +1073,7 @@ def compute_changes(previous, current):
             pq = prev_qty.get(k)
             cq = curr_qty.get(k)
             if pq is not None and cq is not None and cq < pq:
-                statuses[k] = 'partially_shipped'
+                statuses[k] = 'partially_moved' if k in reduced_by_move else 'partially_shipped'
             else:
                 statuses[k] = 'not_shipped'
 
@@ -937,7 +1123,7 @@ def compute_changes(previous, current):
 
 def persist_fully_shipped_jobs(previous, current, shipped_rows, week_label):
     """Persist every fully shipped job; only jobs with QA BRT evidence complete."""
-    inspections = load_json(INSPECTIONS_CACHE, {})
+    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
     persisted = 0
     pending = 0
     completed_at = datetime.now().isoformat()
@@ -1013,15 +1199,20 @@ def healthz():
 def index():
     current = load_schedule(CURRENT_FILE)
     previous = load_schedule(PREVIOUS_FILE)
+    moves_info = {}
     if current and previous:
-        statuses, typo_flags, shipped_rows = compute_changes(previous, current)
+        statuses, typo_flags, shipped_rows = compute_changes(previous, current, moves_out=moves_info)
     else:
         statuses, typo_flags, shipped_rows = {}, [], {}
+    move_notes = {}
+    for m in moves_info.get('moves', []):
+        for k in m['to_keys'] + m['reduced_keys']:
+            move_notes[k] = move_text(m)
     if not g.can_see_prices:
         # Prices never reach inspectors (not even via search).
         current, shipped_rows = strip_admin_only_columns(current, shipped_rows)
     config = load_config()
-    inspections = load_json(INSPECTIONS_CACHE, {})
+    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
 
     sheet_names = list(current.keys())
     selected_sheet = request.args.get('sheet', '')
@@ -1138,6 +1329,7 @@ def index():
     with db_conn() as _c:
         est_overrides = {r['job_key']: dict(r) for r in _c.execute('SELECT * FROM est_overrides')}
     return render_template('index.html',
+                           move_notes=move_notes,
                            est_overrides=est_overrides,
                            data=display_data,
                            statuses=statuses,
@@ -1167,7 +1359,7 @@ def index():
 def export_comparison_excel():
     current = load_schedule(CURRENT_FILE)
     previous = load_schedule(PREVIOUS_FILE)
-    inspections = load_json(INSPECTIONS_CACHE, {})
+    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
     statuses, _, shipped_rows = (
         compute_changes(previous, current)
         if current and previous else ({}, [], {}))
@@ -1203,7 +1395,7 @@ def export_comparison_excel():
             status_label = {
                 'new': 'NEW', 'not_shipped': 'NOT SHIPPED',
                 'partially_shipped': 'PARTIAL', 'shipped': 'SHIPPED',
-                'typo': 'TYPO?',
+                'typo': 'TYPO?', 'moved_in': 'MOVED IN', 'partially_moved': 'PART MOVED OUT',
             }.get(status, status.upper())
             reports = inspections.get(job_key, [])
             worksheet.append([
@@ -1276,7 +1468,7 @@ def dashboard():
     current     = load_schedule(CURRENT_FILE)
     previous    = load_schedule(PREVIOUS_FILE)
     config      = load_config()
-    inspections = load_json(INSPECTIONS_CACHE, {})
+    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
 
     if current and previous:
         statuses, typo_flags, shipped_rows = compute_changes(previous, current)
@@ -1340,6 +1532,7 @@ def dashboard():
                     continue
                 seen_jk.add(jk)
                 status = statuses.get(jk, 'new')
+                status = {'moved_in': 'new', 'partially_moved': 'not_shipped'}.get(status, status)
                 seen_all.add(jk)
                 if status == 'typo':          # a suspected-typo row is still a new order
                     stats['new'] += 1
@@ -1543,7 +1736,7 @@ def _row_details(sheet, row, headers):
 
 def schedule_diff_summary(current, new):
     """Describe what applying `new` on top of `current` would change."""
-    summary = {'sheets': [], 'new': [], 'shipped': [], 'partial': [], 'typo': [],
+    summary = {'sheets': [], 'new': [], 'shipped': [], 'partial': [], 'typo': [], 'moves': [],
                'date_changes': [], 'warnings': [], 'first_upload': not current}
     if not current:
         for sheet, rows in new.items():
@@ -1552,7 +1745,10 @@ def schedule_diff_summary(current, new):
                                       'partial': 0, 'added': [], 'removed': []})
         return summary
 
-    statuses, typo_flags, _ = compute_changes(current, new)
+    moves_info = {}
+    statuses, typo_flags, _ = compute_changes(current, new, moves_out=moves_info)
+    moves = moves_info.get('moves', [])
+    moved_out = {k for m in moves if not m['also_shipped'] for k in m['gone_keys']}
     old_rows, new_rows = {}, {}
     for source, target in ((current, old_rows), (new, new_rows)):
         for sheet, rows in source.items():
@@ -1575,7 +1771,15 @@ def schedule_diff_summary(current, new):
             summary['partial'].append(detail)
     summary['typo'] = typo_flags
     # A row that disappeared entirely means the job fully shipped.
+    for m in moves:
+        row = new_rows.get(m['to_keys'][0]) or {}
+        summary.setdefault('moves', []).append({
+            'order_number': row.get('order_number', ''), 'po': m['po'], 'item_code': m['item'],
+            'description': row.get('description', ''), 'text': move_text(m),
+            'kind': m['kind'], 'also_shipped': m['also_shipped']})
     for key, detail in old_rows.items():
+        if key in moved_out:
+            continue
         if key not in new_rows and key.split('|')[1]:
             per_sheet[detail['sheet']]['shipped'] += 1
             summary['shipped'].append(detail)
@@ -1924,8 +2128,9 @@ def _apply_schedule(data, baseline=False):
     previous = load_schedule(PREVIOUS_FILE)
     current_data = load_schedule(CURRENT_FILE)
     if current_data:
+        moves_info = {}
         if previous:
-            statuses, _, newly_shipped = compute_changes(previous, current_data)
+            statuses, _, newly_shipped = compute_changes(previous, current_data, moves_out=moves_info)
         else:
             # First upload: every row is new.
             statuses, newly_shipped = {}, {}
@@ -1943,12 +2148,19 @@ def _apply_schedule(data, baseline=False):
                          f'{pending_shipped} fully shipped job(s) require a QA BRT inspection report'),
                       'warning')
         new_tasks_created = []
+        moved_in_tasks = []
         date_changes = []
         tasks_updated = 0
         seen_this_upload = set()
         with db_conn() as conn:
             existing_keys = {r[0] for r in conn.execute(
                 'SELECT job_key FROM inspection_tasks').fetchall()}
+            followed, inherit = handle_region_moves(
+                conn, moves_info.get('moves', []), existing_keys, config.get('upload_date', ''))
+            followed = [(m, dict(conn.execute(
+                "SELECT t.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS assignee_name "
+                "FROM inspection_tasks t LEFT JOIN users u ON u.id = t.assigned_to WHERE t.job_key=?",
+                (new,)).fetchone())) for m, _old, new in followed]
             for sheet, rows in current_data.items():
                 if not rows or len(rows) < 2:
                     continue
@@ -2000,7 +2212,7 @@ def _apply_schedule(data, baseline=False):
                                 dict(before), old_est=before['est_completion'], new_est=est,
                                 old_ship=before['must_ship'], new_ship=ship))
                         continue
-                    if statuses.get(jk) in ('new', 'typo'):
+                    if statuses.get(jk) in ('new', 'typo', 'moved_in'):
                         task = dict(
                             job_key=jk, order_number=gcol('order number', row),
                             region=sheet, item_code=gcol('item code', row),
@@ -2019,9 +2231,31 @@ def _apply_schedule(data, baseline=False):
                              task['item_code'], task['description'], task['supplier'],
                              task['quantity'], task['est_completion'],
                              task['must_ship'], task['week_label']))
-                        new_tasks_created.append(task)
                         existing_keys.add(jk)
+                        if jk in inherit:
+                            # split-off part of a line that moved region: same inspector
+                            source, move = inherit[jk]
+                            from_sheets = ', '.join(f['sheet'] for f in move['from'])
+                            note = f'从 {from_sheets} 转入 / moved from {from_sheets}'
+                            conn.execute(
+                                "UPDATE inspection_tasks SET assigned_to=?, assigned_by='system', "
+                                "assigned_at=?, assign_note=? WHERE job_key=?",
+                                (source['assigned_to'], datetime.now().strftime('%Y-%m-%d %H:%M'), note, jk))
+                            assignee = conn.execute('SELECT * FROM users WHERE id=?',
+                                                    (source['assigned_to'],)).fetchone()
+                            moved_in_tasks.append(dict(
+                                task, assigned_to=source['assigned_to'], move_text=move_text(move),
+                                assignee_name=(assignee['display_name'] or assignee['username']) if assignee else ''))
+                        else:
+                            new_tasks_created.append(task)
 
+        if followed or moved_in_tasks:
+            note = tr(f'{len(followed) + len(moved_in_tasks)} 个订单转到了其他地区（任务已跟随 / 已分配给原检验员）',
+                      f'{len(followed) + len(moved_in_tasks)} order line(s) moved region (tasks followed / went to the same inspector)')
+            if not baseline:
+                ok, msg = _send_region_move_email(followed, moved_in_tasks)
+                note += tr('。邮件通知：', '. E-mail: ') + msg
+            flash(note, 'info')
         if date_changes and not baseline:
             ok, msg = _send_date_change_email(date_changes)
             flash(tr(f'{len(date_changes)} 个任务的预计完成日/出货日有变动。邮件通知：{msg}',
@@ -2321,8 +2555,16 @@ def inspect_form(job_key):
     for a in att_rows:
         past_attachments[a['insp_index']].append(a)
 
+    cache_all = load_json(INSPECTIONS_CACHE, {})
+    related_reports = [
+        {'job_key': k, 'region': k.split('|', 1)[0], 'index': i, 'record': r,
+         'report_no': report_number(k, r, i)}
+        for k, records in cache_all.items()
+        if k != job_key and _job_tail(k) == _job_tail(job_key)
+        for i, r in enumerate(records or [])]
     return render_template('inspect.html',
                            job=job_info,
+                           related_reports=related_reports,
                            past_inspections=past,
                            past_attachments=dict(past_attachments),
                            report_emails=report_email_status(job_key),
@@ -2502,8 +2744,9 @@ def submit_inspection(job_key):
     # Mark outstanding_jobs entry as completed
     with db_conn() as conn:
         conn.execute(
-            'UPDATE outstanding_jobs SET completed=1, completed_at=? WHERE job_key=? AND completed=0',
-            (datetime.now().isoformat(), job_key))
+            'UPDATE outstanding_jobs SET completed=1, completed_at=? WHERE completed=0 '
+            "AND substr(job_key, instr(job_key, '|') + 1)=?",
+            (datetime.now().isoformat(), _job_tail(job_key)))
 
     flash(tr('检验报告已保存。', 'Inspection saved.'), 'success')
 
@@ -2611,8 +2854,12 @@ def build_report_pdf(job_key, index, generated_by=''):
 
 @app.route('/inspect/<path:job_key>/report.pdf')
 def inspection_report_pdf(job_key):
-    records = load_json(INSPECTIONS_CACHE, {}).get(job_key, [])
+    cache = load_json(INSPECTIONS_CACHE, {})
+    records = cache.get(job_key, [])
     if not records:
+        other = next((k for k, recs in cache.items() if recs and _job_tail(k) == _job_tail(job_key)), None)
+        if other:   # same PO + item inspected under another region
+            return redirect(url_for('inspection_report_pdf', job_key=other))
         abort(404)
     try:
         index = int(request.args.get('i', len(records) - 1))

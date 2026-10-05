@@ -286,7 +286,12 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
               <span class="badge badge-partially_shipped">{{ tr('部分出货', 'PARTIAL') }}</span>
             {% elif status == 'typo' %}
               <span class="badge badge-typo">&#9888; {{ tr('疑似笔误', 'TYPO?') }}</span>
+            {% elif status == 'moved_in' %}
+              <span class="badge" style="background:#e0e7ff;color:#3730a3;" title="{{ move_notes.get(job_key, '') }}">&#8644; {{ tr('转入', 'MOVED IN') }}</span>
+            {% elif status == 'partially_moved' %}
+              <span class="badge" style="background:#e0e7ff;color:#3730a3;" title="{{ move_notes.get(job_key, '') }}">&#8644; {{ tr('部分转出', 'PART MOVED') }}</span>
             {% endif %}
+            {% if move_notes.get(job_key) %}<div style="font-size:.68rem;color:#4338ca;margin-top:2px;white-space:normal;">{{ move_notes[job_key] }}</div>{% endif %}
             {% if qa_warn %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>{% endif %}
             {% if qa_mismatch %}<span class="badge" style="background:#f59e0b;color:#fff;margin-top:2px" title="{{ tr('Excel 中 QA BRT 已发送=YES，但系统里没有检验报告，请补检验报告', 'Excel says QA BRTs sent = YES but there is no inspection report in the system') }}">&#9888; {{ tr('Excel 已标 YES，系统无报告', 'Excel YES, no report') }}</span>{% endif %}
           </td>

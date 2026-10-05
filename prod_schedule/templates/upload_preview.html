@@ -57,6 +57,10 @@ details.pv summary { cursor:pointer; font-weight:600; }
       <div class="lbl">{{ tr('部分出货（数量减少）', 'Partially shipped (qty down)') }}</div></div>
     <div class="pv-stat pv-date"><div class="num">{{ summary.date_changes|length }}</div>
       <div class="lbl">{{ tr('预计完成日变更', 'Completion date changed') }}</div></div>
+    {% if summary.moves %}
+    <div class="pv-stat" style="border-left:3px solid #6366f1;"><div class="num">{{ summary.moves|length }}</div>
+      <div class="lbl">{{ tr('转区（转到其他地区）', 'Moved to another region') }}</div></div>
+    {% endif %}
     {% if summary.typo %}
     <div class="pv-stat"><div class="num">{{ summary.typo|length }}</div>
       <div class="lbl">{{ tr('疑似笔误', 'Possible typos') }}</div></div>
@@ -105,6 +109,22 @@ details.pv summary { cursor:pointer; font-weight:600; }
     </div>
   {% endmacro %}
 
+  {% if summary.moves %}
+  <details class="pv" open>
+    <summary>{{ tr('转区', 'Moved region') }} ({{ summary.moves|length }})</summary>
+    <p class="muted" style="margin:8px 0 0;">{{ tr('同一 PO + 产品被供应商转到其他地区。整单转区不算出货，任务和检验报告跟随订单；部分转区会为新地区建任务并分配给原检验员。',
+      'Same PO + item moved to another region. A whole move is not counted as shipped — the task and reports follow the order; a partial move gets a new task for the same inspector.') }}</p>
+    <div class="pv-table-wrap">
+    <table class="pv-table" style="margin-top:10px;">
+      <tr><th>{{ tr('订单号', 'Order') }}</th><th>{{ tr('采购单号', 'PO') }}</th><th>{{ tr('物料编码', 'Item Code') }}</th><th>{{ tr('描述', 'Description') }}</th><th>{{ tr('转区', 'Move') }}</th></tr>
+      {% for m in summary.moves %}
+      <tr><td>{{ m.order_number }}</td><td>{{ m.po }}</td><td>{{ m.item_code }}</td><td>{{ m.description }}</td>
+        <td>{{ tr('整单', 'Whole') if m.kind == 'full' else tr('部分', 'Part') }}: {{ m.text }}</td></tr>
+      {% endfor %}
+    </table>
+    </div>
+  </details>
+  {% endif %}
   {% if summary.shipped %}
   <details class="pv">
     <summary>{{ tr('全部出货', 'Fully shipped') }} ({{ summary.shipped|length }})</summary>

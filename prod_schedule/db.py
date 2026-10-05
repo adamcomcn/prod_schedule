@@ -820,6 +820,21 @@ def init_db():
             conn.execute("ALTER TABLE inspection_tasks ADD COLUMN reminder_est TEXT DEFAULT ''")
         except Exception:
             pass
+        # Order lines the supplier moved to another region sheet
+        conn.execute('''CREATE TABLE IF NOT EXISTS region_moves (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            po           TEXT DEFAULT '',
+            item_code    TEXT DEFAULT '',
+            from_sheet   TEXT DEFAULT '',
+            to_sheet     TEXT DEFAULT '',
+            from_before  REAL,
+            from_after   REAL,
+            to_qty       REAL,
+            kind         TEXT DEFAULT '',
+            also_shipped INTEGER DEFAULT 0,
+            week_label   TEXT DEFAULT '',
+            created_at   TEXT DEFAULT (datetime('now'))
+        )''')
         conn.execute('''CREATE TABLE IF NOT EXISTS task_date_changes (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             job_key     TEXT NOT NULL,
