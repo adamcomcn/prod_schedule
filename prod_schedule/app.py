@@ -2572,6 +2572,14 @@ def inspect_form(job_key):
     for a in att_rows:
         past_attachments[a['insp_index']].append(a)
 
+    draft = load_inspection_draft(job_key) if inspect_permission(job_key)[0] else None
+    checklist = job_checklist(job_info.get('Item Code', ''), job_info.get('Item Description', ''),
+                              draft and draft['template_id'], draft and draft['version'])
+    with db_conn() as conn:
+        checklist_photos = defaultdict(list)
+        for a in conn.execute("SELECT id, insp_index, ref FROM inspection_attachments WHERE job_key=? "
+                              "AND evidence_type IN ('checklist_photo', 'product_photo') ORDER BY id", (job_key,)):
+            checklist_photos[(a['insp_index'], a['ref'])].append(a['id'])
     cache_all = load_json(INSPECTIONS_CACHE, {})
     related_reports = [
         {'job_key': k, 'region': k.split('|', 1)[0], 'index': i, 'record': r,
@@ -2581,6 +2589,9 @@ def inspect_form(job_key):
         for i, r in enumerate(records or [])]
     return render_template('inspect.html',
                            job=job_info,
+                           checklist=checklist,
+                           draft=draft,
+                           checklist_photos=checklist_photos,
                            related_reports=related_reports,
                            past_inspections=past,
                            past_attachments=dict(past_attachments),
@@ -2632,6 +2643,31 @@ def submit_inspection(job_key):
         for error in errors:
             flash(error, 'error')
         return redirect(url_for('inspect_form', job_key=job_key))
+
+    # ── Checklist: every question answered, photos where needed ──────────
+    checklist = None
+    with db_conn() as conn:
+        draft = _draft(conn, job_key)
+        draft_files = _draft_files(conn, draft['id']) if draft else []
+    if form.get('checklist_template_id'):
+        checklist = job_checklist('', '', form.get('checklist_template_id', type=int),
+                                  form.get('checklist_version', type=int))
+    elif job_checklist(form.get('item_code', ''), form.get('item_description', '')):
+        flash(tr('这个产品需要填写检查清单', 'This product needs its checklist filled in'), 'error')
+        return redirect(url_for('inspect_form', job_key=job_key))
+    checklist_answers = {}
+    if checklist:
+        try:
+            checklist_answers = json.loads(form.get('checklist_json') or '{}')
+        except json.JSONDecodeError:
+            checklist_answers = {}
+        photo_refs = {f['ref'] for f in draft_files}
+        problems = checklists.answer_problems(checklist['data'], checklist_answers, photo_refs, 'product' in photo_refs)
+        if problems:
+            flash(tr(f'检查清单还有 {len(problems)} 项没有完成，草稿已保存：',
+                     f'{len(problems)} checklist item(s) are not complete; your draft is saved: ')
+                  + '；'.join(checklist_problem_messages(checklist, problems)), 'error')
+            return redirect(url_for('inspect_form', job_key=job_key))
 
     inspection_data = {
         'job_key':           job_key,
@@ -2726,6 +2762,40 @@ def submit_inspection(job_key):
     inspection_data['evidence']    = evidence_results
     inspection_data['file_links']  = all_file_links
     inspection_data['file_names']  = all_file_names
+
+    if checklist:
+        # Draft photos become report attachments (same files, now permanent).
+        photos = defaultdict(list)
+        with db_conn() as conn:
+            for f in draft_files:
+                kind = 'product_photo' if f['ref'] == 'product' else 'checklist_photo'
+                aid = conn.execute(
+                    'INSERT INTO inspection_attachments (job_key, insp_index, evidence_type, original_name, '
+                    'saved_name, file_path, ref) VALUES (?,?,?,?,?,?,?)',
+                    (job_key, insp_index, kind, f['original_name'], f['saved_name'], f['file_path'], f['ref'])
+                ).lastrowid
+                photos[f['ref']].append(aid)
+            if draft:
+                conn.execute('DELETE FROM draft_files WHERE draft_id=?', (draft['id'],))
+                conn.execute('DELETE FROM inspection_drafts WHERE id=?', (draft['id'],))
+        counts, failed = checklists.summarise(checklist['data'], checklist_answers)
+        inspection_data['checklist'] = {
+            'template_id': checklist['template_id'], 'name': checklist['name'],
+            'version': checklist['version'], 'data': checklist['data'],
+            'answers': {qid: {k: a.get(k) for k in ('v', 'occ', 'sup', 'note')}
+                        for qid, a in checklist_answers.items() if isinstance(a, dict)},
+            'photos': dict(photos), 'counts': counts, 'failed': failed,
+            'suggested_result': checklists.suggested_result(checklist['data'], checklist_answers)}
+        if not inspection_data['defects'].strip() and failed:
+            inspection_data['defects'] = '\n'.join(
+                f"[{f['section']} {f['num']}] {f['text']} — {f['value']}"
+                + (f" {f['unit']}" if f['unit'] else '')
+                + (f" ×{f['occurrences']}" if f['occurrences'] else '') + f" → {f['action']}"
+                for f in failed)
+    else:
+        with db_conn() as conn:
+            if draft:
+                conn.execute('DELETE FROM inspection_drafts WHERE id=?', (draft['id'],))
 
     # Save to local cache
     if job_key not in cache:
@@ -4845,6 +4915,171 @@ def _save_product_image(file_obj):
 
 
 # ── Form template management ─────────────────────────────────────────────────
+
+
+
+# ── Checklist on the inspection page: server drafts and per-question photos ──
+# Inspectors answer the checklist and take photos on site (iPad), then finish
+# at a PC: answers, form fields and photos live in a server draft per job and
+# user until the report is submitted.
+
+CHECKLIST_REASONS = {
+    'product_photo': ('缺少产品照片（能看清编号 / 批号）', 'Product photo missing (serial / batch number visible)'),
+    'unanswered': ('未回答', 'Not answered'),
+    'na_not_allowed': ('此项不能选“不适用”', 'N/A is not allowed for this question'),
+    'photo': ('需要照片', 'Photo required'),
+}
+
+
+def job_checklist(item_code, description, template_id=None, version=None):
+    """The checklist for a job: the draft's template/version when given, else
+    the active template for the product type. dict or None."""
+    if not template_id:
+        tpl = checklist_for_product_type(product_type_for(item_code, description))
+        if not tpl:
+            return None
+        template_id, version = tpl['id'], None
+    tpl, ver, data = checklist_version(template_id, version)
+    if not data:
+        return None
+    return {'template_id': tpl['id'], 'name': tpl['name'], 'version': ver['version'], 'data': data}
+
+
+def _draft(conn, job_key, user_id=None):
+    return conn.execute('SELECT * FROM inspection_drafts WHERE job_key=? AND user_id=?',
+                        (job_key, user_id or g.user_id)).fetchone()
+
+
+def _draft_files(conn, draft_id):
+    return conn.execute('SELECT * FROM draft_files WHERE draft_id=? ORDER BY id', (draft_id,)).fetchall()
+
+
+def _draft_file_json(job_key, row):
+    return {'id': row['id'], 'name': row['original_name'], 'ref': row['ref'],
+            'video': _upload_extension(row['original_name']) in {'.mp4', '.mov', '.avi', '.mkv'},
+            'url': url_for('draft_file', job_key=job_key, fid=row['id'])}
+
+
+def load_inspection_draft(job_key):
+    """{'fields', 'answers', 'files': {ref: [...]}, 'template_id', 'version', 'saved_at'} or None."""
+    with db_conn() as conn:
+        draft = _draft(conn, job_key)
+        if not draft:
+            return None
+        files = _draft_files(conn, draft['id'])
+    data = json.loads(draft['data_json'] or '{}')
+    grouped = defaultdict(list)
+    for row in files:
+        grouped[row['ref']].append(_draft_file_json(job_key, row))
+    return {'fields': data.get('fields') or {}, 'answers': data.get('answers') or {}, 'files': dict(grouped),
+            'template_id': draft['template_id'], 'version': draft['version'], 'saved_at': draft['updated_at']}
+
+
+def _ensure_draft(conn, job_key, template_id, version):
+    draft = _draft(conn, job_key)
+    if draft:
+        return draft
+    conn.execute('INSERT INTO inspection_drafts (job_key, user_id, template_id, version, data_json) '
+                 'VALUES (?,?,?,?,?)', (job_key, g.user_id, template_id, version, '{}'))
+    return _draft(conn, job_key)
+
+
+@app.route('/inspect/<path:job_key>/draft', methods=['POST'])
+def inspection_draft_save(job_key):
+    allowed, message = inspect_permission(job_key)
+    if not allowed:
+        return jsonify(ok=False, message=message), 403
+    payload = request.get_json(silent=True) or {}
+    answers = payload.get('answers') if isinstance(payload.get('answers'), dict) else {}
+    fields = payload.get('fields') if isinstance(payload.get('fields'), dict) else {}
+    data = json.dumps({'answers': answers, 'fields': fields}, ensure_ascii=False)
+    if len(data) > 500_000:
+        return jsonify(ok=False, message='Draft too large'), 413
+    with db_conn() as conn:
+        draft = _ensure_draft(conn, job_key, payload.get('template_id'), payload.get('version'))
+        conn.execute("UPDATE inspection_drafts SET data_json=?, updated_at=datetime('now') WHERE id=?",
+                     (data, draft['id']))
+        saved = conn.execute('SELECT updated_at FROM inspection_drafts WHERE id=?', (draft['id'],)).fetchone()[0]
+    return jsonify(ok=True, saved_at=utc_iso(saved))
+
+
+@app.route('/inspect/<path:job_key>/draft/files', methods=['POST'])
+def inspection_draft_upload(job_key):
+    allowed, message = inspect_permission(job_key)
+    if not allowed:
+        return jsonify(ok=False, message=message), 403
+    upload = request.files.get('file')
+    ref = (request.form.get('ref') or '').strip()[:40]
+    if not upload or not upload.filename or not ref:
+        return jsonify(ok=False, message=tr('没有文件', 'No file')), 400
+    if _upload_extension(upload.filename) not in IMAGE_EXTENSIONS | {'.heic', '.mp4', '.mov', '.avi', '.mkv'}:
+        return jsonify(ok=False, message=tr('只能上传照片或视频', 'Photos or videos only')), 400
+    folder = os.path.join(UPLOAD_DIR, hashlib.sha256(job_key.encode('utf-8')).hexdigest(), 'drafts')
+    os.makedirs(folder, exist_ok=True)
+    original, saved = _save_uploaded_file(upload, folder, IMAGE_EXTENSIONS | {'.heic', '.mp4', '.mov', '.avi', '.mkv'})
+    with db_conn() as conn:
+        draft = _ensure_draft(conn, job_key, request.form.get('template_id', type=int),
+                              request.form.get('version', type=int))
+        fid = conn.execute('INSERT INTO draft_files (draft_id, ref, original_name, saved_name, file_path) '
+                           'VALUES (?,?,?,?,?)', (draft['id'], ref, original, saved,
+                                                  os.path.join(folder, saved))).lastrowid
+        conn.execute("UPDATE inspection_drafts SET updated_at=datetime('now') WHERE id=?", (draft['id'],))
+        row = conn.execute('SELECT * FROM draft_files WHERE id=?', (fid,)).fetchone()
+    return jsonify(ok=True, file=_draft_file_json(job_key, row))
+
+
+def _owned_draft_file(conn, job_key, fid):
+    return conn.execute('SELECT f.*, d.user_id FROM draft_files f JOIN inspection_drafts d ON d.id=f.draft_id '
+                        'WHERE f.id=? AND d.job_key=?', (fid, job_key)).fetchone()
+
+
+@app.route('/inspect/<path:job_key>/draft/files/<int:fid>')
+def draft_file(job_key, fid):
+    with db_conn() as conn:
+        row = _owned_draft_file(conn, job_key, fid)
+    if not row or (row['user_id'] != g.user_id and not g.can_review) or not os.path.exists(row['file_path']):
+        abort(404)
+    return send_from_directory(os.path.dirname(row['file_path']), os.path.basename(row['file_path']),
+                               download_name=row['original_name'])
+
+
+@app.route('/inspect/<path:job_key>/draft/files/<int:fid>/delete', methods=['POST'])
+def draft_file_delete(job_key, fid):
+    with db_conn() as conn:
+        row = _owned_draft_file(conn, job_key, fid)
+        if not row or row['user_id'] != g.user_id:
+            return jsonify(ok=False), 404
+        conn.execute('DELETE FROM draft_files WHERE id=?', (fid,))
+    _remove_quietly(row['file_path'])
+    return jsonify(ok=True)
+
+
+@app.route('/inspect/<path:job_key>/draft/discard', methods=['POST'])
+def inspection_draft_discard(job_key):
+    with db_conn() as conn:
+        draft = _draft(conn, job_key)
+        if draft:
+            for row in _draft_files(conn, draft['id']):
+                _remove_quietly(row['file_path'])
+            conn.execute('DELETE FROM draft_files WHERE draft_id=?', (draft['id'],))
+            conn.execute('DELETE FROM inspection_drafts WHERE id=?', (draft['id'],))
+    flash(tr('草稿已清除', 'Draft discarded'), 'info')
+    return redirect(url_for('inspect_form', job_key=job_key))
+
+
+def checklist_problem_messages(checklist, problems, limit=6):
+    """Readable lines for the first few blocking problems."""
+    names = {}
+    for s in checklist['data']['sections']:
+        for n, q in enumerate(s['questions'], 1):
+            names[q['id']] = f"{s.get('name_zh') or s['name'] if current_lang() == 'zh' else s['name']} {n}"
+    lines = []
+    for ref, reason in problems[:limit]:
+        zh, en = CHECKLIST_REASONS[reason]
+        lines.append(tr(zh, en) if ref == 'product' else f'{names.get(ref, ref)}: {tr(zh, en)}')
+    if len(problems) > limit:
+        lines.append(tr(f'还有 {len(problems) - limit} 项', f'{len(problems) - limit} more'))
+    return lines
 
 
 # ── Inspection checklists (templates per product type) ──────────────────────

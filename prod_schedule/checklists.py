@@ -225,3 +225,53 @@ def evaluate(question, answer):
 
 def question_count(template):
     return sum(len(s['questions']) for s in template.get('sections', []))
+
+
+def answer_problems(template, answers, photo_refs, has_product_photo):
+    """Everything that still blocks submission: [(ref, reason)] where reason is
+    'product_photo' | 'unanswered' | 'na_not_allowed' | 'photo'.
+    photo_refs: question ids that have at least one photo or video."""
+    problems = []
+    if template.get('product_photo') and not has_product_photo:
+        problems.append(('product', 'product_photo'))
+    for s in template.get('sections', []):
+        for q in s['questions']:
+            answer = answers.get(q['id']) or {}
+            result = evaluate(q, answer.get('v'))
+            if not result:
+                problems.append((q['id'], 'unanswered'))
+            elif result == 'na':
+                if not (q.get('optional') or s.get('optional')):
+                    problems.append((q['id'], 'na_not_allowed'))
+            elif (result == 'fail' or q.get('photo') == 'always') and q['id'] not in photo_refs:
+                problems.append((q['id'], 'photo'))
+    return problems
+
+
+def summarise(template, answers):
+    """(counts, failed items) for a filled-in checklist."""
+    counts = {'ok': 0, 'fail': 0, 'na': 0, 'total': 0}
+    failed = []
+    for s in template.get('sections', []):
+        for n, q in enumerate(s['questions'], 1):
+            answer = answers.get(q['id']) or {}
+            result = evaluate(q, answer.get('v'))
+            counts['total'] += 1
+            if result in counts:
+                counts[result] += 1
+            if result == 'fail':
+                failed.append({'id': q['id'], 'section': s['name'], 'section_zh': s.get('name_zh', ''), 'num': n,
+                               'text': q['text'], 'text_zh': q.get('text_zh', ''), 'value': answer.get('v'),
+                               'unit': q.get('unit', ''), 'action': q.get('action', ''),
+                               'action_zh': q.get('action_zh', ''), 'occurrences': answer.get('occ', ''),
+                               'supervisor': bool(answer.get('sup')), 'note': answer.get('note', '')})
+    return counts, failed
+
+
+def suggested_result(template, answers):
+    """'Fail' when a failed item's action includes Reject, 'Partial Pass' for
+    other failed items (rework / clean / re-apply), otherwise 'Pass'."""
+    _counts, failed = summarise(template, answers)
+    if any('reject' in (f['action'] or '').lower() for f in failed):
+        return 'Fail'
+    return 'Partial Pass' if failed else 'Pass'

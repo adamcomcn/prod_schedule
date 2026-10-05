@@ -820,6 +820,31 @@ def init_db():
             conn.execute("ALTER TABLE inspection_tasks ADD COLUMN reminder_est TEXT DEFAULT ''")
         except Exception:
             pass
+        # Unsubmitted inspections (checklist answers, form fields, photos)
+        conn.execute('''CREATE TABLE IF NOT EXISTS inspection_drafts (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_key     TEXT NOT NULL,
+            user_id     INTEGER NOT NULL,
+            template_id INTEGER,
+            version     INTEGER,
+            data_json   TEXT DEFAULT '{}',
+            created_at  TEXT DEFAULT (datetime('now')),
+            updated_at  TEXT DEFAULT (datetime('now')),
+            UNIQUE (job_key, user_id)
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS draft_files (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            draft_id      INTEGER NOT NULL,
+            ref           TEXT NOT NULL,
+            original_name TEXT DEFAULT '',
+            saved_name    TEXT DEFAULT '',
+            file_path     TEXT DEFAULT '',
+            created_at    TEXT DEFAULT (datetime('now'))
+        )''')
+        try:
+            conn.execute("ALTER TABLE inspection_attachments ADD COLUMN ref TEXT DEFAULT ''")
+        except Exception:
+            pass
         # Inspection checklist templates; every edit is a new version and a
         # report keeps the version it was filled in with.
         conn.execute('''CREATE TABLE IF NOT EXISTS checklist_templates (

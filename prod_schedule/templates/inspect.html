@@ -2,6 +2,57 @@
 {% block title %}{{ tr('检验', 'Inspection') }} — {{ job.get('Order Number', '') }}{% endblock %}
 
 {% block extra_style %}
+/* ── checklist ── */
+.ck-steps { position:sticky; top:0; z-index:25; display:flex; gap:6px; align-items:center; flex-wrap:wrap;
+            background:#1a3a5c; color:#fff; border-radius:10px; padding:8px 10px; margin-bottom:12px; font-size:.8rem; }
+.ck-steps a { color:#fff; background:rgba(255,255,255,.12); padding:5px 10px; border-radius:16px; text-decoration:none; white-space:nowrap; }
+.ck-steps a:hover { background:rgba(255,255,255,.25); }
+.ck-steps .ck-right { margin-left:auto; display:flex; gap:8px; align-items:center; }
+.ck-steps button { background:#fff; color:#1a3a5c; border:0; border-radius:6px; padding:5px 10px; font-size:.78rem; cursor:pointer; }
+#ck-saved { opacity:.85; white-space:nowrap; }
+.ck-card, .ck-sec { border:1px solid #dbe3ee; border-radius:10px; margin-bottom:10px; background:#fff; }
+.ck-card { padding:10px 12px; }
+.ck-ptitle { font-weight:600; color:#1a3a5c; }
+.ck-shead { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 10px; background:#f8fafc; border-radius:10px 10px 0 0; }
+.ck-stitle { background:none; border:0; font-weight:700; color:#1a3a5c; font-size:.92rem; cursor:pointer; padding:4px 0; text-align:left; flex:1; min-width:160px; }
+.ck-sprog { font-size:.75rem; color:#6b7280; white-space:nowrap; }
+.ck-sprog.good { color:#059669; } .ck-sprog.bad { color:#dc2626; font-weight:600; }
+.ck-quick { font-size:.72rem; padding:4px 8px; border:1px solid #d0d5dd; background:#fff; border-radius:6px; cursor:pointer; }
+.ck-q { padding:10px 12px; border-top:1px solid #f1f5f9; }
+.ck-q.ck-fail { background:#fef2f2; } .ck-q.ck-ok { background:#fbfefc; }
+.ck-q.ck-missing, .ck-card.ck-missing { outline:2px solid #f59e0b; outline-offset:-2px; background:#fffbeb; }
+.ck-qhead { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.ck-text { flex:1 1 320px; font-size:.86rem; line-height:1.45; }
+.ck-n { color:#9ca3af; margin-right:4px; }
+.ck-sub { color:#6b7280; font-size:.76rem; margin-top:2px; }
+.ck-tag { display:inline-block; font-size:.68rem; background:#eef2ff; color:#3730a3; border-radius:10px; padding:1px 7px; margin-left:6px; }
+.ck-ctrl { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.ck-btn { min-width:58px; height:42px; border:1px solid #d0d5dd; background:#fff; border-radius:8px; font-size:.86rem; cursor:pointer; padding:0 10px; }
+.ck-btn.on.ok { background:#d1fae5; border-color:#10b981; color:#065f46; font-weight:700; }
+.ck-btn.on.fail { background:#fee2e2; border-color:#ef4444; color:#991b1b; font-weight:700; }
+.ck-btn.on.na { background:#e5e7eb; border-color:#9ca3af; color:#374151; font-weight:700; }
+.ck-num { width:100px !important; height:42px; font-size:1rem; }
+.ck-unit { color:#6b7280; font-size:.8rem; }
+.ck-badge { font-size:.75rem; font-weight:700; padding:2px 8px; border-radius:10px; }
+.ck-badge-ok { background:#d1fae5; color:#065f46; } .ck-badge-fail { background:#fee2e2; color:#991b1b; }
+.ck-failbox { margin-top:8px; background:#fff; border:1px solid #fecaca; border-radius:8px; padding:8px 10px; font-size:.8rem; }
+.ck-action { color:#b91c1c; font-weight:600; margin-bottom:6px; }
+.ck-failrow { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:6px; }
+.ck-occ { width:80px !important; display:inline-block; }
+.ck-sup input { width:auto; }
+.ck-photos { margin-top:8px; }
+.ck-hint { font-size:.75rem; color:#92400e; margin-bottom:4px; }
+.ck-thumbs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
+.ck-thumb { position:relative; width:72px; height:72px; border-radius:6px; overflow:hidden; background:#f3f4f6; }
+.ck-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.ck-video { width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:1.6rem; }
+.ck-del { position:absolute; top:2px; right:2px; background:rgba(0,0,0,.55); color:#fff; border:0; border-radius:50%; width:20px; height:20px; font-size:.65rem; cursor:pointer; }
+.ck-prow { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.ck-pbtn { border:1px solid #93c5fd; background:#eff6ff; color:#1e40af; border-radius:8px; padding:8px 12px; font-size:.82rem; cursor:pointer; }
+.ck-uploading { font-size:.75rem; color:#92400e; }
+#ck-suggest { font-size:.78rem; color:#4338ca; margin-top:4px; }
+@media (max-width: 760px) { .ck-btn { min-width:52px; } .ck-steps .ck-right { margin-left:0; } }
+
 .inspect-layout { display:grid; grid-template-columns:1fr 360px; gap:20px; align-items:start; }
 @media(max-width:900px){ .inspect-layout { grid-template-columns:1fr; } }
 
@@ -210,9 +261,22 @@ input[name=result] { display:none; }
               id="inspect-form"
               data-max-bytes="{{ config['MAX_CONTENT_LENGTH'] or 0 }}">
 
+          {% if checklist %}
+          <div class="ck-steps">
+            <a href="#sec-info">1 {{ tr('基本信息', 'Info') }}</a>
+            <a href="#sec-checklist">2 {{ tr('检查清单', 'Checklist') }} <span id="ck-progress"></span></a>
+            <a href="#sec-evidence">3 {{ tr('证据文件', 'Files') }}</a>
+            <a href="#sec-result">4 {{ tr('结果', 'Result') }}</a>
+            <span class="ck-right">
+              <span id="ck-saved">{% if draft %}{{ tr('草稿已保存', 'Draft saved') }} {{ draft.saved_at|localtime }}{% endif %}</span>
+              <button type="button" onclick="ckSaveNow()">&#128190; {{ tr('保存草稿', 'Save draft') }}</button>
+            </span>
+          </div>
+          {% endif %}
           <div id="draft-note" style="display:none; background:#fffbeb; border:1px solid #fcd34d; color:#92400e;
                border-radius:8px; padding:8px 12px; margin-bottom:10px; font-size:.8rem;">
-            &#128190; {{ tr('已恢复上次未提交的草稿（照片和文件需要重新选择）。', 'Restored your unsent draft (photos and files must be chosen again).') }}
+            &#128190; {% if draft %}{{ tr('已恢复服务器上的草稿（包括检查清单和照片）。证据文件需要重新选择。', 'Restored your saved draft (checklist and photos included). Evidence files must be chosen again.') }}
+            {% else %}{{ tr('已恢复上次未提交的草稿（照片和文件需要重新选择）。', 'Restored your unsent draft (photos and files must be chosen again).') }}{% endif %}
           </div>
           <input type="hidden" name="region"           value="{{ job.get('region', '') }}">
           <input type="hidden" name="order_number"     value="{{ job.get('Order Number', '') }}">
@@ -222,7 +286,7 @@ input[name=result] { display:none; }
           <input type="hidden" name="quantity_ordered" value="{{ job.get('Quantity', '') }}">
 
           <!-- Inspector & Date -->
-          <div class="row2">
+          <div class="row2" id="sec-info" style="scroll-margin-top:70px;">
             <div class="form-group">
               <label>{{ tr('检验员', 'Inspector Name') }} *
                 {% if matched_category %}
@@ -274,7 +338,58 @@ input[name=result] { display:none; }
             </div>
           </div>
 
+
+          {% if checklist %}
+          {% set ck = checklist.data %}
+          <input type="hidden" name="checklist_template_id" value="{{ checklist.template_id }}">
+          <input type="hidden" name="checklist_version" value="{{ checklist.version }}">
+          <input type="hidden" name="checklist_json" id="checklist-json">
+          <div id="sec-checklist" style="scroll-margin-top:70px;">
+            <div class="section-title" style="margin-top:16px;">
+              &#9989; {{ tr('现场检查清单', 'Site checklist') }}
+              <span class="ev-kind">{{ checklist.name }} · v{{ checklist.version }}</span>
+              <span style="font-size:.75rem; font-weight:400; color:#6b7280; margin-left:8px;">
+                {{ tr('逐项检查；不合格项需要拍照。答案和照片会自动保存到服务器，可以回到电脑上继续。',
+                      'Answer every question; failed items need a photo. Answers and photos are saved to the server automatically, so you can finish on a PC.') }}
+              </span>
+            </div>
+            <div id="checklist-app"></div>
+          </div>
+          <script id="checklist-config" type="application/json">{{ {
+            'data': ck, 'template_id': checklist.template_id, 'version': checklist.version,
+            'answers': (draft.answers if draft else {}), 'files': (draft.files if draft else {}),
+            'lang': current_lang(), 'csrf': csrf_token(),
+            'urls': {'save': url_for('inspection_draft_save', job_key=job.job_key),
+                     'upload': url_for('inspection_draft_upload', job_key=job.job_key),
+                     'delete': url_for('draft_file_delete', job_key=job.job_key, fid=0)},
+            'texts': {
+              'yes': tr('是', 'Yes'), 'no': tr('否', 'No'), 'good': tr('好', 'Good'), 'fair': tr('一般', 'Fair'),
+              'poor': tr('差', 'Poor'), 'na': tr('不适用', 'N/A'), 'ok': tr('合格', 'OK'), 'fail': tr('不合格', 'fail'),
+              'action': tr('处理', 'Action'), 'occurrences': tr('发现数量', 'Occurrences'),
+              'supervisor': tr('已告知主管', 'Supervisor informed'), 'note': tr('说明（选填）', 'Note (optional)'),
+              'take_photo': tr('拍照', 'Photo'), 'record_video': tr('录像', 'Video'), 'from_gallery': tr('相册 / 文件', 'Gallery / files'),
+              'uploading': tr('上传中…', 'Uploading…'), 'upload_failed': tr('上传失败，请重试。', 'Upload failed, please try again.'),
+              'delete': tr('删除', 'Delete'), 'delete_photo': tr('删除这张照片 / 视频？', 'Delete this photo / video?'),
+              'photo_required': tr('必须拍照', 'Photo required'),
+              'fail_photo_hint': tr('不合格项：请拍摄缺陷部位的照片或视频（至少 1 张）', 'Failed item: photograph or film the defect (at least 1)'),
+              'photo_hint': tr('此项必须拍照（至少 1 张）', 'This question needs a photo (at least 1)'),
+              'product_photo': tr('产品照片（必需）', 'Product photo (required)'),
+              'product_photo_hint': tr('请拍清楚产品上的编号 / 批号 / 铸造标识', 'Make sure the serial / batch number or cast marking is readable'),
+              'product_photo_missing': tr('缺少产品照片（能看清编号 / 批号）', 'Product photo missing (serial / batch number visible)'),
+              'if_applicable': tr('如适用', 'If applicable'), 'rest_ok': tr('其余全部合格', 'Rest all OK'),
+              'section_na': tr('本节不适用', 'Section N/A'),
+              'confirm_section_na': tr('把这一节所有检查项标为“不适用”？', 'Mark every question in this section N/A?'),
+              'measure_needed': tr('测量值（如涂层厚度）需要逐个填写实际数值。', 'Measurements (e.g. coating thickness) need the actual value entered.'),
+              'unsaved': tr('未保存…', 'Not saved yet…'), 'saved': tr('草稿已保存', 'Draft saved'),
+              'saved_now': tr('草稿已保存', 'Draft saved'), 'save_failed': tr('保存失败，稍后自动重试', 'Save failed, will retry'),
+              'unanswered': tr('未回答', 'not answered'), 'photo_needed': tr('需要照片', 'photo needed'),
+              'wait_uploads': tr('照片还在上传，请稍等。', 'Photos are still uploading, please wait.'),
+              'incomplete': tr('检查清单还有 {n} 项没有完成：', '{n} checklist item(s) are not complete:'),
+            }} | tojson }}</script>
+          {% endif %}
+
           <!-- Evidence uploads per type -->
+          <div id="sec-evidence" style="scroll-margin-top:70px;"></div>
           {% if not evidence_reqs %}
           <div class="ev-unconfigured">
             &#9888; {{ tr('该产品尚未配置所需证据，请按检验主管要求上传相关文件，并在备注中说明。',
@@ -389,7 +504,7 @@ input[name=result] { display:none; }
           {% endif %}
 
           <!-- Overall Inspection Result -->
-          <div class="form-group">
+          <div class="form-group" id="sec-result" style="scroll-margin-top:70px;">
             <label>{{ tr('总体检验结果', 'Overall Inspection Result') }} *</label>
             <input type="hidden" name="result" id="result-input" required>
             <div class="result-group">
@@ -400,6 +515,7 @@ input[name=result] { display:none; }
               <button type="button" class="result-btn" data-val="Partial Pass"
                       onclick="setResult('Partial Pass', this)">&#9888; {{ tr('部分合格', 'Partial Pass') }}</button>
             </div>
+            {% if checklist %}<div id="ck-suggest"></div>{% endif %}
           </div>
 
           <!-- Defect codes -->
@@ -623,7 +739,7 @@ input[name=result] { display:none; }
           {# Attachment links from DB #}
           {% if past_attachments.get(pidx) %}
           <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
-            {% for att in past_attachments[pidx] %}
+            {% for att in past_attachments[pidx] if att.evidence_type not in ['checklist_photo', 'product_photo'] %}
             <a href="{{ url_for('serve_attachment', aid=att.id) }}"
                style="font-size:.73rem; padding:2px 7px; border:1px solid #d0d5dd;
                       border-radius:4px; color:#1a6fc4; text-decoration:none;">
@@ -648,6 +764,38 @@ input[name=result] { display:none; }
           {% if p.notes %}
           <div style="margin-top:4px; color:#374151">{{ tr('备注', 'Notes') }}: {{ p.notes }}</div>
           {% endif %}
+          {% if p.checklist %}
+          {% set c = p.checklist %}
+          <details style="margin-top:6px; border:1px solid #dbe3ee; border-radius:8px; padding:6px 10px; background:#f8fafc;"
+                   {% if c.failed %}open{% endif %}>
+            <summary style="cursor:pointer; font-size:.8rem; font-weight:600; color:#1a3a5c;">
+              &#9989; {{ tr('检查清单', 'Checklist') }} {{ c.name }} v{{ c.version }} —
+              {{ tr(c.counts.total ~ ' 项：合格 ' ~ c.counts.ok ~ '，不合格 ' ~ c.counts.fail ~ '，不适用 ' ~ c.counts.na,
+                    c.counts.total ~ ' items: ' ~ c.counts.ok ~ ' OK, ' ~ c.counts.fail ~ ' failed, ' ~ c.counts.na ~ ' N/A') }}
+            </summary>
+            {% set product_photos = checklist_photos.get((pidx, 'product'), []) %}
+            {% if product_photos %}
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; align-items:center; font-size:.75rem; color:#6b7280;">
+              {{ tr('产品照片', 'Product photo') }}:
+              {% for aid in product_photos %}<a href="{{ url_for('serve_attachment', aid=aid) }}" target="_blank"><img src="{{ url_for('serve_attachment', aid=aid) }}" alt="" loading="lazy" style="width:56px; height:56px; object-fit:cover; border-radius:6px;"></a>{% endfor %}
+            </div>
+            {% endif %}
+            {% for f in c.failed %}
+            <div style="margin-top:6px; padding-top:6px; border-top:1px solid #e5e7eb; font-size:.78rem;">
+              <div style="color:#b91c1c; font-weight:600;">&#10007; {{ (f.section_zh or f.section) if current_lang() == 'zh' else f.section }} {{ f.num }}.
+                {{ (f.text_zh or f.text) if current_lang() == 'zh' else f.text }}</div>
+              <div style="color:#374151;">{{ tr('结果', 'Answer') }}: {{ f.value }} {{ f.unit }}
+                {% if f.occurrences %} · {{ tr('数量', 'Count') }} {{ f.occurrences }}{% endif %}
+                · {{ tr('处理', 'Action') }}: {{ (f.action_zh or f.action) if current_lang() == 'zh' else f.action }}
+                {% if f.supervisor %} · {{ tr('已告知主管', 'supervisor informed') }}{% endif %}
+                {% if f.note %} · {{ f.note }}{% endif %}</div>
+              <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">
+                {% for aid in checklist_photos.get((pidx, f.id), []) %}<a href="{{ url_for('serve_attachment', aid=aid) }}" target="_blank"><img src="{{ url_for('serve_attachment', aid=aid) }}" alt="" loading="lazy" style="width:56px; height:56px; object-fit:cover; border-radius:6px;" onerror="this.replaceWith(document.createTextNode('🎥'))"></a>{% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </details>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
@@ -665,6 +813,18 @@ function setResult(val, btn) {
   const cls = val==='Pass' ? 'selected-pass' : val==='Fail' ? 'selected-fail' : 'selected-partial';
   btn.className = 'result-btn ' + cls;
 }
+let resultPickedByHand = false;
+document.addEventListener('click', function (e) {
+  if (e.isTrusted && e.target.closest && e.target.closest('.result-btn')) resultPickedByHand = true;
+});
+const SUGGEST_LABELS = {{ {'Pass': tr('合格', 'Pass'), 'Fail': tr('不合格', 'Fail'), 'Partial Pass': tr('部分合格', 'Partial Pass')}|tojson }};
+window.ckSuggest = function (value) {
+  const hint = document.getElementById('ck-suggest');
+  if (hint) hint.textContent = value ? {{ tr('根据检查清单建议：', 'Suggested from the checklist: ')|tojson }} + SUGGEST_LABELS[value] : '';
+  if (!value || resultPickedByHand) return;
+  const btn = document.querySelector('.result-btn[data-val="' + value + '"]');
+  if (btn) setResult(value, btn);
+};
 function clearAll() {
   document.getElementById('result-input').value = '';
   document.querySelectorAll('.result-btn').forEach(b => b.className = 'result-btn');
@@ -861,21 +1021,29 @@ function missingEvidence() {
 const inspectForm = document.getElementById('inspect-form');
 const DRAFT_KEY = 'inspectDraft:' + {{ job.job_key|tojson }};
 const REPORT_COUNT = {{ past_inspections|length }};
-function saveDraft() {
-  if (!inspectForm) return;
+function formSnapshot() {
   const data = {};
+  if (!inspectForm) return data;
   inspectForm.querySelectorAll('input, select, textarea').forEach(el => {
-    if (!el.name || el.type === 'file' || el.type === 'hidden' && el.name !== 'result'
+    if (!el.name || el.type === 'file' || el.closest('#checklist-app') || el.type === 'hidden' && el.name !== 'result'
         && !el.name.startsWith('ev_result_') && !el.name.startsWith('ev_check_')) return;
     if (el.type === 'checkbox') { (data[el.name] = data[el.name] || []); if (el.checked) data[el.name].push(el.value); }
     else if (!el.readOnly) data[el.name] = el.value;
   });
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({reports: REPORT_COUNT, data})); } catch (e) {}
+  return data;
+}
+window.formSnapshot = formSnapshot;
+function saveDraft() {
+  if (!inspectForm) return;
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({reports: REPORT_COUNT, data: formSnapshot()})); } catch (e) {}
+  if (window.ckChanged) window.ckChanged();      // checklist pages also keep the draft on the server
 }
 function restoreDraft() {
   if (!inspectForm) return;
   let draft;
   try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) { draft = null; }
+  const serverFields = {{ (draft.fields if draft else none)|tojson }};
+  if (serverFields && Object.keys(serverFields).length) draft = {reports: REPORT_COUNT, data: serverFields};
   if (!draft) return;
   // A report was submitted after this draft was saved: the draft is done.
   if (draft.reports !== REPORT_COUNT) { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} return; }
@@ -962,6 +1130,10 @@ function uploadWithProgress(form, btn) {
 }
 
 if (inspectForm) inspectForm.addEventListener('submit', function (e) {
+  if (window.ckCheck && !window.ckCheck()) {
+    e.preventDefault();
+    return;
+  }
   if (evBusy()) {
     e.preventDefault();
     alert({{ tr('照片还在压缩中，请稍等几秒再提交。', 'Photos are still being compressed. Please wait a few seconds.')|tojson }});
@@ -1011,4 +1183,5 @@ if (inspectForm) inspectForm.addEventListener('submit', function (e) {
     .catch(upload);   // network hiccup: let the server decide (it re-checks the permission)
 });
 </script>
+{% if checklist and can_inspect %}<script src="{{ url_for('static', filename='checklist.js') }}"></script>{% endif %}
 {% endblock %}
