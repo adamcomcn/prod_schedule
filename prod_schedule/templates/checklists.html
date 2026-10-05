@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('检查清单', 'Checklists') }}{% endblock %}
+
+{% block extra_style %}
+.cl-table { width:100%; border-collapse:collapse; font-size:.85rem; }
+.cl-table th { text-align:left; background:#f8fafc; padding:8px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap; }
+.cl-table td { padding:9px 10px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+.cl-type { display:inline-block; background:#eef2ff; color:#3730a3; border-radius:10px; padding:1px 8px; font-size:.72rem; margin:1px 2px 1px 0; }
+@media (max-width: 760px) {
+  .cl-table thead { display:none; }
+  .cl-table, .cl-table tbody, .cl-table tr, .cl-table td { display:block; }
+  .cl-table tr { padding:10px 0; border-bottom:1px solid #e5e7eb; }
+  .cl-table td { border:0; padding:2px 0; }
+}
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1100px; margin:0 auto;">
+  <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c; margin-bottom:6px;">{{ tr('检查清单', 'Inspection checklists') }}</h1>
+  <p style="font-size:.85rem; color:#6b7280; margin-bottom:16px;">
+    {{ tr('每个产品类别一份检查清单，检验员在检验页面逐项填写。修改后会保存为新版本，已提交的报告保留原来的版本。',
+          'One checklist per product type; inspectors fill it in on the inspection page. Every edit is saved as a new version, and submitted reports keep the version they used.') }}
+  </p>
+
+  <div class="card">
+    {% if templates %}
+    <div style="overflow-x:auto;">
+    <table class="cl-table">
+      <thead><tr>
+        <th>{{ tr('名称', 'Name') }}</th><th>{{ tr('适用产品类别', 'Product types') }}</th>
+        <th>{{ tr('检查项', 'Questions') }}</th><th>{{ tr('版本', 'Version') }}</th>
+        <th>{{ tr('状态', 'Status') }}</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for t in templates %}
+      <tr>
+        <td><strong>{{ t.name }}</strong></td>
+        <td>{% for n in t.type_names %}<span class="cl-type">{{ n }}</span>{% else %}<span style="color:#b45309; font-size:.8rem;">{{ tr('未设置（不会出现在检验页面）', 'Not set (not shown to inspectors)') }}</span>{% endfor %}</td>
+        <td>{{ t.questions }}</td>
+        <td>v{{ t.current_version }} · <span style="color:#6b7280;">{{ t.updated_at|localtime }}</span></td>
+        <td>{% if t.active %}<span style="color:#059669;">{{ tr('启用', 'Active') }}</span>{% else %}<span style="color:#9ca3af;">{{ tr('停用', 'Inactive') }}</span>{% endif %}</td>
+        <td style="white-space:nowrap;">
+          <a class="btn btn-primary btn-sm" href="{{ url_for('checklist_edit', template_id=t.id) }}">{{ tr('编辑', 'Edit') }}</a>
+          <a class="btn btn-outline btn-sm" href="{{ url_for('checklist_preview', template_id=t.id) }}">{{ tr('预览', 'Preview') }}</a>
+          <a class="btn btn-outline btn-sm" href="{{ url_for('checklist_export', template_id=t.id) }}">Excel</a>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color:#9ca3af; font-size:.9rem;">{{ tr('还没有检查清单。从下面导入一个 Excel 检查清单开始。', 'No checklists yet. Import an Excel checklist below to start.') }}</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div style="font-weight:600; margin-bottom:6px;">&#11014; {{ tr('从 Excel 导入', 'Import from Excel') }}</div>
+    <p style="font-size:.8rem; color:#6b7280; margin-bottom:10px;">
+      {{ tr('支持 Daemco 检查清单格式（PART / Q. / INSPECTION GUIDELINE / IF / WHAT TO DO?）。可以另加“中文”列：PART 中文、INSPECTION GUIDELINE 中文、WHAT TO DO? 中文。导入后可以在网页上修改。',
+            'Daemco checklist layout (PART / Q. / INSPECTION GUIDELINE / IF / WHAT TO DO?). Optional Chinese columns: PART 中文, INSPECTION GUIDELINE 中文, WHAT TO DO? 中文. Everything can be edited on the website after the import.') }}
+    </p>
+    <form method="POST" action="{{ url_for('checklist_import') }}" enctype="multipart/form-data"
+          style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input type="file" name="file" accept=".xlsx" required style="width:auto;">
+      <select name="target" style="width:auto;">
+        <option value="new">{{ tr('作为新的检查清单', 'As a new checklist') }}</option>
+        {% for t in templates %}<option value="{{ t.id }}">{{ tr('作为新版本：', 'New version of: ') }}{{ t.name }}</option>{% endfor %}
+      </select>
+      <input type="text" name="name" placeholder="{{ tr('名称（新清单，可留空）', 'Name (new checklist, optional)') }}" style="width:auto; min-width:220px;">
+      <button type="submit" class="btn btn-primary btn-sm">{{ tr('导入', 'Import') }}</button>
+    </form>
+  </div>
+</div>
+</div>
+{% endblock %}

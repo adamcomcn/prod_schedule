@@ -820,6 +820,27 @@ def init_db():
             conn.execute("ALTER TABLE inspection_tasks ADD COLUMN reminder_est TEXT DEFAULT ''")
         except Exception:
             pass
+        # Inspection checklist templates; every edit is a new version and a
+        # report keeps the version it was filled in with.
+        conn.execute('''CREATE TABLE IF NOT EXISTS checklist_templates (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            product_types   TEXT DEFAULT '',
+            active          INTEGER DEFAULT 1,
+            current_version INTEGER DEFAULT 0,
+            created_at      TEXT DEFAULT (datetime('now')),
+            updated_at      TEXT DEFAULT (datetime('now'))
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS checklist_versions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_id INTEGER NOT NULL,
+            version     INTEGER NOT NULL,
+            data_json   TEXT NOT NULL,
+            note        TEXT DEFAULT '',
+            created_by  TEXT DEFAULT '',
+            created_at  TEXT DEFAULT (datetime('now')),
+            UNIQUE (template_id, version)
+        )''')
         # Order lines the supplier moved to another region sheet
         conn.execute('''CREATE TABLE IF NOT EXISTS region_moves (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,

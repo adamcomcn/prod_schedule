@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('编辑检查清单', 'Edit checklist') }} — {{ tpl.name }}{% endblock %}
+
+{% block extra_style %}
+.ed-sec { border:1px solid #dbe3ee; border-radius:10px; margin-bottom:14px; background:#fff; }
+.ed-sec-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:10px 12px; background:#f8fafc; border-bottom:1px solid #e5e7eb; border-radius:10px 10px 0 0; }
+.ed-q { display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:8px; padding:10px 12px; border-top:1px solid #f1f5f9; }
+.ed-q:first-child { border-top:0; }
+.ed-num { color:#9ca3af; font-size:.8rem; padding-top:8px; }
+.ed-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:6px; margin-top:6px; }
+.ed-grid label, .ed-small { font-size:.72rem; color:#6b7280; display:block; }
+.ed-tools { display:flex; flex-direction:column; gap:4px; }
+.ed-tools button, .ed-sec-head button { padding:3px 8px; font-size:.75rem; }
+.ed-check { display:flex; gap:6px; align-items:center; font-size:.8rem; white-space:nowrap; }
+.ed-check input { width:auto; }
+.ed-bar { position:sticky; top:0; z-index:20; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:10px 14px; margin-bottom:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.type-chip { display:inline-flex; gap:5px; align-items:center; border:1px solid #d0d5dd; border-radius:16px; padding:3px 10px; font-size:.78rem; margin:2px; }
+.type-chip input { width:auto; }
+@media (max-width: 760px) { .ed-q { grid-template-columns:minmax(0,1fr); } .ed-num { display:none; } .ed-tools { flex-direction:row; } }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1100px; margin:0 auto;">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+    <h1 style="font-size:1.3rem; font-weight:700; color:#1a3a5c;">{{ tr('编辑检查清单', 'Edit checklist') }}</h1>
+    <div style="display:flex; gap:8px;">
+      <a class="btn btn-outline btn-sm" href="{{ url_for('checklist_preview', template_id=tpl.id) }}">{{ tr('预览', 'Preview') }}</a>
+      <a class="btn btn-outline btn-sm" href="{{ url_for('checklist_templates_page') }}">{{ tr('返回列表', 'All checklists') }}</a>
+    </div>
+  </div>
+
+  <form method="POST" id="editForm">
+    <input type="hidden" name="data_json" id="dataJson">
+
+    <div class="card">
+      <div class="ed-grid" style="grid-template-columns:minmax(0,2fr) minmax(0,3fr);">
+        <div><label class="ed-small">{{ tr('名称', 'Name') }}</label><input type="text" name="name" value="{{ tpl.name }}" required maxlength="200"></div>
+        <div><label class="ed-small">{{ tr('报告标题', 'Report title') }}</label><input type="text" id="titleInput"></div>
+      </div>
+      <div style="margin-top:10px;">
+        <span class="ed-small">{{ tr('适用的产品类别（检验这些产品时自动显示这份清单）', 'Product types (inspections of these products show this checklist)') }}</span>
+        {% for key, label in type_choices %}
+        <label class="type-chip" {% if key in taken_types %}title="{{ tr('已用于：', 'Already used by: ') }}{{ taken_types[key] }}"{% endif %}>
+          <input type="checkbox" name="product_types" value="{{ key }}" {% if key in selected_types %}checked{% endif %}>
+          {{ label }}{% if key in taken_types %} <span style="color:#b45309;">*</span>{% endif %}
+        </label>
+        {% endfor %}
+        {% if taken_types %}<div class="ed-small" style="margin-top:4px;">* {{ tr('已被另一份启用的清单使用；同一类别只会使用第一份。', 'Used by another active checklist; only the first one is used for a product type.') }}</div>{% endif %}
+      </div>
+      <div style="display:flex; gap:18px; flex-wrap:wrap; margin-top:10px;">
+        <label class="ed-check"><input type="checkbox" name="active" value="1" {% if tpl.active %}checked{% endif %}> {{ tr('启用', 'Active') }}</label>
+        <label class="ed-check"><input type="checkbox" id="productPhoto"> &#128247; {{ tr('必须拍摄产品照片（能看清编号 / 批号）', 'Product photo required (serial / batch number visible)') }}</label>
+      </div>
+    </div>
+
+    <div class="ed-bar">
+      <strong id="countLabel" style="font-size:.85rem;"></strong>
+      <input type="text" name="note" maxlength="300" placeholder="{{ tr('修改说明（选填），例如：法兰 Q3 条件改为 If no', 'What changed (optional), e.g. Flange Q3 condition changed to If no') }}" style="flex:1; min-width:200px;">
+      <button type="button" class="btn btn-outline btn-sm" onclick="addSection()">+ {{ tr('新增部位', 'Add section') }}</button>
+      <button type="submit" class="btn btn-primary btn-sm">{{ tr('保存为新版本', 'Save as new version') }}</button>
+    </div>
+
+    <div id="sections"></div>
+  </form>
+
+  <div class="card">
+    <div style="font-weight:600; margin-bottom:6px;">{{ tr('版本记录', 'Version history') }}</div>
+    {% for v in versions %}
+    <div style="font-size:.82rem; padding:3px 0;">
+      <a href="{{ url_for('checklist_preview', template_id=tpl.id, v=v.version) }}">v{{ v.version }}</a>
+      · {{ v.created_at|localtime }} · {{ v.created_by }}{% if v.note %} · {{ v.note }}{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+</div>
+
+<script>
+var DATA = {{ data|tojson }};
+var T = {{ {
+  'section': tr('部位 / 部分', 'Section'), 'section_zh': tr('中文名称', 'Chinese name'),
+  'optional_section': tr('整个部位“如适用”（可选不适用）', 'Whole section "if applicable" (N/A allowed)'),
+  'question': tr('检查内容（英文）', 'Question (English)'), 'question_zh': tr('检查内容（中文）', 'Question (Chinese)'),
+  'type': tr('答案类型', 'Answer type'), 'yes_no': tr('是 / 否', 'Yes / No'), 'rating': tr('好 / 一般 / 差', 'Good / Fair / Poor'),
+  'number': tr('测量值', 'Measurement'), 'fail': tr('判为不合格', 'Fail when'),
+  'fail_yes': tr('回答“是”', 'answer is Yes'), 'fail_no': tr('回答“否”', 'answer is No'),
+  'fail_poor': tr('差', 'Poor'), 'fail_fair': tr('一般或差', 'Fair or Poor'),
+  'min': tr('最小值', 'Minimum'), 'max': tr('最大值', 'Maximum'), 'unit': tr('单位', 'Unit'),
+  'action': tr('处理（英文）', 'Action (English)'), 'action_zh': tr('处理（中文）', 'Action (Chinese)'),
+  'optional': tr('如适用（可选不适用）', 'If applicable (N/A allowed)'),
+  'photo': tr('照片', 'Photo'), 'photo_fail': tr('不合格时必须拍照', 'Required when failed'),
+  'photo_always': tr('必须拍照', 'Always required'),
+  'add_q': tr('新增检查项', 'Add question'), 'up': '↑', 'down': '↓', 'del': tr('删除', 'Delete'),
+  'confirm_sec': tr('删除这个部位和其中所有检查项？', 'Delete this section and all its questions?'),
+  'count': tr('个部位，检查项共 ', ' sections, '), 'count2': tr(' 项', ' questions'),
+  'need_min': tr('测量值需要最小值或最大值', 'A measurement needs a minimum or a maximum'),
+} | tojson }};
+
+function uid(p) { return p + Math.random().toString(16).slice(2, 10); }
+function el(tag, attrs, children) {
+  var n = document.createElement(tag);
+  Object.keys(attrs || {}).forEach(function (k) {
+    if (k === 'onclick' || k === 'oninput' || k === 'onchange') n[k] = attrs[k];
+    else if (k === 'checked') n.checked = !!attrs[k];
+    else if (k === 'value') n.value = attrs[k] == null ? '' : attrs[k];
+    else n.setAttribute(k, attrs[k]);
+  });
+  (children || []).forEach(function (c) { n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+  return n;
+}
+function field(label, input) { return el('div', {}, [el('label', {}, [label]), input]); }
+function input(obj, key, attrs) {
+  var a = Object.assign({type: 'text', value: obj[key]}, attrs || {});
+  a.oninput = function () { obj[key] = this.type === 'number' ? (this.value === '' ? null : Number(this.value)) : this.value; };
+  return el('input', a);
+}
+function select(obj, key, options, rerender) {
+  var s = el('select', {onchange: function () { obj[key] = this.value; if (rerender) render(); }},
+    options.map(function (o) { var opt = el('option', {value: o[0]}, [o[1]]); if (obj[key] === o[0]) opt.selected = true; return opt; }));
+  return s;
+}
+function checkbox(obj, key, label) {
+  return el('label', {'class': 'ed-check'}, [el('input', {type: 'checkbox', checked: obj[key], onchange: function () { obj[key] = this.checked; }}), label]);
+}
+function move(list, i, d) { var j = i + d; if (j < 0 || j >= list.length) return; var t = list[i]; list[i] = list[j]; list[j] = t; render(); }
+
+function questionRow(sec, q, qi) {
+  var rule = [];
+  if (q.type === 'yes_no') rule.push(field(T.fail, select(q, 'fail_on', [['no', T.fail_no], ['yes', T.fail_yes]])));
+  else if (q.type === 'rating') rule.push(field(T.fail, select(q, 'fail_on', [['poor', T.fail_poor], ['fair', T.fail_fair]])));
+  else {
+    rule.push(field(T.min, input(q, 'min', {type: 'number', step: 'any'})));
+    rule.push(field(T.max, input(q, 'max', {type: 'number', step: 'any'})));
+    rule.push(field(T.unit, input(q, 'unit')));
+  }
+  return el('div', {'class': 'ed-q'}, [
+    el('div', {'class': 'ed-num'}, [String(qi + 1)]),
+    el('div', {}, [
+      field(T.question, input(q, 'text', {required: 'required'})),
+      field(T.question_zh, input(q, 'text_zh')),
+      el('div', {'class': 'ed-grid'}, [
+        field(T.type, select(q, 'type', [['yes_no', T.yes_no], ['rating', T.rating], ['number', T.number]], true))
+      ].concat(rule).concat([
+        field(T.action, input(q, 'action')),
+        field(T.action_zh, input(q, 'action_zh')),
+        field(T.photo, select(q, 'photo', [['fail', T.photo_fail], ['always', T.photo_always]]))
+      ])),
+      el('div', {style: 'margin-top:6px;'}, [checkbox(q, 'optional', T.optional)])
+    ]),
+    el('div', {'class': 'ed-tools'}, [
+      el('button', {type: 'button', 'class': 'btn btn-outline', onclick: function () { move(sec.questions, qi, -1); }}, [T.up]),
+      el('button', {type: 'button', 'class': 'btn btn-outline', onclick: function () { move(sec.questions, qi, 1); }}, [T.down]),
+      el('button', {type: 'button', 'class': 'btn btn-outline', style: 'color:#b91c1c;', onclick: function () { sec.questions.splice(qi, 1); render(); }}, [T.del])
+    ])
+  ]);
+}
+
+function render() {
+  var box = document.getElementById('sections');
+  box.innerHTML = '';
+  var total = 0;
+  DATA.sections.forEach(function (sec, si) {
+    total += sec.questions.length;
+    var head = el('div', {'class': 'ed-sec-head'}, [
+      el('strong', {style: 'color:#1a3a5c;'}, [String(si + 1) + '.']),
+      el('div', {style: 'flex:1; min-width:160px;'}, [input(sec, 'name', {placeholder: T.section, required: 'required'})]),
+      el('div', {style: 'flex:1; min-width:120px;'}, [input(sec, 'name_zh', {placeholder: T.section_zh})]),
+      checkbox(sec, 'optional', T.optional_section),
+      el('button', {type: 'button', 'class': 'btn btn-outline', onclick: function () { move(DATA.sections, si, -1); }}, [T.up]),
+      el('button', {type: 'button', 'class': 'btn btn-outline', onclick: function () { move(DATA.sections, si, 1); }}, [T.down]),
+      el('button', {type: 'button', 'class': 'btn btn-outline', style: 'color:#b91c1c;',
+                    onclick: function () { if (confirm(T.confirm_sec)) { DATA.sections.splice(si, 1); render(); } }}, [T.del])
+    ]);
+    var body = el('div', {}, sec.questions.map(function (q, qi) { return questionRow(sec, q, qi); }));
+    var add = el('div', {style: 'padding:8px 12px; border-top:1px solid #f1f5f9;'}, [
+      el('button', {type: 'button', 'class': 'btn btn-outline btn-sm', onclick: function () {
+        sec.questions.push({id: uid('q'), text: '', text_zh: '', type: 'yes_no', fail_on: 'yes', action: 'Reject', action_zh: '拒收', optional: false, photo: 'fail'});
+        render();
+      }}, ['+ ' + T.add_q])
+    ]);
+    box.appendChild(el('div', {'class': 'ed-sec'}, [head, body, add]));
+  });
+  document.getElementById('countLabel').textContent = DATA.sections.length + T.count + total + T.count2;
+}
+
+function addSection() {
+  DATA.sections.push({id: uid('s'), name: '', name_zh: '', optional: false,
+    questions: [{id: uid('q'), text: '', text_zh: '', type: 'yes_no', fail_on: 'yes', action: 'Reject', action_zh: '拒收', optional: false, photo: 'fail'}]});
+  render();
+}
+
+var titleInput = document.getElementById('titleInput');
+titleInput.value = DATA.title || '';
+titleInput.oninput = function () { DATA.title = this.value; };
+var photo = document.getElementById('productPhoto');
+photo.checked = DATA.product_photo !== false;
+photo.onchange = function () { DATA.product_photo = this.checked; };
+
+document.getElementById('editForm').addEventListener('submit', function (e) {
+  var bad = null;
+  DATA.sections.forEach(function (s) { s.questions.forEach(function (q) {
+    if (q.type === 'number' && (q.min == null || q.min === '') && (q.max == null || q.max === '')) bad = q;
+  }); });
+  if (bad) { e.preventDefault(); alert(T.need_min + ': ' + bad.text); return; }
+  document.getElementById('dataJson').value = JSON.stringify(DATA);
+});
+render();
+</script>
+{% endblock %}

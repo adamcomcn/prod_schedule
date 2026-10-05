@@ -122,6 +122,9 @@ textarea { resize: vertical; min-height: 80px; }
   {{ navlink('index', '排期', 'Schedule', ep in ['index', 'upload_preview']) }}
   {{ navlink('tasks', '检验任务', 'Tasks', ep == 'tasks') }}
   {{ navlink('reports', '检验报告', 'Reports', ep == 'reports') }}
+  {% if g.can_assign %}
+  {{ navlink('checklist_templates_page', '检查清单', 'Checklists', ep.startswith('checklist')) }}
+  {% endif %}
   {% if module_enabled('forms') %}
   {{ navlink('form_templates_page', '检验模板', 'Forms', ep in ['form_templates_page', 'inspect_checklist']) }}
   {% endif %}

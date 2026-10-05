@@ -522,6 +522,7 @@ EVIDENCE_META = {
 
 # Chinese version of each guidance line (lines are combined per product).
 import evidence_rules
+import checklists
 
 
 def product_reference(code):
@@ -4844,6 +4845,181 @@ def _save_product_image(file_obj):
 
 
 # ── Form template management ─────────────────────────────────────────────────
+
+
+# ── Inspection checklists (templates per product type) ──────────────────────
+
+def _require_checklist_editor():
+    if not g.can_assign:
+        abort(403)
+
+
+def checklist_version(template_id, version=None):
+    """(template row, version row, template data) or (None, None, None)."""
+    with db_conn() as conn:
+        tpl = conn.execute('SELECT * FROM checklist_templates WHERE id=?', (template_id,)).fetchone()
+        if not tpl:
+            return None, None, None
+        ver = conn.execute('SELECT * FROM checklist_versions WHERE template_id=? AND version=?',
+                           (template_id, version or tpl['current_version'])).fetchone()
+    if not ver:
+        return tpl, None, None
+    return tpl, ver, json.loads(ver['data_json'])
+
+
+def save_checklist_version(conn, template_id, data, note=''):
+    """Store `data` as the next version of a template; returns the version number."""
+    last = conn.execute('SELECT MAX(version) FROM checklist_versions WHERE template_id=?',
+                        (template_id,)).fetchone()[0] or 0
+    conn.execute('INSERT INTO checklist_versions (template_id, version, data_json, note, created_by) '
+                 'VALUES (?,?,?,?,?)', (template_id, last + 1, json.dumps(data, ensure_ascii=False),
+                                       note, g.get('display_name') or g.get('username', '')))
+    conn.execute("UPDATE checklist_templates SET current_version=?, updated_at=datetime('now') WHERE id=?",
+                 (last + 1, template_id))
+    return last + 1
+
+
+def checklist_for_product_type(ptype):
+    """The active checklist template for a product type, or None."""
+    if not ptype:
+        return None
+    with db_conn() as conn:
+        for tpl in conn.execute('SELECT * FROM checklist_templates WHERE active=1 ORDER BY id'):
+            if ptype in (tpl['product_types'] or '').split(','):
+                return tpl
+    return None
+
+
+def _product_type_choices():
+    return [(key, product_type_name(key)) for key in evidence_rules.PRODUCT_TYPES]
+
+
+@app.route('/checklists')
+def checklist_templates_page():
+    _require_checklist_editor()
+    with db_conn() as conn:
+        templates = [dict(r) for r in conn.execute('SELECT * FROM checklist_templates ORDER BY active DESC, name')]
+    for t in templates:
+        _tpl, _ver, data = checklist_version(t['id'])
+        t['questions'] = checklists.question_count(data) if data else 0
+        t['type_names'] = [product_type_name(k) for k in (t['product_types'] or '').split(',')
+                           if k in evidence_rules.PRODUCT_TYPES]
+    return render_template('checklists.html', templates=templates)
+
+
+@app.route('/checklists/import', methods=['POST'])
+def checklist_import():
+    _require_checklist_editor()
+    upload = request.files.get('file')
+    if not upload or _upload_extension(upload.filename) != '.xlsx':
+        flash(tr('请选择 .xlsx 检查清单文件', 'Choose a checklist .xlsx file'), 'error')
+        return redirect(url_for('checklist_templates_page'))
+    try:
+        data = checklists.parse_checklist_workbook(upload.read())
+    except Exception as exc:
+        flash(tr('无法读取这个检查清单：', 'This checklist could not be read: ') + str(exc)[:200], 'error')
+        return redirect(url_for('checklist_templates_page'))
+    target = request.form.get('target', 'new')
+    with db_conn() as conn:
+        if target.isdigit() and conn.execute('SELECT 1 FROM checklist_templates WHERE id=?', (target,)).fetchone():
+            template_id = int(target)
+        else:
+            name = request.form.get('name', '').strip() or data['title'] or _display_filename(upload.filename)
+            template_id = conn.execute('INSERT INTO checklist_templates (name, product_types) VALUES (?, ?)',
+                                       (name[:200], '')).lastrowid
+        version = save_checklist_version(conn, template_id, data,
+                                         tr('从 Excel 导入：', 'Imported from Excel: ') + _display_filename(upload.filename))
+    flash(tr(f'已导入 {checklists.question_count(data)} 个检查项（第 {version} 版），请检查并设置适用的产品类别',
+             f'Imported {checklists.question_count(data)} questions (version {version}). Check them and choose the product types.'),
+          'success')
+    return redirect(url_for('checklist_edit', template_id=template_id))
+
+
+@app.route('/checklists/<int:template_id>/edit', methods=['GET', 'POST'])
+def checklist_edit(template_id):
+    _require_checklist_editor()
+    tpl, ver, data = checklist_version(template_id)
+    if not tpl:
+        abort(404)
+    if request.method == 'POST':
+        try:
+            new_data = checklists.normalise_template(json.loads(request.form.get('data_json') or '{}'))
+        except (ValueError, json.JSONDecodeError) as exc:
+            flash(tr('未保存：', 'Not saved: ') + str(exc), 'error')
+            return redirect(url_for('checklist_edit', template_id=template_id))
+        types = [t for t in request.form.getlist('product_types') if t in evidence_rules.PRODUCT_TYPES]
+        with db_conn() as conn:
+            conn.execute('UPDATE checklist_templates SET name=?, product_types=?, active=? WHERE id=?',
+                         ((request.form.get('name') or tpl['name']).strip()[:200], ','.join(types),
+                          1 if request.form.get('active') == '1' else 0, template_id))
+            if new_data != data:
+                version = save_checklist_version(conn, template_id, new_data, request.form.get('note', '').strip()[:300])
+                flash(tr(f'已保存为第 {version} 版。已提交的报告保留原来的版本。',
+                         f'Saved as version {version}. Submitted reports keep the version they used.'), 'success')
+            else:
+                flash(tr('设置已保存（检查项没有变化）', 'Settings saved (questions unchanged)'), 'success')
+        return redirect(url_for('checklist_edit', template_id=template_id))
+    with db_conn() as conn:
+        versions = conn.execute('SELECT version, note, created_by, created_at FROM checklist_versions '
+                                'WHERE template_id=? ORDER BY version DESC', (template_id,)).fetchall()
+        others = {t: r['name'] for r in conn.execute(
+            'SELECT id, name, product_types FROM checklist_templates WHERE active=1 AND id!=?', (template_id,))
+            for t in (r['product_types'] or '').split(',') if t}
+    return render_template('checklist_edit.html', tpl=tpl, ver=ver, data=data, versions=versions,
+                           type_choices=_product_type_choices(), taken_types=others,
+                           selected_types=(tpl['product_types'] or '').split(','))
+
+
+@app.route('/checklists/<int:template_id>/preview')
+def checklist_preview(template_id):
+    _require_checklist_editor()
+    version = request.args.get('v', type=int)
+    tpl, ver, data = checklist_version(template_id, version)
+    if not data:
+        abort(404)
+    return render_template('checklist_preview.html', tpl=tpl, ver=ver, data=data)
+
+
+@app.route('/checklists/<int:template_id>/export.xlsx')
+def checklist_export(template_id):
+    """The current version as an Excel sheet in the import layout (with
+    Chinese columns), for offline review or translation and re-import."""
+    _require_checklist_editor()
+    tpl, ver, data = checklist_version(template_id)
+    if not data:
+        abort(404)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Inspection Checklist'
+    ws.append([data.get('title') or tpl['name']])
+    ws.append([])
+    ws.append(['PART', 'PART 中文', 'Q.', 'INSPECTION GUIDELINE', 'INSPECTION GUIDELINE 中文', 'IF',
+               'WHAT TO DO?', 'WHAT TO DO? 中文'])
+    for cell in ws[3]:
+        cell.font = openpyxl.styles.Font(bold=True)
+    for s in data['sections']:
+        part = s['name'] + (' (IF APPLICABLE)' if s['optional'] else '')
+        for i, q in enumerate(s['questions'], 1):
+            text = q['text'] + (' (IF APPLICABLE)' if q['optional'] else '')
+            if q['type'] == 'rating':
+                text += ' [Good/ Fair/ Poor]'
+                cond = 'If fair or poor' if q.get('fail_on') == 'fair' else 'If poor'
+            elif q['type'] == 'number':
+                cond = (f"If < {q['min']}{q.get('unit', '')}" if q.get('min') is not None
+                        else f"If > {q['max']}{q.get('unit', '')}")
+            else:
+                cond = f"If {q.get('fail_on', 'no')}"
+            ws.append([_xl_safe(v) for v in (part if i == 1 else '', s['name_zh'] if i == 1 else '', i, text,
+                                              q['text_zh'], cond, q['action'], q['action_zh'])])
+    for letter, width in zip('ABCDEFGH', (22, 14, 5, 70, 50, 14, 20, 16)):
+        ws.column_dimensions[letter].width = width
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    safe = re.sub(r'[^A-Za-z0-9._-]+', '-', tpl['name'])[:60]
+    return send_file(buf, as_attachment=True, download_name=f'checklist-{safe}-v{ver["version"]}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
 
 @app.route('/forms')
 def form_templates_page():
