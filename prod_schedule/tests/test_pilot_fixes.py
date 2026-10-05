@@ -131,7 +131,8 @@ class PilotFixTests(unittest.TestCase):
         path = os.path.join(app.DATA_DIR, 'atomic-test.json')
         app.save_json(path, {'a': 1})
         self.assertEqual(app.load_json(path), {'a': 1})
-        self.assertFalse(os.path.exists(path + '.tmp'))
+        import glob
+        self.assertEqual(glob.glob(path + '*.tmp'), [])          # no temp file left behind
 
     def test_dashboard_uses_local_chartjs(self):
         self.assertTrue(os.path.exists(

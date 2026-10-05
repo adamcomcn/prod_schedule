@@ -92,12 +92,23 @@ def load_json(path, default=None):
 def save_json(path, data):
     # Write to a temp file then atomically replace, so a crash mid-write
     # never leaves a truncated JSON file behind.
-    tmp_path = f'{path}.tmp'
+    # A unique temp name per write: background threads (e-mails) may save
+    # the same file at the same moment.
+    tmp_path = f'{path}.{uuid.uuid4().hex}.tmp'
     with open(tmp_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp_path, path)
+    for attempt in range(20):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            # Windows only (local runs): the target is briefly open in another thread
+            if attempt == 19:
+                os.remove(tmp_path)
+                raise
+            time.sleep(0.05)
 
 def schedule_fingerprint(data):
     canonical = json.dumps(
