@@ -52,7 +52,9 @@ class ClassifyTests(unittest.TestCase):
             ('AVHW100180CC', 'Handwheel', ref(pc='Accessories - Handwheels'), 'handwheel'),
             ('ACTBW', 'DI Toby Box W', ref('Covers & Lids'), 'cover'),
             ('ACLTYPE', 'L-type hydrant cover', ref('Covers & Lids'), 'l_type'),
-            ('ACLTYPESMFB', 'Single MFB L - Type Hydrant Head', ref(pc='L - Type Hydrant'), 'l_type'),
+            ('ACLTYPESMFB', 'Single MFB L - Type Hydrant Head', ref(pc='L - Type Hydrant'), 'l_type_head'),
+            ('ACLTYPEDCFA', 'Dual CFA L - Type Hydrant Head', ref('Covers & Lids'), 'l_type_head'),
+            ('XYZ1', 'Dual MFB L - Type Hydrant Head', None, 'l_type_head'),
             ('ACLTYPELP', 'Latch Pin (Suit L Type Cover)', ref('Covers & Lids'), 'latch_pin'),
             ('ACCOMP1', 'Composite cover', ref('Comp Covers', 'Comp Covers - SMC Lid'), None),               # left out
         ]
@@ -68,6 +70,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(types('pretap_bush'), ['brt'])                         # no pressure test
         self.assertEqual(types('repair_clamp'), ['brt', 'xrf'])
         self.assertEqual(types('l_type'), ['checklist'])
+        self.assertEqual(types('l_type_head'), ['checklist'])
         self.assertEqual(types('latch_pin'), ['material'])
         self.assertEqual(types('cover'), ['checklist', 'material'])
         self.assertIn('Q235B', er.PRODUCT_TYPES['umc_gal']['evidence'][0]['checks'][-1]['en'])

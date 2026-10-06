@@ -160,6 +160,24 @@ class ItemCodeTemplateTests(unittest.TestCase):
         self.assertEqual(len(app.load_json(app.INSPECTIONS_CACHE, {})[JOB]), 1)
 
 
+class SplitLTypeTests(unittest.TestCase):
+    def test_old_head_reports_get_the_head_type(self):
+        app.save_json(app.INSPECTIONS_CACHE, {
+            'M|P1|ACLTYPESCFA': [{'item_code': 'ACLTYPESCFA', 'item_description': 'Single CFA L - Type Hydrant Head',
+                                  'product_type': 'l_type'}],
+            'M|P2|ACLTYPE': [{'item_code': 'ACLTYPE', 'item_description': 'L-type hydrant cover',
+                              'product_type': 'l_type'}]})
+        self.assertEqual(app.reclassify_l_type_heads(), 1)
+        cache = app.load_json(app.INSPECTIONS_CACHE, {})
+        self.assertEqual(cache['M|P1|ACLTYPESCFA'][0]['product_type'], 'l_type_head')
+        self.assertEqual(cache['M|P2|ACLTYPE'][0]['product_type'], 'l_type')
+        self.assertEqual(app.reclassify_l_type_heads(), 0)
+        with app.app.test_request_context():
+            app.g.lang = 'zh'
+            self.assertEqual(app.product_type_name('l_type_head'), 'L 型消防栓头')
+            self.assertEqual(app.product_type_name('l_type'), 'L 型消防栓盖')
+
+
 class SingleHeadTests(ItemCodeTemplateTests):
     SINGLE = 'MELBOURNE|PO-7|ACLTYPESMFB'
     test_item_codes_select_the_template_and_replace_the_paper_upload = None     # covered above

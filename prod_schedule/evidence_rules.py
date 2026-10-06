@@ -120,7 +120,9 @@ PRODUCT_TYPES = {
     'handwheel': {'name': _c('手轮', 'Handwheel'), 'evidence': [_ev('checklist', CHECK_CHECKLIST)]},
     'cover': {'name': _c('井盖 / 阀箱 / 盖板', 'Cover / box / lid'),
               'evidence': [_ev('checklist', CHECK_CHECKLIST), _ev('material', CHECK_MATERIAL)]},
-    'l_type': {'name': _c('L 型消防栓盖 / 头', 'L-Type hydrant cover / head'),
+    'l_type_head': {'name': _c('L 型消防栓头', 'L-Type hydrant head'),
+                    'evidence': [_ev('checklist', CHECK_CHECKLIST)]},
+    'l_type': {'name': _c('L 型消防栓盖', 'L-Type hydrant cover'),
                'evidence': [_ev('checklist', CHECK_CHECKLIST)]},
     'latch_pin': {'name': _c('插销（L 型盖）', 'Latch pin (L-Type cover)'),
                   'evidence': [_ev('material', CHECK_MATERIAL)]},
@@ -196,6 +198,10 @@ def classify(code, description='', ref=None):
         return 'handwheel'
     if code_u.startswith('ACLTYPELP') or 'LATCH PIN' in desc_u:
         return 'latch_pin'
+    # hydrant heads (single / dual, CFA / MFB) are not covers
+    if code_u.startswith(('ACLTYPES', 'ACLTYPED')) or (
+            ('L - TYPE' in desc_u or 'L-TYPE' in desc_u) and 'HYDRANT HEAD' in desc_u):
+        return 'l_type_head'
     if code_u.startswith('ACLTYPE') or 'l - type' in pcat or 'L - TYPE' in desc_u or 'L-TYPE' in desc_u:
         return 'l_type'
     if cat == 'covers & lids' or 'access covers' in pcat or 'fire plug' in pcat:

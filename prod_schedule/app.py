@@ -6048,6 +6048,23 @@ def assign_unscheduled_tasks_to_lead():
     return len(ids)
 
 
+def reclassify_l_type_heads():
+    """L-Type hydrant heads used to share the cover's product type; give
+    reports saved before the split the head type. Idempotent."""
+    cache = load_json(INSPECTIONS_CACHE, {})
+    changed = 0
+    for records in cache.values():
+        for rec in records or []:
+            if rec.get('product_type') == 'l_type' and \
+                    product_type_for(rec.get('item_code', ''), rec.get('item_description', '')) == 'l_type_head':
+                rec['product_type'] = 'l_type_head'
+                changed += 1
+    if changed:
+        save_json(INSPECTIONS_CACHE, cache)
+        logger.info('Re-labelled %d L-Type hydrant head report(s)', changed)
+    return changed
+
+
 def _assign_old_shipped_reports_to_lead():
     """One-time clean-up (agreed with the business): tasks that already have an
     inspection report but no assignee, and whose order has left the current
@@ -6122,6 +6139,11 @@ try:
     assign_unscheduled_tasks_to_lead()
 except Exception:
     logger.exception('Unable to assign unscheduled tasks')
+
+try:
+    reclassify_l_type_heads()
+except Exception:
+    logger.exception('Unable to re-label L-Type hydrant head reports')
 
 try:
     _backfill_fully_shipped_history()
