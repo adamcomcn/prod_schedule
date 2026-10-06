@@ -166,6 +166,10 @@ def _find_columns(header):
             cols['hint_zh' if zh else 'hint'] = i
         elif 'GLOSSARY' in h:
             cols['glossary'] = i
+        elif h == 'PHOTO':
+            cols['photo'] = i
+        elif h == 'ONLY IF':
+            cols['only_if'] = i
     return cols
 
 
@@ -233,6 +237,7 @@ def parse_checklist_workbook(file_bytes):
         if not action and action_zh:
             action, action_zh = action_zh, ''
         condition = cell(row, 'condition') if 'condition' in cols else ('If ' + cols.get('default_fail', 'no'))
+        condition = condition[1:] if condition.startswith("'") else condition     # older exports escaped '-'
         rule, sentence = parse_condition(condition, raw_text)
         hint = cell(row, 'hint') or (f"Defect code: {cell(row, 'glossary')}" if cell(row, 'glossary') else '')
         current['questions'].append({
@@ -241,8 +246,10 @@ def parse_checklist_workbook(file_bytes):
             'action': action or sentence or '', 'action_zh': action_zh or cell(row, 'action_zh'),
             'hint': hint, 'hint_zh': cell(row, 'hint_zh'),
             'optional': bool(APPLICABLE_RE.search(raw_text)),
-            'photo': 'always' if re.search(r'\b(video|photo)\b', text, re.I) and not re.search(
-                r'refer to|see (the )?(photo|drawing)', text, re.I) else 'fail', **rule})
+            'only_if': cell(row, 'only_if'),
+            'photo': cell(row, 'photo').lower() if cell(row, 'photo').lower() in PHOTO_RULES else (
+                'always' if re.search(r'\b(video|photo)\b', text, re.I) and not re.search(
+                    r'refer to|see (the )?(photo|drawing)', text, re.I) else 'fail'), **rule})
     for sec in sections:
         sec.pop('_source', None)
     sections = [sec for sec in sections if sec['questions']]

@@ -22,6 +22,7 @@ from reportlab.platypus import (Image, KeepTogether, Paragraph, SimpleDocTemplat
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PHOTO_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
+VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv'}
 try:                                   # iPhone photos (HEIC/HEIF); without the plugin they stay listed as files
     import pillow_heif
     pillow_heif.register_heif_opener()
@@ -221,7 +222,10 @@ def _site_checklist(story, record, attachments, st, content_w):
             for aid in photo_ids.get(q['id'], []):
                 att = by_id.get(aid)
                 if att:
-                    label = f"{section['name']} {n} — {'不合格 Fail' if result == 'fail' else '照片 Photo'}"
+                    ext = os.path.splitext(att.get('original_name') or '')[1].lower()
+                    kind = ('视频 Video' if ext in VIDEO_EXTENSIONS else '照片 Photo' if ext in PHOTO_EXTENSIONS
+                            else '文件 File')
+                    label = f"{section['name']} {n} — " + (f'不合格 Fail · {kind}' if result == 'fail' else kind)
                     photo_cells.append((att, label))
         t = Table(rows, colWidths=widths, repeatRows=1)
         t.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.25, LINE), ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -500,7 +504,7 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
     signed_by = record.get('inspector_name') or record.get('submitted_by') or ''
     if record.get('submitted_by') and record.get('submitted_by') != signed_by:
         signed_by += f" ({record['submitted_by']})"
-    signed_at = (record.get('submitted_at') or '')[:16].replace('T', ' ')
+    signed_at = time_text(record.get('submitted_at')) if record.get('submitted_at') else ''
     inspector_cell = (_bi('检验员签字', 'Inspector signature')
                       + f"\n\n{signed_by}\n已电子签署 Signed electronically\n{signed_at}")
     if review and review['status'] == 'approved':

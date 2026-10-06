@@ -5339,7 +5339,7 @@ def checklist_export(template_id):
     ws.append([data.get('title') or tpl['name']])
     ws.append([])
     ws.append(['PART', 'PART 中文', 'Q.', 'INSPECTION GUIDELINE', 'INSPECTION GUIDELINE 中文', 'IF',
-               'WHAT TO DO?', 'WHAT TO DO? 中文', 'FREQUENCY', 'FREQUENCY 中文'])
+               'WHAT TO DO?', 'WHAT TO DO? 中文', 'FREQUENCY', 'FREQUENCY 中文', 'PHOTO', 'ONLY IF'])
     for cell in ws[3]:
         cell.font = openpyxl.styles.Font(bold=True)
     for s in data['sections']:
@@ -5356,10 +5356,12 @@ def checklist_export(template_id):
                 cond = '-'
             else:
                 cond = f"If {q.get('fail_on', 'no')}"
+            # the condition, photo rule and keyword are ours, not typed text: no formula escaping
             ws.append([_xl_safe(v) for v in (part if i == 1 else '', s['name_zh'] if i == 1 else '', i, text,
-                                              q['text_zh'], cond, q['action'], q['action_zh'],
-                                              q.get('hint', ''), q.get('hint_zh', ''))])
-    for letter, width in zip('ABCDEFGHIJ', (22, 14, 5, 70, 50, 14, 20, 16, 22, 18)):
+                                              q['text_zh'])] + [cond] +
+                      [_xl_safe(v) for v in (q['action'], q['action_zh'], q.get('hint', ''), q.get('hint_zh', ''))] +
+                      [q.get('photo', 'fail'), q.get('only_if', '')])
+    for letter, width in zip('ABCDEFGHIJKL', (22, 14, 5, 70, 50, 14, 20, 16, 22, 18, 8, 10)):
         ws.column_dimensions[letter].width = width
     buf = io.BytesIO()
     wb.save(buf)
