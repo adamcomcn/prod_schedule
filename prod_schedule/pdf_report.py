@@ -136,18 +136,129 @@ def _kv_table(pairs, st, col_widths):
     return table
 
 
-def _photo(path, max_w, max_h):
+def _photo(path, max_w, max_h, max_px=1400):
     """Downscale a photo (respecting EXIF rotation) and return an Image flowable."""
     from PIL import Image as PILImage, ImageOps
     with PILImage.open(path) as im:
         im = ImageOps.exif_transpose(im).convert('RGB')
-        im.thumbnail((1400, 1400))
+        im.thumbnail((max_px, max_px))
         buf = io.BytesIO()
         im.save(buf, 'JPEG', quality=72, optimize=True)
         w, h = im.size
     buf.seek(0)
     scale = min(max_w / w, max_h / h)
     return Image(buf, width=w * scale, height=h * scale)
+
+
+
+# ── Site checklist (filled in on the inspection page) ────────────────────────
+ANSWER_TEXT = {'yes': '是 Yes', 'no': '否 No', 'good': '好 Good', 'fair': '一般 Fair', 'poor': '差 Poor',
+               'na': '不适用 N/A'}
+CHECKLIST_PHOTO_TYPES = {'checklist_photo', 'product_photo'}
+NA_GREY = colors.HexColor('#9ca3af')
+
+
+def _answer_text(question, value):
+    value = '' if value is None else str(value).strip()
+    if not value:
+        return '—'
+    if value.lower() in ANSWER_TEXT:
+        return ANSWER_TEXT[value.lower()]
+    return f"{value} {question.get('unit') or ''}".strip()
+
+
+def _site_checklist(story, record, attachments, st, content_w):
+    """Checklist table (every question; failed rows red), then the product
+    photo and the photos of failed / photo-required questions."""
+    import checklists
+    c = record['checklist']
+    data, answers = c.get('data') or {}, c.get('answers') or {}
+    counts = c.get('counts') or {}
+    story.append(_p(_bi('现场检查清单', 'Site checklist') + f" — {c.get('name', '')} v{c.get('version', '')}", st['h']))
+    story.append(_p(
+        f"共 {counts.get('total', 0)} 项：合格 {counts.get('ok', 0)}，不合格 {counts.get('fail', 0)}，"
+        f"不适用 {counts.get('na', 0)}    {counts.get('total', 0)} items: {counts.get('ok', 0)} OK, "
+        f"{counts.get('fail', 0)} failed, {counts.get('na', 0)} N/A    ·    "
+        f"抽检数量 Parts checked: {record.get('quantity_inspected') or '—'}", st['sub']))
+
+    by_id = {a['id']: a for a in attachments if a.get('id') is not None}
+    photo_ids = c.get('photos') or {}
+    widths = [9 * mm, content_w - 9 * mm - 26 * mm - 58 * mm, 26 * mm, 58 * mm]
+    photo_cells = []
+    for section in data.get('sections', []):
+        title = section['name'] + (f"  {section['name_zh']}" if section.get('name_zh') else '')
+        if all(checklists.evaluate(q, (answers.get(q['id']) or {}).get('v')) == 'na' for q in section['questions']):
+            # a whole section that does not apply (e.g. no spigot): one line
+            t = Table([[_p(f"{title} — 不适用 N/A ({len(section['questions'])})", st['label'])]], colWidths=[content_w])
+            t.setStyle(TableStyle([('BOX', (0, 0), (-1, -1), 0.25, LINE), ('BACKGROUND', (0, 0), (-1, -1), LIGHT)]))
+            story += [t, Spacer(1, 2 * mm)]
+            continue
+        rows = [[_p(title, st['label']), '', '', '']]
+        styles = [('SPAN', (0, 0), (-1, 0)), ('BACKGROUND', (0, 0), (-1, 0), LIGHT)]
+        for n, q in enumerate(section['questions'], 1):
+            answer = answers.get(q['id']) or {}
+            result = checklists.evaluate(q, answer.get('v'))
+            text = q['text'] + (f"\n{q['text_zh']}" if q.get('text_zh') else '')
+            detail = ''
+            if result == 'fail':
+                parts = [f"→ {q.get('action', '')}" + (f" / {q['action_zh']}" if q.get('action_zh') else '')]
+                if answer.get('occ'):
+                    parts.append(f"数量 Count: {answer['occ']}")
+                if answer.get('sup'):
+                    parts.append('已告知主管 Supervisor informed')
+                if answer.get('note'):
+                    parts.append(answer['note'])
+                detail = '\n'.join(parts)
+            rows.append([_p(str(n), st['small']), _p(text, st['small']),
+                         _p(_answer_text(q, answer.get('v')), st['small']), _p(detail, st['small'])])
+            line = len(rows) - 1
+            if result == 'fail':
+                styles.append(('BACKGROUND', (0, line), (-1, line), RESULT_COLORS['Fail'][0]))
+            elif result == 'na':
+                styles.append(('TEXTCOLOR', (0, line), (-1, line), NA_GREY))
+            for aid in photo_ids.get(q['id'], []):
+                att = by_id.get(aid)
+                if att:
+                    label = f"{section['name']} {n} — {'不合格 Fail' if result == 'fail' else '照片 Photo'}"
+                    photo_cells.append((att, label))
+        t = Table(rows, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.25, LINE), ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                               ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2)] + styles))
+        story += [t, Spacer(1, 2 * mm)]
+
+    product = [(by_id[a], '产品照片 Product photo (serial / batch)') for a in photo_ids.get('product', []) if a in by_id]
+    _photo_grid(story, product + photo_cells, st, content_w,
+                _bi('检查清单照片', 'Checklist photos'))
+
+
+def _photo_grid(story, items, st, content_w, heading, per_row=3):
+    """Small photos with captions, `per_row` across; videos and unreadable
+    files are listed by name."""
+    cells, others = [], []
+    cell_w = (content_w - (per_row - 1) * 3 * mm) / per_row
+    for att, caption in items:
+        ext = os.path.splitext(att.get('original_name') or att.get('saved_name') or '')[1].lower()
+        path = att.get('file_path')
+        if ext in PHOTO_EXTENSIONS and path and os.path.exists(path):
+            try:
+                cells.append([_photo(path, cell_w, 45 * mm, max_px=900), _p(caption, st['small'])])
+                continue
+            except Exception:
+                pass
+        others.append(f"• {caption}: {att.get('original_name', '')}")
+    if not cells and not others:
+        return
+    story.append(_p(heading, st['h']))
+    grid = [cells[i:i + per_row] + [''] * (per_row - len(cells[i:i + per_row]))
+            for i in range(0, len(cells), per_row)]
+    if grid:
+        t = Table(grid, colWidths=[cell_w + 3 * mm] * per_row)
+        t.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
+        story.append(t)
+    if others:
+        story.append(_p(_bi('视频 / 其他文件（在系统中查看）', 'Videos / other files (view in the system)'), st['small']))
+        for line in others:
+            story.append(_p(line, st['small']))
 
 
 def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=None,
@@ -296,7 +407,7 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
     missing = record.get('missing_evidence') or []
     if missing:
         names = ', '.join(' / '.join(evidence_labels.get(m, (m.upper(), m.upper()))) for m in missing)
-        warn = Table([[_p(_bi('⚠ 缺少证据文件', '⚠ Missing evidence files') + f': {names}', st['cell'])]],
+        warn = Table([[_p(_bi('! 缺少证据文件', 'Missing evidence files') + f': {names}', st['cell'])]],
                      colWidths=[content_w])
         warn.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), AMBER[0]),
                                   ('BOX', (0, 0), (-1, -1), 0.6, AMBER[1])]))
@@ -322,6 +433,11 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
     if record.get('notes'):
         story += [_p(_bi('备注', 'Notes'), st['h']), _p(record.get('notes'), st['cell'])]
 
+    # ── Site checklist stored on the report ─────────────────────────────────
+    if record.get('checklist'):
+        _site_checklist(story, record, attachments, st, content_w)
+        checklist = None          # the older stand-alone checklist form is superseded
+
     # ── Checklist (latest digital checklist for this job) ───────────────────
     if checklist:
         story.append(_p(_bi('检验清单', 'Checklist') + f" — {checklist.get('name', '')}", st['h']))
@@ -346,6 +462,8 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
     # ── Photos ──────────────────────────────────────────────────────────────
     photos, other_files = [], []
     for att in attachments:
+        if att.get('evidence_type') in CHECKLIST_PHOTO_TYPES:
+            continue                  # shown with the checklist above
         ext = os.path.splitext(att['original_name'] or att.get('saved_name', ''))[1].lower()
         path = att['file_path']
         if ext in PHOTO_EXTENSIONS and path and os.path.exists(path):

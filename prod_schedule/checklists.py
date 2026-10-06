@@ -223,6 +223,16 @@ def evaluate(question, answer):
     return 'ok'
 
 
+ANSWER_LABELS = {'yes': '是 Yes', 'no': '否 No', 'good': '好 Good', 'fair': '一般 Fair', 'poor': '差 Poor',
+                 'na': '不适用 N/A'}
+
+
+def answer_label(value):
+    """Bilingual display text of an answer ('yes' -> '是 Yes'; numbers as is)."""
+    text = '' if value is None else str(value).strip()
+    return ANSWER_LABELS.get(text.lower(), text)
+
+
 def question_count(template):
     return sum(len(s['questions']) for s in template.get('sections', []))
 

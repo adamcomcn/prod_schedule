@@ -138,6 +138,20 @@ class ChecklistInspectionTests(unittest.TestCase):
         self.assertIn('4 项：合格 2，不合格 1，不适用 1', page)
         self.assertIn(f'/attachments/{att["id"]}', page)
 
+        # PDF: checklist section with every question, the failed one with its action
+        pdf = self.client_for('murphy').get(f'/inspect/{JOB}/report.pdf')
+        self.assertEqual(pdf.status_code, 200)
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            return
+        text = ''.join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.get_data())).pages)
+        self.assertIn('Site checklist', text)
+        self.assertIn('Coating thickness', text)
+        self.assertIn('280 μm', text)
+        self.assertIn('Spigot', text)                      # whole section N/A: one line
+        self.assertIn('Checklist photos', text)
+
     def test_products_without_checklist_are_unchanged(self):
         with db_conn() as conn:
             conn.execute("UPDATE checklist_templates SET product_types=''")

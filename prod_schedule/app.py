@@ -2788,7 +2788,7 @@ def submit_inspection(job_key):
             'suggested_result': checklists.suggested_result(checklist['data'], checklist_answers)}
         if not inspection_data['defects'].strip() and failed:
             inspection_data['defects'] = '\n'.join(
-                f"[{f['section']} {f['num']}] {f['text']} — {f['value']}"
+                f"[{f['section']} {f['num']}] {f['text']} — {checklists.answer_label(f['value'])}"
                 + (f" {f['unit']}" if f['unit'] else '')
                 + (f" ×{f['occurrences']}" if f['occurrences'] else '') + f" → {f['action']}"
                 for f in failed)
