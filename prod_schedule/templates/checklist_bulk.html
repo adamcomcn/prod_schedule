@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('批量导入检查清单', 'Bulk import checklists') }}{% endblock %}
+
+{% block extra_style %}
+.bk-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+.bk-table th { text-align:left; background:#f8fafc; padding:7px 9px; border-bottom:1px solid #e2e8f0; }
+.bk-table td { padding:7px 9px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+.bk-st { display:inline-block; border-radius:10px; padding:1px 8px; font-size:.72rem; font-weight:600; }
+.bk-created { background:#d1fae5; color:#065f46; } .bk-updated { background:#dbeafe; color:#1e40af; }
+.bk-skipped { background:#f3f4f6; color:#6b7280; } .bk-missing, .bk-error { background:#fee2e2; color:#991b1b; }
+{% endblock %}
+
+{% block content %}
+<div class="page">
+<div style="max-width:1100px; margin:0 auto;">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+    <h1 style="font-size:1.3rem; font-weight:700; color:#1a3a5c;">{{ tr('批量导入检查清单', 'Bulk import checklists') }}</h1>
+    <a class="btn btn-outline btn-sm" href="{{ url_for('checklist_templates_page') }}">{{ tr('返回列表', 'All checklists') }}</a>
+  </div>
+
+  <div class="card">
+    <p style="font-size:.85rem; color:#374151; margin-bottom:10px;">
+      {{ tr('1. 选择导入计划（含 Plan 和 Translations 两个工作表）；2. 选择计划中列出的所有检查清单 Excel 文件（可一次多选）。',
+            '1. Choose the import plan (Plan and Translations sheets); 2. choose all the checklist Excel files it lists (select many at once).') }}
+    </p>
+    <ul style="font-size:.8rem; color:#6b7280; margin:0 0 12px 18px;">
+      <li>{{ tr('只导入“使用”为 Y 的行；新建的清单默认停用，检查后在编辑页启用。',
+                'Only rows with Use = Y are imported; new checklists start inactive — activate them on their edit page after checking.') }}</li>
+      <li>{{ tr('同名的清单会保存为新版本，并更新产品类别和物料编码。没有变化的不会产生新版本。',
+                'A checklist with the same name gets a new version and its product types / item codes are updated. Unchanged ones get no new version.') }}</li>
+      <li>{{ tr('缺少的中文按 Translations 工作表（按英文原文匹配）自动补上。',
+                'Missing Chinese is filled from the Translations sheet (matched on the English text).') }}</li>
+    </ul>
+    <form method="POST" enctype="multipart/form-data" style="display:grid; gap:10px; max-width:640px;">
+      <label style="font-size:.82rem;">{{ tr('导入计划', 'Import plan') }} (.xlsx)
+        <input type="file" name="plan" accept=".xlsx" required></label>
+      <label style="font-size:.82rem;">{{ tr('检查清单文件（多选）', 'Checklist files (select several)') }}
+        <input type="file" name="files" accept=".xlsx" multiple required></label>
+      <div><button type="submit" class="btn btn-primary btn-sm">{{ tr('导入', 'Import') }}</button></div>
+    </form>
+  </div>
+
+  {% if results %}
+  <div class="card" style="overflow-x:auto;">
+    <table class="bk-table">
+      <thead><tr><th>{{ tr('名称', 'Name') }}</th><th>{{ tr('文件', 'File') }}</th><th>{{ tr('结果', 'Result') }}</th>
+        <th>{{ tr('检查项', 'Questions') }}</th><th>{{ tr('缺中文', 'No Chinese') }}</th><th>{{ tr('版本', 'Version') }}</th><th></th></tr></thead>
+      <tbody>
+      {% for r in results %}
+      <tr>
+        <td><strong>{{ r.name }}</strong></td>
+        <td style="color:#6b7280;">{{ r.file }}</td>
+        <td><span class="bk-st bk-{{ r.status }}">{{ {'created': tr('新建', 'Created'), 'updated': tr('已更新', 'Updated'),
+              'skipped': tr('跳过', 'Skipped'), 'missing': tr('缺少文件', 'File missing'), 'error': tr('出错', 'Error')}[r.status] }}</span>
+          {% if r.detail %}<div style="font-size:.74rem; color:#6b7280; margin-top:2px;">{{ r.detail }}</div>{% endif %}</td>
+        <td>{{ r.questions or '' }}</td>
+        <td>{% if r.untranslated %}<span style="color:#b45309;">{{ r.untranslated }}</span>{% elif r.questions %}0{% endif %}</td>
+        <td>{% if r.version == 'same' %}{{ tr('无变化', 'unchanged') }}{% elif r.version %}v{{ r.version }}{% endif %}</td>
+        <td>{% if r.template_id %}<a href="{{ url_for('checklist_edit', template_id=r.template_id) }}">{{ tr('检查', 'Review') }}</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

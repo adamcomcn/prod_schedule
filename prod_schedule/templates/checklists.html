@@ -56,7 +56,10 @@
   </div>
 
   <div class="card">
-    <div style="font-weight:600; margin-bottom:6px;">&#11014; {{ tr('从 Excel 导入', 'Import from Excel') }}</div>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
+      <div style="font-weight:600;">&#11014; {{ tr('从 Excel 导入', 'Import from Excel') }}</div>
+      <a class="btn btn-outline btn-sm" href="{{ url_for('checklist_bulk_import') }}">&#128230; {{ tr('批量导入（导入计划 + 多个文件）', 'Bulk import (plan + many files)') }}</a>
+    </div>
     <p style="font-size:.8rem; color:#6b7280; margin-bottom:10px;">
       {{ tr('支持 Daemco 检查清单格式（PART / Q. / INSPECTION GUIDELINE / IF / WHAT TO DO?）。可以另加“中文”列：PART 中文、INSPECTION GUIDELINE 中文、WHAT TO DO? 中文。导入后可以在网页上修改。',
             'Daemco checklist layout (PART / Q. / INSPECTION GUIDELINE / IF / WHAT TO DO?). Optional Chinese columns: PART 中文, INSPECTION GUIDELINE 中文, WHAT TO DO? 中文. Everything can be edited on the website after the import.') }}

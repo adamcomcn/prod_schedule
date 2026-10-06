@@ -432,6 +432,82 @@ def answer_label(value):
     return ANSWER_LABELS.get(text.lower(), text)
 
 
+# ── Bulk import: an import plan workbook plus the checklist files ────────────
+
+def translation_key(text):
+    """Translations are matched on the English text, ignoring case, spacing and
+    punctuation."""
+    return re.sub(r'[^a-z0-9]+', ' ', str(text or '').lower()).strip()
+
+
+def apply_translations(template, table):
+    """Fill missing Chinese (section names, questions, actions) from
+    {translation_key(english): chinese}. Returns how many texts are still
+    without Chinese."""
+    missing = 0
+
+    def fill(obj, en_key, zh_key):
+        nonlocal missing
+        if obj.get(zh_key) or not obj.get(en_key):
+            return
+        zh = table.get(translation_key(obj[en_key]))
+        if zh:
+            obj[zh_key] = zh
+        else:
+            missing += 1
+
+    for s in template.get('sections', []):
+        fill(s, 'name', 'name_zh')
+        for q in s['questions']:
+            fill(q, 'text', 'text_zh')
+            fill(q, 'action', 'action_zh')
+    return missing
+
+
+def carry_ids(template, previous):
+    """Reuse section / question ids of the previous version for the same
+    section name and question text, so answers keep their meaning and an
+    unchanged re-import compares equal."""
+    if not previous:
+        return template
+    sections = {translation_key(s['name']): s for s in previous.get('sections', [])}
+    for s in template.get('sections', []):
+        old = sections.get(translation_key(s['name']))
+        if not old:
+            continue
+        s['id'] = old['id']
+        questions = {translation_key(q['text']): q['id'] for q in old['questions']}
+        for q in s['questions']:
+            q['id'] = questions.get(translation_key(q['text']), q['id'])
+    return template
+
+
+def parse_import_plan(file_bytes):
+    """The 'Plan' sheet (file, use Y/N, name, product types, item codes) and
+    the optional 'Translations' sheet (English, 中文) of an import plan.
+    Returns (rows, {translation_key: chinese})."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    if 'Plan' not in wb.sheetnames:
+        raise ValueError('The import plan needs a sheet named "Plan"')
+    rows = []
+    for values in wb['Plan'].iter_rows(min_row=2, values_only=True):
+        values = list(values) + [None] * 7
+        file_name = _clean(values[0])
+        if not file_name:
+            continue
+        rows.append({'file': file_name, 'use': _clean(values[1]).upper(), 'name': _clean(values[2]),
+                     'types': [t.strip() for t in re.split(r'[,;\s]+', _clean(values[3])) if t.strip()],
+                     'codes': _clean(values[4]), 'note': _clean(values[6])})
+    table = {}
+    if 'Translations' in wb.sheetnames:
+        for values in wb['Translations'].iter_rows(min_row=2, values_only=True):
+            en, zh = (list(values) + [None, None])[:2]
+            if en and zh:
+                table[translation_key(en)] = _clean_text(zh)
+    return rows, table
+
+
 def question_count(template):
     return sum(len(s['questions']) for s in template.get('sections', []))
 

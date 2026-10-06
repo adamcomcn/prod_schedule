@@ -1,5 +1,5 @@
 import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time, base64, uuid, zipfile, re, unicodedata, shutil
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from functools import wraps
@@ -5176,6 +5176,78 @@ def checklist_templates_page():
     return render_template('checklists.html', templates=templates)
 
 
+
+@app.route('/checklists/bulk', methods=['GET', 'POST'])
+def checklist_bulk_import():
+    """Import many checklists at once from an import plan (Plan +
+    Translations sheets) and the checklist files it lists. New checklists are
+    created inactive; a checklist with the same name gets a new version."""
+    _require_checklist_editor()
+    if request.method == 'GET':
+        return render_template('checklist_bulk.html', results=None)
+    plan_file = request.files.get('plan')
+    if not plan_file or _upload_extension(plan_file.filename) != '.xlsx':
+        flash(tr('请选择导入计划（.xlsx）', 'Choose the import plan (.xlsx)'), 'error')
+        return redirect(url_for('checklist_bulk_import'))
+    try:
+        plan, table = checklists.parse_import_plan(plan_file.read())
+    except Exception as exc:
+        flash(tr('无法读取导入计划：', 'The import plan could not be read: ') + str(exc)[:200], 'error')
+        return redirect(url_for('checklist_bulk_import'))
+    uploads = {os.path.basename(f.filename or '').lower(): f for f in request.files.getlist('files') if f.filename}
+    results = []
+    with db_conn() as conn:
+        for row in plan:
+            result = {'file': row['file'], 'name': row['name'] or row['file'], 'status': '', 'detail': ''}
+            results.append(result)
+            if row['use'] != 'Y':
+                result['status'] = 'skipped'
+                result['detail'] = row['note']
+                continue
+            upload = uploads.get(row['file'].lower())
+            if not upload:
+                result['status'] = 'missing'
+                continue
+            try:
+                data = checklists.parse_checklist_workbook(upload.read())
+            except Exception as exc:
+                result['status'] = 'error'
+                result['detail'] = str(exc)[:200]
+                continue
+            result['untranslated'] = checklists.apply_translations(data, table)
+            result['questions'] = checklists.question_count(data)
+            types = ','.join(t for t in row['types'] if t in evidence_rules.PRODUCT_TYPES)
+            codes = ', '.join(dict.fromkeys(_code_patterns(row['codes'])))
+            existing = conn.execute('SELECT id FROM checklist_templates WHERE name=?', (result['name'],)).fetchone()
+            if existing:
+                template_id = existing['id']
+                conn.execute('UPDATE checklist_templates SET product_types=?, item_codes=? WHERE id=?',
+                             (types, codes, template_id))
+                result['status'] = 'updated'
+            else:
+                template_id = conn.execute(
+                    'INSERT INTO checklist_templates (name, product_types, item_codes, active) VALUES (?,?,?,0)',
+                    (result['name'], types, codes)).lastrowid
+                result['status'] = 'created'
+            current = conn.execute('SELECT data_json FROM checklist_versions WHERE template_id=? '
+                                   'ORDER BY version DESC LIMIT 1', (template_id,)).fetchone()
+            previous = json.loads(current['data_json']) if current else None
+            data = checklists.carry_ids(data, previous)
+            if previous == data:
+                result['version'] = 'same'
+            else:
+                result['version'] = save_checklist_version(
+                    conn, template_id, data, tr('批量导入：', 'Bulk import: ') + row['file'])
+            result['template_id'] = template_id
+    counts = Counter(r['status'] for r in results)
+    flash(tr(f"新建 {counts.get('created', 0)}，更新 {counts.get('updated', 0)}，跳过 {counts.get('skipped', 0)}，"
+             f"缺文件 {counts.get('missing', 0)}，出错 {counts.get('error', 0)}。新建的清单默认停用，检查后再启用。",
+             f"Created {counts.get('created', 0)}, updated {counts.get('updated', 0)}, skipped {counts.get('skipped', 0)}, "
+             f"missing {counts.get('missing', 0)}, errors {counts.get('error', 0)}. New checklists start inactive — "
+             "check them, then activate."), 'success' if not counts.get('error') else 'warning')
+    return render_template('checklist_bulk.html', results=results)
+
+
 @app.route('/checklists/import', methods=['POST'])
 def checklist_import():
     _require_checklist_editor()
@@ -5192,6 +5264,9 @@ def checklist_import():
     with db_conn() as conn:
         if target.isdigit() and conn.execute('SELECT 1 FROM checklist_templates WHERE id=?', (target,)).fetchone():
             template_id = int(target)
+            current = conn.execute('SELECT data_json FROM checklist_versions WHERE template_id=? '
+                                   'ORDER BY version DESC LIMIT 1', (template_id,)).fetchone()
+            data = checklists.carry_ids(data, json.loads(current['data_json']) if current else None)
         else:
             name = request.form.get('name', '').strip() or data['title'] or _display_filename(upload.filename)
             template_id = conn.execute('INSERT INTO checklist_templates (name, product_types) VALUES (?, ?)',
