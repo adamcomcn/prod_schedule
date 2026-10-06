@@ -24,8 +24,8 @@ import secrets
 QUESTION_TYPES = ('yes_no', 'rating', 'number', 'text')   # text: recorded only (e.g. a date code)
 RATINGS = ('good', 'fair', 'poor')
 PHOTO_RULES = ('fail', 'always')
-APPLICABLE_RE = re.compile(r'\(\s*if\s+applicable\s*\)', re.I)
-RATING_RE = re.compile(r'\[\s*good\s*/\s*fair\s*/\s*poor\s*\]', re.I)
+APPLICABLE_RE = re.compile(r'[\(\[]\s*if\s+applicable\s*[\)\]]', re.I)
+RATING_RE = re.compile(r'\[\s*good\s*[/,、]\s*fair\s*[/,、]\s*poor\s*\]?', re.I)
 ANSWER_HINT_RE = re.compile(r'\[\s*(y\s*/\s*n|mmyy)\s*\]', re.I)     # [Y/N], [MMYY]
 DUAL_ONLY_RE = re.compile(r'^\s*(dual|single)\s+only\s*:', re.I)
 
@@ -44,54 +44,134 @@ def _clean_text(text):
     return '\n'.join(line for line in lines if line)
 
 
+CJK_RE = re.compile(r'[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]')
+LATIN_RE = re.compile(r'[A-Za-z]')
+FOOTER_WORDS = ('DATE', 'SIGNATURE', 'PRODUCTION BATCH', 'INSPECTION DATE', 'DPL')
+
+
+def split_bilingual(text):
+    """Split a cell holding both languages ('部件是否…？Is the part…?' or
+    'Is the part…?部件是否…？') into (english, chinese). Short Latin tokens
+    inside Chinese (DAEMCO, M16, 2mm) stay with the Chinese."""
+    text = str(text or '')
+    if not CJK_RE.search(text):
+        return text, ''
+    if not LATIN_RE.search(CJK_RE.sub('', text)):
+        return '', text
+    # runs: a CJK run continues through anything but Latin letters, a Latin
+    # run through anything but CJK characters
+    runs = []
+    for m in re.finditer(r'[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef][^A-Za-z]*|[^\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]+',
+                         text):
+        chunk = m.group(0)
+        kind = 'zh' if CJK_RE.match(chunk) else 'en'
+        if kind == 'en' and not LATIN_RE.search(chunk):
+            kind = 'zh' if runs and runs[-1][0] == 'zh' else 'en'
+        runs.append([kind, chunk])
+    # a Latin run that is a single short token next to Chinese belongs to it
+    for i, (kind, chunk) in enumerate(runs):
+        if kind != 'en':
+            continue
+        body = chunk.strip()
+        before = i > 0 and runs[i - 1][0] == 'zh'
+        after = i + 1 < len(runs) and runs[i + 1][0] == 'zh'
+        code_like = (bool(re.search(r'\d', body)) or (body.isupper() and len(body) > 1) or len(body) == 1
+                     or (before and runs[i - 1][1].rstrip()[-1:].isdigit()))       # '2' + 'mm'
+        if ' ' not in body and len(body) <= 8 and ((before and after) or ((before or after) and code_like)):
+            runs[i][0] = 'zh'
+            continue
+        # "...holes?M16" before Chinese: the trailing token after ?/. is Chinese's
+        m = re.search(r'([?.!:;)])([A-Za-z0-9][^\s?.!:;]*)$', chunk)
+        if m and i + 1 < len(runs) and runs[i + 1][0] == 'zh':
+            runs[i][1] = chunk[:m.start(2)]
+            runs[i + 1][1] = m.group(2) + runs[i + 1][1]
+    en = ' '.join(c.strip() for k, c in runs if k == 'en' and c.strip())
+    zh_parts, gap = [], False
+    for k, c in runs:
+        if k == 'zh':
+            zh_parts.append((' ' if gap and zh_parts else '') + c)
+            gap = False
+        else:
+            gap = True                     # English in between: keep the Chinese pieces apart
+    zh = _clean(''.join(zh_parts))
+    return en.strip(' /'), zh.strip(' /')
+
+
+def _strip_markers(text):
+    text = RATING_RE.sub('', APPLICABLE_RE.sub('', text))
+    return re.sub(r'[\[［【]\s*良好\s*[、,，/]\s*一般\s*[、,，/]\s*较差\s*[\]］】]', '', text).strip()
+
+
 def parse_condition(condition, text=''):
-    """Turn the Excel 'IF' column into a question type and fail rule:
-    'If no' / 'If yes' / 'If Poor' / 'If < 300μm'."""
-    cond = _clean(condition)
+    """Turn the Excel 'IF' column into (rule, action override):
+    'If no' / 'If yes' / 'If Poor' / 'If < 300μm' / 'If less than' (limit in
+    the question) / a whole sentence ('Reject the valve if ...')."""
+    cond = _clean(split_bilingual(condition)[0] or condition)
     low = cond.lower()
-    if cond in ('-', '—'):
-        return {'type': 'text'}
-    number = re.search(r'([<>])\s*=?\s*([\d.]+)\s*([^\s\d]*)', cond)
+    media = re.search(r'\b(video|photo)', text or '', re.I)
+    if cond in ('-', '—', ''):
+        return ({'type': 'yes_no', 'fail_on': 'no'} if media else {'type': 'text'}), None
+    number = re.search(r'([<>])\s*=?\s*([\d.]+)\s*([^\s\d)]*)', cond)
+    if 'less than' in low or 'greater than' in low or 'more than' in low:
+        number = re.search(r'([<>])\s*=?\s*([\d.]+)\s*([^\s\d)]*)', text or '')
+        if number:
+            sign = '<' if 'less' in low else '>'
+            number = (sign, number.group(2), number.group(3))
+    elif number:
+        number = number.groups()
+    if not number and re.match(r'\s*what (is|are)\s', text or '', re.I):
+        # "What is the coating thickness? (External > 300μm)" with "If no": a measurement
+        found = re.search(r'([<>])\s*=?\s*([\d.]+)\s*([^\s\d)]*)', text)
+        if found:
+            number = ('<' if found.group(1) == '>' else '>', found.group(2), found.group(3))
     if number:
-        value = float(number.group(2))
+        value = float(number[1])
         value = int(value) if value == int(value) else value
-        rule = {'type': 'number', 'unit': number.group(3)}
-        rule['min' if number.group(1) == '<' else 'max'] = value
-        return rule
+        rule = {'type': 'number', 'unit': number[2]}
+        rule['min' if number[0] == '<' else 'max'] = value
+        return rule, None
     if 'poor' in low or RATING_RE.search(text or ''):
-        return {'type': 'rating', 'fail_on': 'poor'}
-    if re.search(r'\byes\b', low):
-        return {'type': 'yes_no', 'fail_on': 'yes'}
-    return {'type': 'yes_no', 'fail_on': 'no'}
+        return {'type': 'rating', 'fail_on': 'poor'}, None
+    if re.match(r'if\s+(yes|no|fail|failed)\b', low) or len(cond) <= 15:
+        return {'type': 'yes_no', 'fail_on': 'yes' if re.search(r'\byes\b', low) else 'no'}, None
+    # a sentence such as "Reject the valve if the gasket does not fit properly"
+    return {'type': 'yes_no', 'fail_on': 'no'}, cond
 
 
 def _find_columns(header):
-    """Column index per field from the header row ('PART', 'Q.', 'INSPECTION
-    GUIDELINE', 'IF', 'WHAT TO DO?' plus optional '... 中文' columns)."""
+    """Column index per field from the header row ('PART'/'Item', 'Q.',
+    'INSPECTION GUIDELINE', 'IF', 'WHAT TO DO?' / 'If no, what to do?', plus
+    optional '... 中文' columns). Bilingual headers ('如果IF') are fine."""
     cols = {}
     for i, cell in enumerate(header):
-        h = _clean(cell).upper()
-        if not h:
+        raw = _clean(cell)
+        if not raw:
             continue
-        zh = '中文' in h or 'CHINESE' in h
-        if h.startswith('PART') or h.startswith('部位'):
+        zh = '中文' in raw or 'CHINESE' in raw.upper()
+        h = _clean(CJK_RE.sub(' ', raw)).upper()
+        if h.startswith('PART') or h == 'ITEM' or raw.startswith('部位'):
             cols['part_zh' if zh else 'part'] = i
         elif h in ('Q.', 'Q', 'NO.', 'NO'):
             cols['num'] = i
-        elif 'GUIDELINE' in h or '检查内容' in h:
+        elif 'GUIDELINE' in h or '检查内容' in raw:
             cols['text_zh' if zh else 'text'] = i
         elif h in ('IF', 'CONDITION'):
             cols['condition'] = i
-        elif 'WHAT TO DO' in h or 'ACTION' in h or '处理' in h:
+        elif h.startswith('IF NO') and 'WHAT TO DO' in h:
+            cols['action'] = i
+            cols['default_fail'] = 'no'
+        elif 'WHAT TO DO' in h or 'ACTION' in h or '处理' in raw:
             cols['action_zh' if zh else 'action'] = i
-        elif 'FREQUENCY' in h or '频率' in h:
+        elif 'FREQUENCY' in h or '频率' in raw:
             cols['hint_zh' if zh else 'hint'] = i
+        elif 'GLOSSARY' in h:
+            cols['glossary'] = i
     return cols
 
 
 def parse_checklist_workbook(file_bytes):
-    """Read a checklist in the Daemco Excel layout into a template dict.
-    Raises ValueError when the layout is not recognised."""
+    """Read a checklist in one of the Daemco Excel layouts into a template
+    dict. Raises ValueError when the layout is not recognised."""
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.worksheets[0]
@@ -107,15 +187,18 @@ def parse_checklist_workbook(file_bytes):
     cols = _find_columns(rows[header_idx])
     if 'text' not in cols or 'num' not in cols:
         raise ValueError('The header row needs "Q." and "INSPECTION GUIDELINE" columns')
+    # the section name is the column just left of "Q." (some files label the
+    # column further left "PART" and keep a wider group name there)
+    section_col = cols['num'] - 1 if cols['num'] > 0 else cols.get('part')
 
-    def cell(row, key):
-        idx = cols.get(key)
-        return _clean(row[idx]) if idx is not None and idx < len(row) else ''
+    def cell(row, key, idx=None):
+        idx = cols.get(key) if idx is None else idx
+        return _clean(row[idx]) if idx is not None and idx < len(row) and row[idx] is not None else ''
 
     title = ''
-    for row in rows[:header_idx]:
+    for row in rows[:header_idx + 1]:
         for c in row:
-            if 'CHECKLIST' in _clean(c).upper():
+            if 'CHECKLIST' in _clean(c).upper() or 'GUIDELINES' in _clean(c).upper() or '检查确认单' in _clean(c):
                 title = _clean(c)
                 break
         if title:
@@ -123,36 +206,46 @@ def parse_checklist_workbook(file_bytes):
 
     sections, current = [], None
     for row in rows[header_idx + 1:]:
-        text = cell(row, 'text')
-        part = cell(row, 'part')
-        if part and part.upper() in ('DATE', 'SIGNATURE'):
+        part = cell(row, None, section_col)
+        part_en, part_zh = split_bilingual(part)
+        footer = _clean(CJK_RE.sub(' ', part)).upper().rstrip(':')
+        if footer in FOOTER_WORDS or any(footer.startswith(w) for w in FOOTER_WORDS[:4]):
+            current = None
             continue
         if part and (current is None or part != current['_source']):
-            optional = bool(APPLICABLE_RE.search(part))
             current = {'id': new_id('s'), '_source': part,
-                       'name': APPLICABLE_RE.sub('', part).strip(),
-                       'name_zh': APPLICABLE_RE.sub('', cell(row, 'part_zh')).strip(),
-                       'optional': optional, 'questions': []}
+                       'name': APPLICABLE_RE.sub('', part_en or part_zh).strip(),
+                       'name_zh': APPLICABLE_RE.sub('', part_zh or cell(row, 'part_zh')).strip(),
+                       'optional': bool(APPLICABLE_RE.search(part)), 'questions': []}
             sections.append(current)
-        if not text:
+        raw_text = cell(row, 'text')
+        if not raw_text or raw_text.startswith('#'):        # '#VALUE!' rows under a question
             continue
         if current is None:
             current = {'id': new_id('s'), '_source': '', 'name': 'General', 'name_zh': '通用',
                        'optional': False, 'questions': []}
             sections.append(current)
-        rule = parse_condition(cell(row, 'condition'), text)
-        question = {
+        text, text_zh = split_bilingual(raw_text)
+        if not text:
+            text, text_zh = text_zh, ''
+        text_zh = text_zh or cell(row, 'text_zh')
+        action, action_zh = split_bilingual(cell(row, 'action'))
+        if not action and action_zh:
+            action, action_zh = action_zh, ''
+        condition = cell(row, 'condition') if 'condition' in cols else ('If ' + cols.get('default_fail', 'no'))
+        rule, sentence = parse_condition(condition, raw_text)
+        hint = cell(row, 'hint') or (f"Defect code: {cell(row, 'glossary')}" if cell(row, 'glossary') else '')
+        current['questions'].append({
             'id': new_id(),
-            'text': RATING_RE.sub('', APPLICABLE_RE.sub('', text)).strip(),
-            'text_zh': RATING_RE.sub('', APPLICABLE_RE.sub('', cell(row, 'text_zh'))).strip(),
-            'action': cell(row, 'action'), 'action_zh': cell(row, 'action_zh'),
-            'hint': cell(row, 'hint'), 'hint_zh': cell(row, 'hint_zh'),
-            'optional': bool(APPLICABLE_RE.search(text)),
-            'photo': 'fail', **rule}
-        current['questions'].append(question)
-    for s in sections:
-        s.pop('_source', None)
-    sections = [s for s in sections if s['questions']]
+            'text': _strip_markers(text), 'text_zh': _strip_markers(text_zh),
+            'action': action or sentence or '', 'action_zh': action_zh or cell(row, 'action_zh'),
+            'hint': hint, 'hint_zh': cell(row, 'hint_zh'),
+            'optional': bool(APPLICABLE_RE.search(raw_text)),
+            'photo': 'always' if re.search(r'\b(video|photo)\b', text, re.I) and not re.search(
+                r'refer to|see (the )?(photo|drawing)', text, re.I) else 'fail', **rule})
+    for sec in sections:
+        sec.pop('_source', None)
+    sections = [sec for sec in sections if sec['questions']]
     if not sections:
         raise ValueError('No questions were found under the header row')
     return normalise_template({'title': title, 'product_photo': True, 'sections': sections})
