@@ -1513,6 +1513,64 @@ def _format_export_sheet(worksheet):
         worksheet.column_dimensions[column[0].column_letter].width = width
 
 ONTIME_MIN_SAMPLE = 5   # below this the on-time rate is shown as indicative only
+KPI_EXCLUDED_ROLES = ('admin', 'hq')   # they do not inspect: keep them out of the inspector KPIs
+
+
+def inspector_kpis(inspections, est_map, users, weeks):
+    """Per-inspector report counts, pass / on-time rates and a weekly series.
+
+    inspections: {job_key: [report, ...]}; est_map: {job_key: estimated completion cell};
+    users: rows with id, username, display_name, role; weeks: ['2026-W40', ...].
+    A report belongs to the account whose display name or username equals its
+    inspector name (case-insensitive); reports of admin / HQ accounts are left out.
+    Names without an account are kept under the name as written."""
+    by_name = {}
+    for u in users:
+        for key in (u['username'], u['display_name']):
+            key = (key or '').strip().lower()
+            if key:
+                by_name.setdefault(key, u)
+    raw = {}
+    for job_key, records in inspections.items():
+        est = _parse_date(est_map.get(job_key, ''))
+        for rec in records:
+            name = (rec.get('inspector_name') or '').strip()
+            if not name:
+                continue
+            user = by_name.get(name.lower())
+            if user and user['role'] in KPI_EXCLUDED_ROLES:
+                continue
+            key = ('user', user['id']) if user else ('name', name.lower())
+            s = raw.setdefault(key, dict(
+                name=(user['display_name'] or user['username']) if user else name,
+                total=0, passed=0, failed=0, partial=0, on_time=0, late=0, no_est=0,
+                last_date='', weekly=defaultdict(int)))
+            s['total'] += 1
+            result = (rec.get('result') or '').lower()
+            if 'fail' in result:
+                s['failed'] += 1
+            elif 'partial' in result:
+                s['partial'] += 1
+            elif 'pass' in result:
+                s['passed'] += 1
+            insp_date = _parse_date(rec.get('inspection_date'))
+            if insp_date:
+                s['last_date'] = max(s['last_date'], insp_date.isoformat())
+                year, week, _ = insp_date.isocalendar()
+                s['weekly'][f'{year}-W{week:02d}'] += 1
+            if est and insp_date:
+                s['on_time' if insp_date <= est else 'late'] += 1
+            else:
+                s['no_est'] += 1
+    stats = []
+    for s in sorted(raw.values(), key=lambda s: (-s['total'], s['name'].lower())):
+        s['weekly'] = {w: s['weekly'].get(w, 0) for w in weeks}
+        s['max_weekly'] = max(s['weekly'].values(), default=0) or 1
+        s['rated'] = s['on_time'] + s['late']
+        s['ontime_pct'] = round(s['on_time'] / s['rated'] * 100) if s['rated'] else None
+        s['small_sample'] = 0 < s['rated'] < ONTIME_MIN_SAMPLE
+        stats.append((s['name'], s))
+    return stats
 
 
 @app.route('/dashboard')
@@ -1631,66 +1689,16 @@ def dashboard():
             conn.execute("SELECT job_key, est_completion FROM outstanding_jobs  WHERE est_completion!=''").fetchall() +
             conn.execute("SELECT job_key, est_completion FROM inspection_tasks WHERE est_completion!=''").fetchall()
         )
-    est_map = {r['job_key']: r['est_completion'][:10] for r in _est_rows if r['job_key'] and r['est_completion']}
+        users = conn.execute('SELECT id, username, display_name, role FROM users').fetchall()
+    est_map = {r['job_key']: r['est_completion'] for r in _est_rows if r['job_key'] and r['est_completion']}
 
-    # Last 8 ISO weeks (oldest → newest)
-    from datetime import datetime as _dt, timedelta as _td
-    from collections import defaultdict
-    _today = _dt.now()
+    # Last 8 ISO weeks (oldest → newest), by the factories' calendar
+    _today = china_today()
     recent_weeks = []
     for _i in range(7, -1, -1):
-        _d = _today - _td(weeks=_i)
-        _yr, _wk, _ = _d.isocalendar()
+        _yr, _wk, _ = (_today - timedelta(weeks=_i)).isocalendar()
         recent_weeks.append(f"{_yr}-W{_wk:02d}")
-
-    # Inspector statistics with on-time rate + weekly breakdown
-    _insp_raw = defaultdict(lambda: dict(
-        total=0, passed=0, failed=0, partial=0,
-        on_time=0, late=0, no_est=0, last_date='',
-        weekly=defaultdict(int)
-    ))
-    for job_key, records in inspections.items():
-        est = est_map.get(job_key, '')
-        for rec in records:
-            name = rec.get('inspector_name', '').strip()
-            if not name:
-                continue
-            s = _insp_raw[name]
-            s['total'] += 1
-            r = rec.get('result', '').lower()
-            if 'fail' in r:    s['failed'] += 1
-            elif 'partial' in r: s['partial'] += 1
-            elif 'pass' in r:  s['passed'] += 1
-            insp_date = (rec.get('inspection_date') or '')[:10]
-            if insp_date and insp_date > s['last_date']:
-                s['last_date'] = insp_date
-            if insp_date:
-                try:
-                    _d2 = _dt.strptime(insp_date, '%Y-%m-%d')
-                    _yr2, _wk2, _ = _d2.isocalendar()
-                    s['weekly'][f"{_yr2}-W{_wk2:02d}"] += 1
-                except Exception:
-                    pass
-            if est and insp_date:
-                (s['on_time'] if insp_date <= est else s['late']).__class__  # dummy
-                if insp_date <= est:
-                    s['on_time'] += 1
-                else:
-                    s['late'] += 1
-            else:
-                s['no_est'] += 1
-
-    # Serialise for template (convert inner defaultdicts)
-    inspector_stats = []
-    for name, s in sorted(_insp_raw.items(), key=lambda x: -x[1]['total']):
-        sc = dict(s)
-        sc['weekly'] = {w: s['weekly'].get(w, 0) for w in recent_weeks}
-        sc['max_weekly'] = max(sc['weekly'].values()) if any(sc['weekly'].values()) else 1
-        rated = sc['on_time'] + sc['late']
-        sc['ontime_pct'] = round(sc['on_time'] / rated * 100) if rated else None
-        sc['rated'] = rated
-        sc['small_sample'] = 0 < rated < ONTIME_MIN_SAMPLE
-        inspector_stats.append((name, sc))
+    inspector_stats = inspector_kpis(inspections, est_map, users, recent_weeks)
 
     outside = {k: v for k, v in inspections.items() if v and k not in seen_all}
     inspections_outside = {'jobs': len(outside), 'reports': sum(len(v) for v in outside.values())}
