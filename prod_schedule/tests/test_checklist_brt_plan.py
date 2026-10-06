@@ -83,7 +83,7 @@ class ItemCodeTemplateTests(unittest.TestCase):
             for table in ('users', 'inspection_tasks', 'checklist_templates', 'checklist_versions',
                           'inspection_drafts', 'draft_files', 'product_reference'):
                 conn.execute(f'DELETE FROM {table}')
-            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('murphy','x','lead')")
+            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('murphy','x','admin')")
             conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('yu','x','inspector')")
             self.ids = {r['username']: r['id'] for r in conn.execute('SELECT id, username FROM users')}
         schedule = {'MELBOURNE': [['Order Number', 'Daemco Purchase Order', 'Item Code', 'Item Description', 'Quantity'],

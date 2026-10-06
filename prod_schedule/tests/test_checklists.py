@@ -99,7 +99,7 @@ class PageTests(unittest.TestCase):
         with db_conn() as conn:
             for table in ('users', 'checklist_templates', 'checklist_versions'):
                 conn.execute(f'DELETE FROM {table}')
-            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('murphy','x','lead')")
+            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('murphy','x','admin')")
             conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('yu','x','inspector')")
             self.ids = {r['username']: r['id'] for r in conn.execute('SELECT id, username FROM users')}
 
@@ -159,6 +159,16 @@ class PageTests(unittest.TestCase):
         self.assertEqual(yu.get('/checklists').status_code, 403)
         self.assertEqual(self.import_sample(yu).status_code, 403)
         self.assertNotIn('/checklists', yu.get('/tasks').get_data(as_text=True))
+
+    def test_only_admins_see_checklists(self):
+        with db_conn() as conn:
+            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('lead2','x','lead')")
+            self.ids['lead2'] = conn.execute("SELECT id FROM users WHERE username='lead2'").fetchone()[0]
+        lead = self.client_for('lead2')
+        self.assertEqual(lead.get('/checklists').status_code, 403)
+        self.assertEqual(lead.get('/checklists/bulk').status_code, 403)
+        self.assertNotIn('/checklists', lead.get('/tasks').get_data(as_text=True))
+        self.assertIn('/checklists', self.client_for('murphy').get('/tasks').get_data(as_text=True))   # admin
 
 
 if __name__ == '__main__':

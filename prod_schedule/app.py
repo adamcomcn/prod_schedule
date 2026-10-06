@@ -5099,7 +5099,7 @@ def checklist_problem_messages(checklist, problems, limit=6):
 # ── Inspection checklists (templates per product type) ──────────────────────
 
 def _require_checklist_editor():
-    if not g.can_assign:
+    if not g.is_admin:            # checklist templates are maintained by admins only
         abort(403)
 
 

@@ -39,7 +39,7 @@ class BulkImportTests(unittest.TestCase):
         with db_conn() as conn:
             for table in ('users', 'checklist_templates', 'checklist_versions'):
                 conn.execute(f'DELETE FROM {table}')
-            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('murphy','x','lead')")
+            conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('murphy','x','admin')")
             conn.execute("INSERT INTO users (username,password_hash,role) VALUES ('yu','x','inspector')")
             self.ids = {r['username']: r['id'] for r in conn.execute('SELECT id, username FROM users')}
 
