@@ -45,10 +45,12 @@
   </div>
 
   <div class="card">
-    <div class="card-title">{{ tr('账号列表', 'User accounts') }}</div>
+    <div class="card-title">{{ tr('账号列表', 'User accounts') }}
+      <a href="{{ url_for('user_logins') }}" class="btn btn-outline btn-sm" style="float:right;">{{ tr('登录记录', 'Sign-in history') }}</a>
+    </div>
     <div style="overflow-x:auto;">
     <table class="user-table">
-      <thead><tr><th>{{ tr('用户名', 'Username') }}</th><th>{% if show_employee %}{{ tr('显示名称 / 邮箱 / 角色 / 关联员工', 'Name / E-mail / Role / Employee') }}{% else %}{{ tr('显示名称 / 邮箱 / 角色', 'Name / E-mail / Role') }}{% endif %}</th><th>{{ tr('状态', 'Status') }}</th><th>{{ tr('操作', 'Actions') }}</th></tr></thead>
+      <thead><tr><th>{{ tr('用户名', 'Username') }}</th><th>{% if show_employee %}{{ tr('显示名称 / 邮箱 / 角色 / 关联员工', 'Name / E-mail / Role / Employee') }}{% else %}{{ tr('显示名称 / 邮箱 / 角色', 'Name / E-mail / Role') }}{% endif %}</th><th>{{ tr('状态', 'Status') }}</th><th>{{ tr('最近登录', 'Last sign-in') }}</th><th>{{ tr('操作', 'Actions') }}</th></tr></thead>
       <tbody>
       {% for user in users %}
         <tr>
@@ -68,6 +70,11 @@
             </form>
           </td>
           <td>{{ tr('启用', 'Active') if user.active else tr('已停用', 'Disabled') }}</td>
+          <td style="white-space:nowrap;font-size:.8rem;">
+            {% set last = last_logins.get(user.id) %}
+            {% if last %}<a href="{{ url_for('user_logins', user=user.username) }}">{{ last.created_at | localtime }}</a><br><span style="color:#6b7280;font-family:monospace;">{{ last.ip }}</span>
+            {% else %}<span style="color:#9ca3af;">{{ tr('从未登录', 'Never') }}</span>{% endif %}
+          </td>
           <td>
             <div class="user-actions">
             <form method="POST" action="{{ url_for('user_toggle', uid=user.id) }}">

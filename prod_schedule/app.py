@@ -78,7 +78,7 @@ ADMIN_ENDPOINTS = {
     'region_edit', 'region_delete', 'leave_approve', 'leave_reject',
     'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
-    'user_update',
+    'user_update', 'user_logins',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -141,6 +141,41 @@ def _login_rate_limited(client_id):
 
 def _record_login_failure(client_id):
     _login_failures[client_id].append(time.monotonic())
+
+LOGIN_EVENTS = ('login', 'failed', 'blocked', 'logout')
+LOGIN_EVENT_RETENTION_DAYS = 365
+
+def _log_login_event(event, username='', user_id=None):
+    """Sign-in history for admins (/admin/logins). Must never break logging in."""
+    try:
+        now = datetime.now(_tz.utc)
+        with db_conn() as conn:
+            conn.execute(
+                'INSERT INTO login_events (created_at, user_id, username, event, ip, user_agent) '
+                'VALUES (?,?,?,?,?,?)',
+                (now.strftime('%Y-%m-%d %H:%M:%S'), user_id, (username or '')[:64], event,
+                 (request.remote_addr or '')[:64], request.headers.get('User-Agent', '')[:300]))
+            if event == 'login':
+                cutoff = now - timedelta(days=LOGIN_EVENT_RETENTION_DAYS)
+                conn.execute('DELETE FROM login_events WHERE created_at < ?',
+                             (cutoff.strftime('%Y-%m-%d %H:%M:%S'),))
+    except Exception:
+        logger.exception('Unable to record login event')
+
+def device_label(user_agent):
+    """'Android · 微信' style summary of a User-Agent string."""
+    ua = user_agent or ''
+    system = next((name for key, name in (
+        ('iPhone', 'iPhone'), ('iPad', 'iPad'), ('Android', 'Android'), ('Windows', 'Windows'),
+        ('Mac OS X', 'Mac'), ('CrOS', 'ChromeOS'), ('Linux', 'Linux')) if key in ua), '')
+    browser = next((name for key, name in (
+        ('MicroMessenger', tr('微信', 'WeChat')), ('DingTalk', tr('钉钉', 'DingTalk')),
+        ('Edg/', 'Edge'), ('OPR/', 'Opera'), ('Firefox/', 'Firefox'), ('HuaweiBrowser', tr('华为浏览器', 'Huawei')),
+        ('MiuiBrowser', tr('小米浏览器', 'Xiaomi')), ('UCBrowser', 'UC'), ('QQBrowser', 'QQ'),
+        ('Chrome/', 'Chrome'), ('Safari/', 'Safari')) if key in ua), '')
+    return ' · '.join(p for p in (system, browser) if p) or (ua[:40] if ua else '—')
+
+app.jinja_env.filters['device_label'] = device_label
 
 def _safe_next_url(value):
     if not value or not value.startswith('/') or value.startswith('//') or '\\' in value:
@@ -6300,7 +6335,41 @@ def users_admin():
         employees = conn.execute(
             'SELECT id, name FROM employees WHERE active=1 ORDER BY name'
         ).fetchall()
-    return render_template('users.html', users=users, employees=employees)
+        last_logins = {row['user_id']: row for row in conn.execute(
+            "SELECT user_id, MAX(created_at) AS created_at, ip FROM login_events "
+            "WHERE event='login' AND user_id IS NOT NULL GROUP BY user_id")}
+    return render_template('users.html', users=users, employees=employees, last_logins=last_logins)
+
+LOGIN_HISTORY_LIMIT = 500
+
+@app.route('/admin/logins')
+def user_logins():
+    """Who signed in, when and from which IP / device (newest first)."""
+    user_filter = request.args.get('user', '').strip()
+    event_filter = request.args.get('event', '').strip()
+    where, params = [], []
+    if user_filter:
+        where.append('e.username = ? COLLATE NOCASE')
+        params.append(user_filter)
+    if event_filter in LOGIN_EVENTS:
+        where.append('e.event = ?')
+        params.append(event_filter)
+    with db_conn() as conn:
+        # new_ip: a successful login from an IP this account never logged in from before
+        events = conn.execute(
+            'SELECT e.*, u.display_name, '
+            "  (e.event = 'login' AND e.user_id IS NOT NULL"
+            "   AND EXISTS (SELECT 1 FROM login_events p WHERE p.user_id = e.user_id"
+            "               AND p.event = 'login' AND p.id < e.id)"
+            "   AND NOT EXISTS (SELECT 1 FROM login_events p WHERE p.user_id = e.user_id"
+            "                   AND p.event = 'login' AND p.ip = e.ip AND p.id < e.id)) AS new_ip "
+            'FROM login_events e LEFT JOIN users u ON u.id = e.user_id '
+            + ('WHERE ' + ' AND '.join(where) + ' ' if where else '')
+            + 'ORDER BY e.id DESC LIMIT ?', (*params, LOGIN_HISTORY_LIMIT)).fetchall()
+        usernames = [row[0] for row in conn.execute('SELECT username FROM users ORDER BY username')]
+    return render_template('login_history.html', events=events, usernames=usernames,
+                           user_filter=user_filter, event_filter=event_filter,
+                           limit=LOGIN_HISTORY_LIMIT, retention_days=LOGIN_EVENT_RETENTION_DAYS)
 
 @app.route('/admin/users/create', methods=['POST'])
 def user_create():
@@ -6502,6 +6571,7 @@ def login():
         # sharing an office IP) cannot lock out the whole team.
         client_id = f"{username.lower()}|{request.remote_addr or 'unknown'}"
         if _login_rate_limited(client_id):
+            _log_login_event('blocked', username)
             flash(tr('登录尝试次数过多，请稍后再试', 'Too many login attempts — please try again later'), 'error')
             return render_template('login.html'), 429
         password = request.form.get('password', '')
@@ -6515,13 +6585,17 @@ def login():
             session.permanent = True
             session['user_id'] = user['id']
             csrf_token()
+            _log_login_event('login', user['username'], user['id'])
             return redirect(_safe_next_url(request.args.get('next')) or url_for('index'))
         _record_login_failure(client_id)
+        _log_login_event('failed', username, user['id'] if user else None)
         flash(tr('用户名或密码错误', 'Incorrect username or password'), 'error')
     return render_template('login.html')
 
 @app.route('/logout', methods=['POST'])
 def logout():
+    if session.get('user_id'):
+        _log_login_event('logout', g.get('username', ''), session['user_id'])
     session.clear()
     return redirect(url_for('login'))
 

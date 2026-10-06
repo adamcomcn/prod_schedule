@@ -926,6 +926,19 @@ def init_db():
             PRIMARY KEY (job_key, insp_index)
         )''')
 
+        # Sign-in history shown to admins: login / failed / blocked / logout
+        conn.execute('''CREATE TABLE IF NOT EXISTS login_events (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            user_id    INTEGER,
+            username   TEXT DEFAULT '',
+            event      TEXT NOT NULL,
+            ip         TEXT DEFAULT '',
+            user_agent TEXT DEFAULT ''
+        )''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_login_events_created ON login_events(created_at)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_login_events_user ON login_events(user_id, ip)')
+
         # Defect codes
         existing_dc = {r[0] for r in conn.execute('SELECT code FROM defect_codes').fetchall()}
         for row in _DEFECT_SEEDS:
