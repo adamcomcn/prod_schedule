@@ -78,7 +78,7 @@ ADMIN_ENDPOINTS = {
     'region_edit', 'region_delete', 'leave_approve', 'leave_reject',
     'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
-    'user_update', 'user_logins',
+    'user_update', 'user_logins', 'change_report_inspector',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -3252,6 +3252,38 @@ def review_inspection(job_key, index):
     else:
         _notify_report_returned(job_key, record, comment)
         flash(tr('已退回，已通知检验员', 'Returned to the inspector'), 'success')
+    return redirect(url_for('inspect_form', job_key=job_key))
+
+
+@app.route('/inspect/<path:job_key>/report/<int:index>/inspector', methods=['POST'])
+def change_report_inspector(job_key, index):
+    """Admin corrects who did a submitted inspection (e.g. entered under the
+    wrong name). Only lead / inspector accounts can be chosen; every change is
+    kept on the report."""
+    with db_conn() as conn:
+        user = conn.execute(
+            "SELECT username, display_name FROM users WHERE id=? AND active=1 AND role IN ('lead', 'inspector')",
+            (request.form.get('inspector_id', type=int),)).fetchone()
+    if not user:
+        flash(tr('请选择检验员', 'Please choose an inspector'), 'error')
+        return redirect(url_for('inspect_form', job_key=job_key))
+    cache = load_json(INSPECTIONS_CACHE, {})
+    records = cache.get(job_key, [])
+    if not 0 <= index < len(records):
+        abort(404)
+    record = records[index]
+    old = record.get('inspector_name', '')
+    new = user['display_name'] or user['username']
+    if old == new:
+        flash(tr('检验员没有变化', 'The inspector is unchanged'), 'info')
+        return redirect(url_for('inspect_form', job_key=job_key))
+    record['inspector_name'] = new
+    record.setdefault('inspector_changes', []).append({
+        'from': old, 'to': new, 'by': g.get('username', ''),
+        'at': datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M')})
+    save_json(INSPECTIONS_CACHE, cache)
+    logger.info('Report %s #%s inspector changed from %r to %r by %s', job_key, index, old, new, g.get('username'))
+    flash(tr(f'检验员已从 {old} 改为 {new}', f'Inspector changed from {old} to {new}'), 'success')
     return redirect(url_for('inspect_form', job_key=job_key))
 
 

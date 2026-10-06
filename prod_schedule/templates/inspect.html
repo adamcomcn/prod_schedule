@@ -686,6 +686,21 @@ input[name=result] { display:none; }
                class="btn btn-sm btn-outline" style="padding:2px 8px; font-size:.72rem;"
                title="{{ tr('PDF 检验报告', 'PDF inspection report') }}">&#128196; PDF</a>
           </div>
+          {% if g.is_admin and assignees %}
+          <details class="hq-mail" style="font-size:.75rem;">
+            <summary style="cursor:pointer; color:#6b7280;">{{ tr('修改检验员', 'Change inspector') }}</summary>
+            <form method="POST" action="{{ url_for('change_report_inspector', job_key=job.job_key, index=pidx) }}" style="display:inline-flex; gap:4px; align-items:center; margin-top:4px;">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <select name="inspector_id" style="padding:2px 6px; font-size:.75rem; width:auto;">
+                {% for u in assignees %}<option value="{{ u.id }}" {% if (u.display_name or u.username) == p.inspector_name %}selected{% endif %}>{{ u.display_name or u.username }}</option>{% endfor %}
+              </select>
+              <button type="submit" class="hq-resend">{{ tr('保存', 'Save') }}</button>
+            </form>
+          </details>
+          {% endif %}
+          {% for c in p.get('inspector_changes', []) %}
+          <div style="font-size:.72rem; color:#9ca3af;">{{ tr('检验员由 ' ~ c['from'] ~ ' 改为 ' ~ c['to'], 'Inspector changed from ' ~ c['from'] ~ ' to ' ~ c['to']) }} · {{ c['by'] }} · {{ c['at']|localtime }}</div>
+          {% endfor %}
           {% set rv = reviews.get(pidx) %}
           <div class="hq-mail">
             {% if rv and rv.status == 'approved' %}
