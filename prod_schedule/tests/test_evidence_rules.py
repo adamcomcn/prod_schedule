@@ -55,6 +55,8 @@ class ClassifyTests(unittest.TestCase):
             ('ACLTYPESMFB', 'Single MFB L - Type Hydrant Head', ref(pc='L - Type Hydrant'), 'l_type_head'),
             ('ACLTYPEDCFA', 'Dual CFA L - Type Hydrant Head', ref('Covers & Lids'), 'l_type_head'),
             ('XYZ1', 'Dual MFB L - Type Hydrant Head', None, 'l_type_head'),
+            ('ACLTYPESC', 'L - Type Hydrant Cover Surround Concrete', None, 'l_type'),
+            ('WAPVAL', 'Valve Anchor Legs (Suit DN100 - DN150)', ref('DI Fittings'), 'valve_legs'),
             ('ACLTYPELP', 'Latch Pin (Suit L Type Cover)', ref('Covers & Lids'), 'latch_pin'),
             ('ACCOMP1', 'Composite cover', ref('Comp Covers', 'Comp Covers - SMC Lid'), None),               # left out
         ]

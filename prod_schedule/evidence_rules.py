@@ -124,6 +124,8 @@ PRODUCT_TYPES = {
                     'evidence': [_ev('checklist', CHECK_CHECKLIST)]},
     'l_type': {'name': _c('L 型消防栓盖', 'L-Type hydrant cover'),
                'evidence': [_ev('checklist', CHECK_CHECKLIST)]},
+    'valve_legs': {'name': _c('阀门支腿', 'Valve anchor legs'),
+                   'evidence': [_ev('checklist', CHECK_CHECKLIST)]},
     'latch_pin': {'name': _c('插销（L 型盖）', 'Latch pin (L-Type cover)'),
                   'evidence': [_ev('material', CHECK_MATERIAL)]},
 }
@@ -160,6 +162,8 @@ def classify(code, description='', ref=None):
 
     if 'comp covers' in cat:
         return None                                   # not configured yet
+    if 'ANCHOR LEG' in desc_u or code_u.startswith(('WAPVAL', 'APVAK')):
+        return 'valve_legs'                           # filed under DI Fittings in the reference
     if code_u.startswith('RSVCAP') or 'caps' in sub or 'valve caps' in pcat:
         return 'valve_cap'
     if code_u.startswith('RSV') or cat == 'gate valves' or 'rsv' in pcat:
@@ -199,9 +203,9 @@ def classify(code, description='', ref=None):
     if code_u.startswith('ACLTYPELP') or 'LATCH PIN' in desc_u:
         return 'latch_pin'
     # hydrant heads (single / dual, CFA / MFB) are not covers
-    if code_u.startswith(('ACLTYPES', 'ACLTYPED')) or (
+    if re.match(r'ACLTYPE[SD](CFA|MFB)', code_u) or (
             ('L - TYPE' in desc_u or 'L-TYPE' in desc_u) and 'HYDRANT HEAD' in desc_u):
-        return 'l_type_head'
+        return 'l_type_head'                          # not ACLTYPESC (concrete surround)
     if code_u.startswith('ACLTYPE') or 'l - type' in pcat or 'L - TYPE' in desc_u or 'L-TYPE' in desc_u:
         return 'l_type'
     if cat == 'covers & lids' or 'access covers' in pcat or 'fire plug' in pcat:
