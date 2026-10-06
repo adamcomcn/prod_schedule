@@ -29,7 +29,8 @@
     <div class="pv-q">
       <div style="color:#9ca3af;">{{ loop.index }}</div>
       <div>{{ q.text }}{% if q.optional %}<span class="pv-tag">{{ tr('如适用', 'If applicable') }}</span>{% endif %}
-        {% if q.photo == 'always' %}<span class="pv-tag">&#128247; {{ tr('必须拍照', 'Photo required') }}</span>{% endif %}
+        {% if q.photo == 'always' %}<span class="pv-tag">&#128247; {{ tr('必须拍照 / 上传', 'Photo / file required') }}</span>{% endif %}
+        {% if q.only_if %}<span class="pv-tag">{{ tr('仅限', 'Only') }} {{ q.only_if }}</span>{% endif %}
         {% if q.text_zh %}<div class="pv-zh">{{ q.text_zh }}</div>{% endif %}
         {% if q.hint %}<div class="pv-zh">&#9201; {{ q.hint }}{% if q.hint_zh %} / {{ q.hint_zh }}{% endif %}</div>{% endif %}</div>
       <div>

@@ -91,6 +91,7 @@ var T = {{ {
   'number': tr('测量值', 'Measurement'), 'text': tr('文字记录（如日期代码）', 'Text (e.g. a date code)'),
   'fail': tr('判为不合格', 'Fail when'), 'hint': tr('检查频率 / 提示（英文）', 'Frequency / hint (English)'),
   'hint_zh': tr('检查频率 / 提示（中文）', 'Frequency / hint (Chinese)'), 'no_fail': tr('只记录，不判定', 'Recorded only'),
+  'only_if': tr('仅适用于描述含（如 Dual；其他产品自动“不适用”）', 'Only when the description contains (e.g. Dual; others are N/A automatically)'),
   'fail_yes': tr('回答“是”', 'answer is Yes'), 'fail_no': tr('回答“否”', 'answer is No'),
   'fail_poor': tr('差', 'Poor'), 'fail_fair': tr('一般或差', 'Fair or Poor'),
   'min': tr('最小值', 'Minimum'), 'max': tr('最大值', 'Maximum'), 'unit': tr('单位', 'Unit'),
@@ -161,7 +162,8 @@ function questionRow(sec, q, qi) {
         field(T.action_zh, input(q, 'action_zh')),
         field(T.photo, select(q, 'photo', [['fail', T.photo_fail], ['always', T.photo_always]])),
         field(T.hint, input(q, 'hint')),
-        field(T.hint_zh, input(q, 'hint_zh'))
+        field(T.hint_zh, input(q, 'hint_zh')),
+        field(T.only_if, input(q, 'only_if'))
       ])),
       el('div', {style: 'margin-top:6px;'}, [checkbox(q, 'optional', T.optional)])
     ]),

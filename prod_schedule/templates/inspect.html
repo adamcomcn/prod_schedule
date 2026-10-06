@@ -25,6 +25,7 @@
 .ck-text { flex:1 1 320px; font-size:.86rem; line-height:1.45; white-space:pre-line; }
 .ck-hintline { font-size:.72rem; color:#0369a1; margin-top:3px; white-space:normal; }
 .ck-textans { width:160px !important; height:42px; }
+.ck-q.ck-na-auto { background:#f9fafb; color:#9ca3af; padding:6px 12px; }
 .ck-n { color:#9ca3af; margin-right:4px; }
 .ck-sub { color:#6b7280; font-size:.76rem; margin-top:2px; }
 .ck-tag { display:inline-block; font-size:.68rem; background:#eef2ff; color:#3730a3; border-radius:10px; padding:1px 7px; margin-left:6px; }
@@ -360,6 +361,7 @@ input[name=result] { display:none; }
           <script id="checklist-config" type="application/json">{{ {
             'data': ck, 'template_id': checklist.template_id, 'version': checklist.version,
             'answers': (draft.answers if draft else {}), 'files': (draft.files if draft else {}),
+            'description': job.get('Item Description', ''),
             'lang': current_lang(), 'csrf': csrf_token(),
             'urls': {'save': url_for('inspection_draft_save', job_key=job.job_key),
                      'upload': url_for('inspection_draft_upload', job_key=job.job_key),
@@ -369,12 +371,13 @@ input[name=result] { display:none; }
               'poor': tr('差', 'Poor'), 'na': tr('不适用', 'N/A'), 'ok': tr('合格', 'OK'), 'fail': tr('不合格', 'fail'),
               'action': tr('处理', 'Action'), 'occurrences': tr('发现数量', 'Occurrences'),
               'supervisor': tr('已告知主管', 'Supervisor informed'), 'note': tr('说明（选填）', 'Note (optional)'),
-              'take_photo': tr('拍照', 'Photo'), 'record_video': tr('录像', 'Video'), 'from_gallery': tr('相册 / 文件', 'Gallery / files'),
+              'take_photo': tr('拍照', 'Photo'), 'record_video': tr('录像', 'Video'), 'from_gallery': tr('相册 / 文件（PDF、Excel）', 'Gallery / files (PDF, Excel)'),
+              'auto_na': tr('不适用（仅限 {k} 产品）', 'N/A (only for {k} items)'),
               'uploading': tr('上传中…', 'Uploading…'), 'upload_failed': tr('上传失败，请重试。', 'Upload failed, please try again.'),
               'delete': tr('删除', 'Delete'), 'delete_photo': tr('删除这张照片 / 视频？', 'Delete this photo / video?'),
               'photo_required': tr('必须拍照', 'Photo required'),
               'fail_photo_hint': tr('不合格项：请拍摄缺陷部位的照片或视频（至少 1 张）', 'Failed item: photograph or film the defect (at least 1)'),
-              'photo_hint': tr('此项必须拍照（至少 1 张）', 'This question needs a photo (at least 1)'),
+              'photo_hint': tr('此项必须拍照、录像或上传文件（至少 1 个）', 'This question needs a photo, video or file (at least 1)'),
               'product_photo': tr('产品照片（必需）', 'Product photo (required)'),
               'product_photo_hint': tr('请拍清楚产品上的编号 / 批号 / 铸造标识', 'Make sure the serial / batch number or cast marking is readable'),
               'product_photo_missing': tr('缺少产品照片（能看清编号 / 批号）', 'Product photo missing (serial / batch number visible)'),

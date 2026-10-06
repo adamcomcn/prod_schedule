@@ -65,6 +65,9 @@ class BrtPlanParseTests(unittest.TestCase):
         tool, dual = t['sections'][1]['questions']
         self.assertEqual((tool['fail_on'], tool['action']), ('yes', 'bolt needs to be tightened more'))
         self.assertEqual((dual['fail_on'], dual['optional'], dual['action_zh']), ('no', True, '通知 Murphy'))
+        self.assertEqual((dual['only_if'], tool['only_if']), ('Dual', ''))
+        self.assertTrue(checklists.applies(dual, 'Dual CFA L - Type Hydrant Head'))
+        self.assertFalse(checklists.applies(dual, 'Single CFA L - Type Hydrant Head'))
         self.assertEqual(t['sections'][2]['questions'][0]['photo'], 'always')      # the test video
 
     def test_text_answers(self):
@@ -85,7 +88,8 @@ class ItemCodeTemplateTests(unittest.TestCase):
             self.ids = {r['username']: r['id'] for r in conn.execute('SELECT id, username FROM users')}
         schedule = {'MELBOURNE': [['Order Number', 'Daemco Purchase Order', 'Item Code', 'Item Description', 'Quantity'],
                                   ['DPL8', 'PO-8', 'ACLTYPEDCFA', 'Dual CFA L - Type Hydrant Head', '10'],
-                                  ['DPL9', 'PO-9', 'ACLTYPE', 'L-type hydrant cover', '10']]}
+                                  ['DPL9', 'PO-9', 'ACLTYPE', 'L-type hydrant cover', '10'],
+                                  ['DPL7', 'PO-7', 'ACLTYPESMFB', 'Single MFB L - Type Hydrant Head', '10']]}
         app.save_json(app.CURRENT_FILE, schedule)
         app.save_json(app.PREVIOUS_FILE, schedule)
         app.save_json(app.INSPECTIONS_CACHE, {})
@@ -154,6 +158,50 @@ class ItemCodeTemplateTests(unittest.TestCase):
             'checklist_template_id': tid, 'checklist_version': 99, 'checklist_json': '{}'},
             content_type='multipart/form-data')
         self.assertEqual(len(app.load_json(app.INSPECTIONS_CACHE, {})[JOB]), 1)
+
+
+class SingleHeadTests(ItemCodeTemplateTests):
+    SINGLE = 'MELBOURNE|PO-7|ACLTYPESMFB'
+    test_item_codes_select_the_template_and_replace_the_paper_upload = None     # covered above
+
+    def test_dual_only_questions_are_na_for_a_single_head_and_reports_upload(self):
+        murphy = self.client_for('murphy')
+        murphy.post('/checklists/import', data={'_csrf_token': 'tok', 'target': 'new', 'name': 'L-Type heads',
+                                                'file': (io.BytesIO(brt_workbook()), 'l.xlsx')},
+                    content_type='multipart/form-data')
+        with db_conn() as conn:
+            tid = conn.execute('SELECT id FROM checklist_templates').fetchone()[0]
+        _tpl, _ver, data = app.checklist_version(tid)
+        murphy.post(f'/checklists/{tid}/edit', data={'_csrf_token': 'tok', 'name': 'L', 'active': '1',
+                                                    'data_json': json.dumps(data), 'item_codes': 'ACLTYPES*, ACLTYPED*'})
+        page = murphy.get(f'/inspect/{self.SINGLE}').get_data(as_text=True)
+        self.assertIn('"description": "Single MFB L - Type Hydrant Head"', page)
+
+        def upload(ref, name):
+            return murphy.post(f'/inspect/{self.SINGLE}/draft/files', headers={'X-CSRF-Token': 'tok'}, data={
+                'ref': ref, 'template_id': tid, 'version': 1, 'file': (io.BytesIO(b'%PDF-1.4'), name)},
+                content_type='multipart/form-data')
+        self.assertEqual(upload('product', 'p.jpg').status_code, 200)
+        video_ref = data['sections'][2]['questions'][0]['id']
+        report = upload(video_ref, 'material-report.pdf')                 # documents are accepted now
+        self.assertEqual(report.status_code, 200)
+        self.assertTrue(report.get_json()['file']['doc'])
+        self.assertEqual(upload(video_ref, 'tool.exe').status_code, 400)
+
+        dual = data['sections'][1]['questions'][1]
+        answers = {q['id']: {'v': '0925' if q['type'] == 'text' else ('no' if q['fail_on'] == 'yes' else 'yes')}
+                   for s in data['sections'] for q in s['questions'] if q['id'] != dual['id']}
+        answers[dual['id']] = {'v': 'no'}           # a stale "fail" for a question that does not apply
+        response = murphy.post(f'/inspect/{self.SINGLE}/submit', data={
+            '_csrf_token': 'tok', 'region': 'MELBOURNE', 'order_number': 'DPL7', 'item_code': 'ACLTYPESMFB',
+            'item_description': 'Single MFB L - Type Hydrant Head', 'inspection_date': '2026-10-09',
+            'quantity_inspected': '10', 'result': 'Pass', 'inspector_name': 'Murphy',
+            'checklist_template_id': tid, 'checklist_version': 1, 'checklist_json': json.dumps(answers)},
+            content_type='multipart/form-data')
+        self.assertEqual(response.status_code, 302)
+        record = app.load_json(app.INSPECTIONS_CACHE, {})[self.SINGLE][0]
+        self.assertEqual(record['checklist']['answers'][dual['id']]['v'], 'na')
+        self.assertEqual(record['checklist']['counts']['fail'], 0)
 
 
 if __name__ == '__main__':

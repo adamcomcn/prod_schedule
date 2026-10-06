@@ -225,14 +225,16 @@ def _parse_brt_plan(rows, header_idx):
         rule, action = parse_criteria(cell(row, 'criteria'))
         text_zh = cell(row, 'text_zh', keep_lines=True)
         label_zh = cell(row, 'label_zh')
+        only = DUAL_ONLY_RE.search(text)
         current['questions'].append({
             'id': new_id(),
+            'only_if': only.group(1).capitalize() if only else '',
             'text': f'{label} — ' + ANSWER_HINT_RE.sub('', text).strip(),
             'text_zh': ((f'{label_zh} — ' if label_zh else '') + ANSWER_HINT_RE.sub('', text_zh).strip()) if text_zh else '',
             'hint': cell(row, 'hint'), 'hint_zh': cell(row, 'hint_zh'),
             'action': action, 'action_zh': cell(row, 'action_zh'),
             'optional': bool(DUAL_ONLY_RE.search(text)) or bool(APPLICABLE_RE.search(text)),
-            'photo': 'always' if 'video' in text.lower() else 'fail', **rule})
+            'photo': 'always' if ('video' in text.lower() or 'been provided' in text.lower()) else 'fail', **rule})
     sections = [s for s in sections if s['questions']]
     if not sections:
         raise ValueError('No questions were found under the header row')
@@ -273,6 +275,7 @@ def normalise_template(data):
             item = {'id': qid, 'text': text, 'text_zh': _clean_text(q.get('text_zh')), 'type': qtype,
                     'action': _clean(q.get('action')), 'action_zh': _clean(q.get('action_zh')),
                     'hint': _clean(q.get('hint')), 'hint_zh': _clean(q.get('hint_zh')),
+                    'only_if': _clean(q.get('only_if')),
                     'optional': bool(q.get('optional')),
                     'photo': q.get('photo') if q.get('photo') in PHOTO_RULES else 'fail'}
             if qtype == 'yes_no':
@@ -340,6 +343,23 @@ def question_count(template):
     return sum(len(s['questions']) for s in template.get('sections', []))
 
 
+def applies(question, description):
+    """False when the question is limited to items whose description contains
+    a keyword (only_if, e.g. 'Dual') and this item's does not."""
+    keyword = (question.get('only_if') or '').strip().lower()
+    return not keyword or keyword in (description or '').lower()
+
+
+def fill_not_applicable(template, answers, description):
+    """Answers with every question that does not apply to this item set to N/A."""
+    answers = dict(answers or {})
+    for s in template.get('sections', []):
+        for q in s['questions']:
+            if not applies(q, description):
+                answers[q['id']] = {'v': 'na'}
+    return answers
+
+
 def answer_problems(template, answers, photo_refs, has_product_photo):
     """Everything that still blocks submission: [(ref, reason)] where reason is
     'product_photo' | 'unanswered' | 'na_not_allowed' | 'photo'.
@@ -354,7 +374,7 @@ def answer_problems(template, answers, photo_refs, has_product_photo):
             if not result:
                 problems.append((q['id'], 'unanswered'))
             elif result == 'na':
-                if not (q.get('optional') or s.get('optional')):
+                if not (q.get('optional') or s.get('optional') or q.get('only_if')):
                     problems.append((q['id'], 'na_not_allowed'))
             elif (result == 'fail' or q.get('photo') == 'always') and q['id'] not in photo_refs:
                 problems.append((q['id'], 'photo'))

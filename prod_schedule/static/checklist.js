@@ -51,7 +51,7 @@
     C.data.sections.forEach(function (s) { s.questions.forEach(function (q, i) { fn(s, q, i + 1); }); });
   }
   function photoCount(ref) { return (state.files[ref] || []).length; }
-  function needsPhoto(q, result) { return result === 'fail' || (q.photo === 'always' && result !== 'na'); }
+  function needsPhoto(q, result) { return applies(q) && (result === 'fail' || (q.photo === 'always' && result !== 'na')); }
 
   // ── photos / videos ────────────────────────────────────────────────────
   function upload(ref, file) {
@@ -117,7 +117,9 @@
     if (hint) box.appendChild(el('div', {'class': 'ck-hint'}, [hint]));
     var thumbs = el('div', {'class': 'ck-thumbs'});
     (state.files[ref] || []).forEach(function (f) {
-      var media = f.video ? el('div', {'class': 'ck-video'}, ['🎥']) : el('img', {src: f.url, alt: f.name, loading: 'lazy'});
+      var media = f.video ? el('div', {'class': 'ck-video'}, ['🎥'])
+        : f.doc ? el('div', {'class': 'ck-video', title: f.name}, ['📄'])
+        : el('img', {src: f.url, alt: f.name, loading: 'lazy'});
       thumbs.appendChild(el('div', {'class': 'ck-thumb'}, [
         el('a', {href: f.url, target: '_blank'}, [media]),
         el('button', {type: 'button', 'class': 'ck-del', title: T.delete, onclick: function () { removeFile(ref, f); }}, ['✕'])
@@ -127,7 +129,7 @@
     var row = el('div', {'class': 'ck-prow'});
     picker(ref, 'image/*', 'environment', T.take_photo, '📷').forEach(function (n) { row.appendChild(n); });
     picker(ref, 'video/*', 'environment', T.record_video, '🎥').forEach(function (n) { row.appendChild(n); });
-    picker(ref, 'image/*,video/*', null, T.from_gallery, '🖼').forEach(function (n) { row.appendChild(n); });
+    picker(ref, 'image/*,video/*,.pdf,.xlsx,.xls,.csv', null, T.from_gallery, '🖼').forEach(function (n) { row.appendChild(n); });
     if (state.pending) row.appendChild(el('span', {'class': 'ck-uploading'}, ['⏳ ' + T.uploading]));
     box.appendChild(row);
   }
@@ -146,8 +148,20 @@
     }}, [text]);
   }
 
+  function applies(q) {
+    var k = (q.only_if || '').trim().toLowerCase();
+    return !k || (C.description || '').toLowerCase().indexOf(k) >= 0;
+  }
+
   function questionNode(s, q, n) {
     var a = ans(q.id);
+    if (!applies(q)) {                    // e.g. a DUAL ONLY question on a single head
+      a.v = 'na';
+      var tx = texts(q, 'text');
+      return el('div', {'class': 'ck-q ck-na-auto', id: 'ck-q-' + q.id}, [
+        el('div', {'class': 'ck-text'}, [el('span', {'class': 'ck-n'}, [n + '.']), tx[0],
+          el('span', {'class': 'ck-tag'}, [T.auto_na.replace('{k}', q.only_if)])])]);
+    }
     var result = evaluate(q, a.v);
     var t = texts(q, 'text');
     var hint = texts(q, 'hint');

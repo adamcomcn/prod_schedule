@@ -2668,6 +2668,8 @@ def submit_inspection(job_key):
             checklist_answers = json.loads(form.get('checklist_json') or '{}')
         except json.JSONDecodeError:
             checklist_answers = {}
+        checklist_answers = checklists.fill_not_applicable(checklist['data'], checklist_answers,
+                                                           form.get('item_description', ''))
         photo_refs = {f['ref'] for f in draft_files}
         problems = checklists.answer_problems(checklist['data'], checklist_answers, photo_refs, 'product' in photo_refs)
         if problems:
@@ -4932,6 +4934,8 @@ def _save_product_image(file_obj):
 # at a PC: answers, form fields and photos live in a server draft per job and
 # user until the report is submitted.
 
+CHECKLIST_FILE_EXTENSIONS = IMAGE_EXTENSIONS | {'.heic', '.mp4', '.mov', '.avi', '.mkv', '.pdf', '.xlsx', '.xls', '.csv'}
+
 CHECKLIST_REASONS = {
     'product_photo': ('缺少产品照片（能看清编号 / 批号）', 'Product photo missing (serial / batch number visible)'),
     'unanswered': ('未回答', 'Not answered'),
@@ -4966,6 +4970,7 @@ def _draft_files(conn, draft_id):
 def _draft_file_json(job_key, row):
     return {'id': row['id'], 'name': row['original_name'], 'ref': row['ref'],
             'video': _upload_extension(row['original_name']) in {'.mp4', '.mov', '.avi', '.mkv'},
+            'doc': _upload_extension(row['original_name']) in {'.pdf', '.xlsx', '.xls', '.csv'},
             'url': url_for('draft_file', job_key=job_key, fid=row['id'])}
 
 
@@ -5021,11 +5026,11 @@ def inspection_draft_upload(job_key):
     ref = (request.form.get('ref') or '').strip()[:40]
     if not upload or not upload.filename or not ref:
         return jsonify(ok=False, message=tr('没有文件', 'No file')), 400
-    if _upload_extension(upload.filename) not in IMAGE_EXTENSIONS | {'.heic', '.mp4', '.mov', '.avi', '.mkv'}:
-        return jsonify(ok=False, message=tr('只能上传照片或视频', 'Photos or videos only')), 400
+    if _upload_extension(upload.filename) not in CHECKLIST_FILE_EXTENSIONS:
+        return jsonify(ok=False, message=tr('只能上传照片、视频、PDF 或 Excel', 'Photos, videos, PDF or Excel only')), 400
     folder = os.path.join(UPLOAD_DIR, hashlib.sha256(job_key.encode('utf-8')).hexdigest(), 'drafts')
     os.makedirs(folder, exist_ok=True)
-    original, saved = _save_uploaded_file(upload, folder, IMAGE_EXTENSIONS | {'.heic', '.mp4', '.mov', '.avi', '.mkv'})
+    original, saved = _save_uploaded_file(upload, folder, CHECKLIST_FILE_EXTENSIONS)
     with db_conn() as conn:
         draft = _ensure_draft(conn, job_key, request.form.get('template_id', type=int),
                               request.form.get('version', type=int))
