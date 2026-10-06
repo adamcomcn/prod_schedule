@@ -22,7 +22,9 @@
 .ck-q.ck-fail { background:#fef2f2; } .ck-q.ck-ok { background:#fbfefc; }
 .ck-q.ck-missing, .ck-card.ck-missing { outline:2px solid #f59e0b; outline-offset:-2px; background:#fffbeb; }
 .ck-qhead { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
-.ck-text { flex:1 1 320px; font-size:.86rem; line-height:1.45; }
+.ck-text { flex:1 1 320px; font-size:.86rem; line-height:1.45; white-space:pre-line; }
+.ck-hintline { font-size:.72rem; color:#0369a1; margin-top:3px; white-space:normal; }
+.ck-textans { width:160px !important; height:42px; }
 .ck-n { color:#9ca3af; margin-right:4px; }
 .ck-sub { color:#6b7280; font-size:.76rem; margin-top:2px; }
 .ck-tag { display:inline-block; font-size:.68rem; background:#eef2ff; color:#3730a3; border-radius:10px; padding:1px 7px; margin-left:6px; }
@@ -363,7 +365,7 @@ input[name=result] { display:none; }
                      'upload': url_for('inspection_draft_upload', job_key=job.job_key),
                      'delete': url_for('draft_file_delete', job_key=job.job_key, fid=0)},
             'texts': {
-              'yes': tr('是', 'Yes'), 'no': tr('否', 'No'), 'good': tr('好', 'Good'), 'fair': tr('一般', 'Fair'),
+              'yes': tr('是', 'Yes'), 'no': tr('否', 'No'), 'text_placeholder': tr('填写，例如 0925', 'Enter, e.g. 0925'), 'good': tr('好', 'Good'), 'fair': tr('一般', 'Fair'),
               'poor': tr('差', 'Poor'), 'na': tr('不适用', 'N/A'), 'ok': tr('合格', 'OK'), 'fail': tr('不合格', 'fail'),
               'action': tr('处理', 'Action'), 'occurrences': tr('发现数量', 'Occurrences'),
               'supervisor': tr('已告知主管', 'Supervisor informed'), 'note': tr('说明（选填）', 'Note (optional)'),
@@ -390,7 +392,7 @@ input[name=result] { display:none; }
 
           <!-- Evidence uploads per type -->
           <div id="sec-evidence" style="scroll-margin-top:70px;"></div>
-          {% if not evidence_reqs %}
+          {% if not evidence_reqs and not checklist %}
           <div class="ev-unconfigured">
             &#9888; {{ tr('该产品尚未配置所需证据，请按检验主管要求上传相关文件，并在备注中说明。',
                           'Required evidence is not configured for this product. Follow the lead inspector instructions and explain in the notes.') }}

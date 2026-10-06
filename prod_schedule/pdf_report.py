@@ -199,6 +199,8 @@ def _site_checklist(story, record, attachments, st, content_w):
             answer = answers.get(q['id']) or {}
             result = checklists.evaluate(q, answer.get('v'))
             text = q['text'] + (f"\n{q['text_zh']}" if q.get('text_zh') else '')
+            if q.get('hint'):
+                text += f"\n频率 Frequency: {q['hint']}" + (f" / {q['hint_zh']}" if q.get('hint_zh') else '')
             detail = ''
             if result == 'fail':
                 parts = [f"→ {q.get('action', '')}" + (f" / {q['action_zh']}" if q.get('action_zh') else '')]

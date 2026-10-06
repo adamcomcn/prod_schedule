@@ -30,10 +30,12 @@
       <div style="color:#9ca3af;">{{ loop.index }}</div>
       <div>{{ q.text }}{% if q.optional %}<span class="pv-tag">{{ tr('如适用', 'If applicable') }}</span>{% endif %}
         {% if q.photo == 'always' %}<span class="pv-tag">&#128247; {{ tr('必须拍照', 'Photo required') }}</span>{% endif %}
-        {% if q.text_zh %}<div class="pv-zh">{{ q.text_zh }}</div>{% endif %}</div>
+        {% if q.text_zh %}<div class="pv-zh">{{ q.text_zh }}</div>{% endif %}
+        {% if q.hint %}<div class="pv-zh">&#9201; {{ q.hint }}{% if q.hint_zh %} / {{ q.hint_zh }}{% endif %}</div>{% endif %}</div>
       <div>
         {% if q.type == 'yes_no' %}{{ tr('不合格：', 'Fail if: ') }}{{ tr('是', 'Yes') if q.fail_on == 'yes' else tr('否', 'No') }}
         {% elif q.type == 'rating' %}{{ tr('不合格：', 'Fail if: ') }}{{ tr('一般或差', 'Fair or Poor') if q.fail_on == 'fair' else tr('差', 'Poor') }}
+        {% elif q.type == 'text' %}{{ tr('只记录', 'Recorded only') }}
         {% else %}{{ tr('测量值', 'Measured') }} {% if q.min is not none %}≥ {{ q.min }}{% endif %}{% if q.max is not none %} ≤ {{ q.max }}{% endif %} {{ q.unit }}{% endif %}
       </div>
       <div style="color:#b91c1c;">{{ q.action }}{% if q.action_zh %}<div class="pv-zh">{{ q.action_zh }}</div>{% endif %}</div>

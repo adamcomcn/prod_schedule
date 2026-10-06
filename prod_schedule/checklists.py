@@ -21,11 +21,13 @@ import io
 import re
 import secrets
 
-QUESTION_TYPES = ('yes_no', 'rating', 'number')
+QUESTION_TYPES = ('yes_no', 'rating', 'number', 'text')   # text: recorded only (e.g. a date code)
 RATINGS = ('good', 'fair', 'poor')
 PHOTO_RULES = ('fail', 'always')
 APPLICABLE_RE = re.compile(r'\(\s*if\s+applicable\s*\)', re.I)
 RATING_RE = re.compile(r'\[\s*good\s*/\s*fair\s*/\s*poor\s*\]', re.I)
+ANSWER_HINT_RE = re.compile(r'\[\s*(y\s*/\s*n|mmyy)\s*\]', re.I)     # [Y/N], [MMYY]
+DUAL_ONLY_RE = re.compile(r'^\s*(dual|single)\s+only\s*:', re.I)
 
 
 def new_id(prefix='q'):
@@ -36,11 +38,19 @@ def _clean(text):
     return ' '.join(str(text or '').split())
 
 
+def _clean_text(text):
+    """Like _clean but keeps line breaks (lists inside a question)."""
+    lines = [' '.join(line.split()) for line in str(text or '').splitlines()]
+    return '\n'.join(line for line in lines if line)
+
+
 def parse_condition(condition, text=''):
     """Turn the Excel 'IF' column into a question type and fail rule:
     'If no' / 'If yes' / 'If Poor' / 'If < 300μm'."""
     cond = _clean(condition)
     low = cond.lower()
+    if cond in ('-', '—'):
+        return {'type': 'text'}
     number = re.search(r'([<>])\s*=?\s*([\d.]+)\s*([^\s\d]*)', cond)
     if number:
         value = float(number.group(2))
@@ -74,6 +84,8 @@ def _find_columns(header):
             cols['condition'] = i
         elif 'WHAT TO DO' in h or 'ACTION' in h or '处理' in h:
             cols['action_zh' if zh else 'action'] = i
+        elif 'FREQUENCY' in h or '频率' in h:
+            cols['hint_zh' if zh else 'hint'] = i
     return cols
 
 
@@ -84,6 +96,10 @@ def parse_checklist_workbook(file_bytes):
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.worksheets[0]
     rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    brt = next((i for i, r in enumerate(rows)
+                if {'TEST', 'CRITERIA'} <= {_clean(c).upper() for c in r}), None)
+    if brt is not None:
+        return _parse_brt_plan(rows, brt)
     header_idx = next((i for i, r in enumerate(rows)
                        if any(_clean(c).upper() in ('Q.', 'Q') for c in r)), None)
     if header_idx is None:
@@ -130,11 +146,93 @@ def parse_checklist_workbook(file_bytes):
             'text': RATING_RE.sub('', APPLICABLE_RE.sub('', text)).strip(),
             'text_zh': RATING_RE.sub('', APPLICABLE_RE.sub('', cell(row, 'text_zh'))).strip(),
             'action': cell(row, 'action'), 'action_zh': cell(row, 'action_zh'),
+            'hint': cell(row, 'hint'), 'hint_zh': cell(row, 'hint_zh'),
             'optional': bool(APPLICABLE_RE.search(text)),
             'photo': 'fail', **rule}
         current['questions'].append(question)
     for s in sections:
         s.pop('_source', None)
+    sections = [s for s in sections if s['questions']]
+    if not sections:
+        raise ValueError('No questions were found under the header row')
+    return normalise_template({'title': title, 'product_photo': True, 'sections': sections})
+
+
+def parse_criteria(criteria):
+    """BRT plan 'Criteria' column: 'If No, Reject & Check 100%' ->
+    ({'type': 'yes_no', 'fail_on': 'no'}, 'Reject & Check 100%'); '-' -> text."""
+    text = _clean(criteria)
+    if text in ('', '-', '—'):
+        return {'type': 'text'}, ''
+    m = re.match(r'if\s+(yes|no|fail|failed|poor)\b[^,]*,?\s*(.*)$', text, re.I)
+    if not m:
+        return {'type': 'yes_no', 'fail_on': 'no'}, text
+    word, action = m.group(1).lower(), m.group(2).strip()
+    if word == 'poor':
+        return {'type': 'rating', 'fail_on': 'poor'}, action
+    return {'type': 'yes_no', 'fail_on': 'yes' if word == 'yes' else 'no'}, action
+
+
+def _parse_brt_plan(rows, header_idx):
+    """'Batch Release Test' layout: Test / Description / Checking Frequency /
+    Result / Criteria; groups are separated by blank rows. Optional Chinese
+    columns: 'Test 中文', 'Description 中文', 'Frequency 中文', 'Action 中文'."""
+    cols = {}
+    for i, c in enumerate(rows[header_idx]):
+        h = _clean(c).upper()
+        zh = '中文' in h
+        if h.startswith('TEST'):
+            cols['label_zh' if zh else 'label'] = i
+        elif h.startswith('DESCRIPTION'):
+            cols['text_zh' if zh else 'text'] = i
+        elif 'FREQUENCY' in h:
+            cols['hint_zh' if zh else 'hint'] = i
+        elif h.startswith('CRITERIA'):
+            cols['criteria'] = i
+        elif h.startswith('ACTION') and zh:
+            cols['action_zh'] = i
+
+    def cell(row, key, keep_lines=False):
+        idx = cols.get(key)
+        value = row[idx] if idx is not None and idx < len(row) else ''
+        return _clean_text(value) if keep_lines else _clean(value)
+
+    title = ''
+    for row in rows[:header_idx]:
+        for c in row:
+            if 'BATCH RELEASE TEST' in _clean(c).upper() or 'CHECKLIST' in _clean(c).upper():
+                title = _clean(c)
+                break
+        if title:
+            break
+
+    def section_name(label):
+        return re.sub(r'\s*#\s*\d+\s*$', '', label).strip()
+
+    sections, current = [], None
+    for row in rows[header_idx + 1:]:
+        label, text = cell(row, 'label'), cell(row, 'text', keep_lines=True)
+        if label.rstrip(':').upper() in ('RELIABLE SIGNATURE', 'BATCH RESULT (PASS OR REJECT)'):
+            break
+        if not label or not text:
+            if not any(c not in (None, '') for c in row):
+                current = None                     # blank row: next group
+            continue
+        if current is None:
+            current = {'id': new_id('s'), 'name': section_name(label),
+                       'name_zh': section_name(cell(row, 'label_zh')), 'optional': False, 'questions': []}
+            sections.append(current)
+        rule, action = parse_criteria(cell(row, 'criteria'))
+        text_zh = cell(row, 'text_zh', keep_lines=True)
+        label_zh = cell(row, 'label_zh')
+        current['questions'].append({
+            'id': new_id(),
+            'text': f'{label} — ' + ANSWER_HINT_RE.sub('', text).strip(),
+            'text_zh': ((f'{label_zh} — ' if label_zh else '') + ANSWER_HINT_RE.sub('', text_zh).strip()) if text_zh else '',
+            'hint': cell(row, 'hint'), 'hint_zh': cell(row, 'hint_zh'),
+            'action': action, 'action_zh': cell(row, 'action_zh'),
+            'optional': bool(DUAL_ONLY_RE.search(text)) or bool(APPLICABLE_RE.search(text)),
+            'photo': 'always' if 'video' in text.lower() else 'fail', **rule})
     sections = [s for s in sections if s['questions']]
     if not sections:
         raise ValueError('No questions were found under the header row')
@@ -164,7 +262,7 @@ def normalise_template(data):
             raise ValueError('Every section needs a name')
         questions = []
         for q in s.get('questions') or []:
-            text = _clean(q.get('text'))
+            text = _clean_text(q.get('text'))
             if not text:
                 raise ValueError(f'A question in "{name}" has no text')
             qtype = q.get('type') if q.get('type') in QUESTION_TYPES else 'yes_no'
@@ -172,14 +270,17 @@ def normalise_template(data):
             while qid in seen:
                 qid = new_id()
             seen.add(qid)
-            item = {'id': qid, 'text': text, 'text_zh': _clean(q.get('text_zh')), 'type': qtype,
+            item = {'id': qid, 'text': text, 'text_zh': _clean_text(q.get('text_zh')), 'type': qtype,
                     'action': _clean(q.get('action')), 'action_zh': _clean(q.get('action_zh')),
+                    'hint': _clean(q.get('hint')), 'hint_zh': _clean(q.get('hint_zh')),
                     'optional': bool(q.get('optional')),
                     'photo': q.get('photo') if q.get('photo') in PHOTO_RULES else 'fail'}
             if qtype == 'yes_no':
                 item['fail_on'] = 'yes' if q.get('fail_on') == 'yes' else 'no'
             elif qtype == 'rating':
                 item['fail_on'] = 'fair' if q.get('fail_on') == 'fair' else 'poor'
+            elif qtype == 'text':
+                pass
             else:
                 item['min'], item['max'] = _number(q.get('min')), _number(q.get('max'))
                 item['unit'] = _clean(q.get('unit'))
@@ -208,6 +309,8 @@ def evaluate(question, answer):
         if value not in ('yes', 'no'):
             return ''
         return 'fail' if value == question.get('fail_on', 'no') else 'ok'
+    if question['type'] == 'text':
+        return 'ok'
     if question['type'] == 'rating':
         if value not in RATINGS:
             return ''

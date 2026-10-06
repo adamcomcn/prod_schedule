@@ -2575,6 +2575,8 @@ def inspect_form(job_key):
     draft = load_inspection_draft(job_key) if inspect_permission(job_key)[0] else None
     checklist = job_checklist(job_info.get('Item Code', ''), job_info.get('Item Description', ''),
                               draft and draft['template_id'], draft and draft['version'])
+    if checklist:   # the digital checklist replaces the signed paper checklist upload
+        evidence_reqs = [ev for ev in evidence_reqs if ev['type'] != 'checklist']
     with db_conn() as conn:
         checklist_photos = defaultdict(list)
         for a in conn.execute("SELECT id, insp_index, ref FROM inspection_attachments WHERE job_key=? "
@@ -2652,6 +2654,11 @@ def submit_inspection(job_key):
     if form.get('checklist_template_id'):
         checklist = job_checklist('', '', form.get('checklist_template_id', type=int),
                                   form.get('checklist_version', type=int))
+        if not checklist:
+            flash(tr('找不到这份检查清单的版本，请刷新页面后重新提交（草稿已保存）',
+                     'This checklist version was not found; reload the page and submit again (your draft is saved)'),
+                  'error')
+            return redirect(url_for('inspect_form', job_key=job_key))
     elif job_checklist(form.get('item_code', ''), form.get('item_description', '')):
         flash(tr('这个产品需要填写检查清单', 'This product needs its checklist filled in'), 'error')
         return redirect(url_for('inspect_form', job_key=job_key))
@@ -2740,6 +2747,8 @@ def submit_inspection(job_key):
     missing = []
     for req in (evidence_rules.PRODUCT_TYPES[ptype]['evidence'] if ptype else []):
         etype = req['type']
+        if etype == 'checklist' and checklist:
+            continue                  # filled in digitally, nothing to upload
         ev = evidence_results.setdefault(etype, {'result': '', 'notes': '', 'files': []})
         if req['checks']:
             ev['checks'] = [{'zh': chk['zh'], 'en': chk['en'],
@@ -4935,7 +4944,7 @@ def job_checklist(item_code, description, template_id=None, version=None):
     """The checklist for a job: the draft's template/version when given, else
     the active template for the product type. dict or None."""
     if not template_id:
-        tpl = checklist_for_product_type(product_type_for(item_code, description))
+        tpl = checklist_for_item(item_code, description)
         if not tpl:
             return None
         template_id, version = tpl['id'], None
@@ -5125,6 +5134,26 @@ def checklist_for_product_type(ptype):
     return None
 
 
+def _code_patterns(text):
+    """'ACLTYPESCFA, ACLTYPED*' -> ['ACLTYPESCFA', 'ACLTYPED*'] (upper case)."""
+    return [p.strip().upper() for p in re.split(r'[,;\s]+', text or '') if p.strip()]
+
+
+def _code_matches(code, pattern):
+    code = (code or '').strip().upper()
+    return code.startswith(pattern[:-1]) if pattern.endswith('*') else code == pattern
+
+
+def checklist_for_item(item_code, description):
+    """The active template for a job: one listing this item code first (exact
+    or prefix*), else the one for its product type."""
+    with db_conn() as conn:
+        for tpl in conn.execute('SELECT * FROM checklist_templates WHERE active=1 ORDER BY id'):
+            if any(_code_matches(item_code, p) for p in _code_patterns(tpl['item_codes'])):
+                return tpl
+    return checklist_for_product_type(product_type_for(item_code, description))
+
+
 def _product_type_choices():
     return [(key, product_type_name(key)) for key in evidence_rules.PRODUCT_TYPES]
 
@@ -5138,7 +5167,7 @@ def checklist_templates_page():
         _tpl, _ver, data = checklist_version(t['id'])
         t['questions'] = checklists.question_count(data) if data else 0
         t['type_names'] = [product_type_name(k) for k in (t['product_types'] or '').split(',')
-                           if k in evidence_rules.PRODUCT_TYPES]
+                           if k in evidence_rules.PRODUCT_TYPES] + _code_patterns(t.get('item_codes'))
     return render_template('checklists.html', templates=templates)
 
 
@@ -5183,9 +5212,10 @@ def checklist_edit(template_id):
             flash(tr('未保存：', 'Not saved: ') + str(exc), 'error')
             return redirect(url_for('checklist_edit', template_id=template_id))
         types = [t for t in request.form.getlist('product_types') if t in evidence_rules.PRODUCT_TYPES]
+        codes = ', '.join(dict.fromkeys(_code_patterns(request.form.get('item_codes', ''))))
         with db_conn() as conn:
-            conn.execute('UPDATE checklist_templates SET name=?, product_types=?, active=? WHERE id=?',
-                         ((request.form.get('name') or tpl['name']).strip()[:200], ','.join(types),
+            conn.execute('UPDATE checklist_templates SET name=?, product_types=?, item_codes=?, active=? WHERE id=?',
+                         ((request.form.get('name') or tpl['name']).strip()[:200], ','.join(types), codes[:2000],
                           1 if request.form.get('active') == '1' else 0, template_id))
             if new_data != data:
                 version = save_checklist_version(conn, template_id, new_data, request.form.get('note', '').strip()[:300])
@@ -5229,7 +5259,7 @@ def checklist_export(template_id):
     ws.append([data.get('title') or tpl['name']])
     ws.append([])
     ws.append(['PART', 'PART 中文', 'Q.', 'INSPECTION GUIDELINE', 'INSPECTION GUIDELINE 中文', 'IF',
-               'WHAT TO DO?', 'WHAT TO DO? 中文'])
+               'WHAT TO DO?', 'WHAT TO DO? 中文', 'FREQUENCY', 'FREQUENCY 中文'])
     for cell in ws[3]:
         cell.font = openpyxl.styles.Font(bold=True)
     for s in data['sections']:
@@ -5242,11 +5272,14 @@ def checklist_export(template_id):
             elif q['type'] == 'number':
                 cond = (f"If < {q['min']}{q.get('unit', '')}" if q.get('min') is not None
                         else f"If > {q['max']}{q.get('unit', '')}")
+            elif q['type'] == 'text':
+                cond = '-'
             else:
                 cond = f"If {q.get('fail_on', 'no')}"
             ws.append([_xl_safe(v) for v in (part if i == 1 else '', s['name_zh'] if i == 1 else '', i, text,
-                                              q['text_zh'], cond, q['action'], q['action_zh'])])
-    for letter, width in zip('ABCDEFGH', (22, 14, 5, 70, 50, 14, 20, 16)):
+                                              q['text_zh'], cond, q['action'], q['action_zh'],
+                                              q.get('hint', ''), q.get('hint_zh', ''))])
+    for letter, width in zip('ABCDEFGHIJ', (22, 14, 5, 70, 50, 14, 20, 16, 22, 18)):
         ws.column_dimensions[letter].width = width
     buf = io.BytesIO()
     wb.save(buf)

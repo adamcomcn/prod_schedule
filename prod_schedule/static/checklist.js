@@ -35,6 +35,7 @@
     var v = value == null ? '' : String(value).trim().toLowerCase();
     if (!v) return '';
     if (v === 'na') return 'na';
+    if (q.type === 'text') return 'ok';
     if (q.type === 'yes_no') return (v === 'yes' || v === 'no') ? (v === (q.fail_on || 'no') ? 'fail' : 'ok') : '';
     if (q.type === 'rating') {
       if (['good', 'fair', 'poor'].indexOf(v) < 0) return '';
@@ -149,6 +150,7 @@
     var a = ans(q.id);
     var result = evaluate(q, a.v);
     var t = texts(q, 'text');
+    var hint = texts(q, 'hint');
     var controls = el('div', {'class': 'ck-ctrl'});
     function cls(v) { return evaluate(q, v) === 'fail' ? 'fail' : 'ok'; }
     if (q.type === 'yes_no') {
@@ -158,6 +160,13 @@
       [['good', T.good], ['fair', T.fair], ['poor', T.poor]].forEach(function (o) {
         controls.appendChild(choice(s, q, n, o[0], o[1], cls(o[0])));
       });
+    } else if (q.type === 'text') {
+      controls.appendChild(el('input', {type: 'text', 'class': 'ck-textans', value: a.v === 'na' ? '' : (a.v || ''),
+                                        placeholder: T.text_placeholder, oninput: function () {
+        a.v = this.value;
+        refresh();
+        changed();
+      }}));
     } else {
       var badge = el('span', {'class': 'ck-badge ck-badge-' + (result || 'empty')},
                      [result === 'ok' ? T.ok : result === 'fail' ? T.fail : '']);
@@ -185,7 +194,8 @@
           el('span', {'class': 'ck-n'}, [n + '.']), t[0],
           q.photo === 'always' ? el('span', {'class': 'ck-tag'}, ['📷 ' + T.photo_required]) : null,
           limit.trim() ? el('span', {'class': 'ck-tag'}, [limit.trim()]) : null,
-          t[1] ? el('div', {'class': 'ck-sub'}, [t[1]]) : null
+          t[1] ? el('div', {'class': 'ck-sub'}, [t[1]]) : null,
+          hint[0] ? el('div', {'class': 'ck-hintline'}, ['⏱ ' + hint[0] + (hint[1] ? ' / ' + hint[1] : '')]) : null
         ]),
         controls
       ])

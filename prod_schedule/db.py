@@ -866,6 +866,10 @@ def init_db():
             created_at  TEXT DEFAULT (datetime('now')),
             UNIQUE (template_id, version)
         )''')
+        try:     # templates for specific item codes (exact or prefix*)
+            conn.execute("ALTER TABLE checklist_templates ADD COLUMN item_codes TEXT DEFAULT ''")
+        except Exception:
+            pass
         # Order lines the supplier moved to another region sheet
         conn.execute('''CREATE TABLE IF NOT EXISTS region_moves (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
