@@ -138,6 +138,7 @@ input[name=result] { display:none; }
 @media (hover: hover) and (pointer: fine) { .ev-capture-row { display:none; } }  /* desktop: no camera */
 .ev-file-busy { font-size:.77rem; color:#92400e; padding:4px 9px; }
 .ev-file-saved { color:#059669; }
+.ev-video-hint { font-size:.72rem; color:#9ca3af; margin-top:6px; }
 #upload-progress { display:none; margin-top:10px; font-size:.82rem; color:#374151; }
 #upload-progress .bar { height:8px; background:#e5e7eb; border-radius:4px; overflow:hidden; margin-top:4px; }
 #upload-progress .bar div { height:100%; width:0; background:#16a34a; transition:width .2s; }
@@ -278,7 +279,7 @@ input[name=result] { display:none; }
           {% endif %}
           <div id="draft-note" style="display:none; background:#fffbeb; border:1px solid #fcd34d; color:#92400e;
                border-radius:8px; padding:8px 12px; margin-bottom:10px; font-size:.8rem;">
-            &#128190; {% if draft %}{{ tr('已恢复服务器上的草稿（包括检查清单和照片）。证据文件需要重新选择。', 'Restored your saved draft (checklist and photos included). Evidence files must be chosen again.') }}
+            &#128190; {% if draft %}{{ tr('已恢复服务器上的草稿（包括检查清单、照片和证据文件）。', 'Restored your saved draft (checklist, photos and evidence files included).') }}
             {% else %}{{ tr('已恢复上次未提交的草稿（照片和文件需要重新选择）。', 'Restored your unsent draft (photos and files must be chosen again).') }}{% endif %}
           </div>
           <input type="hidden" name="region"           value="{{ job.get('region', '') }}">
@@ -461,11 +462,10 @@ input[name=result] { display:none; }
                     {{ ev.accepts }}
                   </div>
                   <input type="file" id="ev-file-{{ ev.type }}"
-                         name="ev_file_{{ ev.type }}"
                          multiple
                          accept="{{ ev.accepts }}"
                          style="display:none"
-                         onchange="evHandleFiles(this.files,'{{ ev.type }}')">
+                         onchange="evHandleFiles(this.files,'{{ ev.type }}'); this.value='';">
                 </div>
                 {% if 'image' in ev.accepts or 'video' in ev.accepts %}
                 <div class="ev-capture-row">
@@ -482,6 +482,10 @@ input[name=result] { display:none; }
                          onchange="evHandleFiles(this.files,'{{ ev.type }}'); this.value='';">
                   {% endif %}
                 </div>
+                {% endif %}
+                {% if 'video' in ev.accepts %}
+                <div class="ev-video-hint">{{ tr('视频每个最大 ' ~ (draft_file_max_bytes // 1048576) ~ ' MB；建议 1080p、每段 1 分钟以内。',
+                                                'Max ' ~ (draft_file_max_bytes // 1048576) ~ ' MB per video; 1080p and under 1 minute per clip is best.') }}</div>
                 {% endif %}
                 <div id="ev-list-{{ ev.type }}" class="ev-file-list"></div>
 
@@ -859,20 +863,23 @@ function evSetResult(etype, val, btn) {
   btn.className = 'ev-result-btn ' + cls;
 }
 
-// ── Per-evidence file upload ────────────────────────────────────────────────
-const evDTs = {};
-
-function evGetDT(etype) {
-  if (!evDTs[etype]) evDTs[etype] = new DataTransfer();
-  return evDTs[etype];
-}
+// ── Per-evidence files ──────────────────────────────────────────────────────
+// Each file is uploaded into the server draft as soon as it is picked (ref
+// "ev:<type>"), so a report started on an iPad / phone can be finished on a PC.
+const EV = {{ {'upload': url_for('inspection_draft_upload', job_key=job.job_key),
+               'delete': url_for('draft_file_delete', job_key=job.job_key, fid=0),
+               'csrf': csrf_token(),
+               'template_id': checklist.template_id if checklist else none,
+               'version': checklist.version if checklist else none,
+               'max_bytes': draft_file_max_bytes}|tojson }};
+const evFiles = {{ ev_files|tojson }};     // {type: [{id, name, url, video, doc}]}
+const evUploads = {};                      // {type: [{name, loaded, total}]}
 
 // ── Photo compression ──────────────────────────────────────────────────────
 // Phone photos are 3–8 MB and factory networks are slow: large JPEG / PNG /
 // WebP photos are scaled to 2000 px on the long edge and saved as JPEG
 // (about 300–600 KB) before upload. Other files are sent unchanged.
 const PHOTO_MAX_EDGE = 2000, PHOTO_QUALITY = 0.82, PHOTO_MIN_BYTES = 800 * 1024;
-const evPending = {};
 const evOriginalSize = new WeakMap();
 
 function loadImage(file) {
@@ -909,21 +916,50 @@ function compressPhoto(file) {
 }
 
 function evBusy() {
-  return Object.values(evPending).some(n => n > 0);
+  return Object.values(evUploads).some(list => list.length > 0);
 }
 
 function evHandleFiles(files, etype) {
-  const picked = Array.from(files || []);
-  if (!picked.length) return;
-  evPending[etype] = (evPending[etype] || 0) + 1;
-  evRenderList(etype);
-  Promise.all(picked.map(compressPhoto)).then(ready => {
-    const dt = evGetDT(etype);
-    ready.forEach(f => dt.items.add(f));
-    document.getElementById('ev-file-' + etype).files = dt.files;
-  }).finally(() => {
-    evPending[etype] -= 1;
+  Array.from(files || []).forEach(file => {
+    if (EV.max_bytes && file.size > EV.max_bytes) {
+      alert({{ tr('文件太大，无法上传：', 'File too large to upload: ')|tojson }} + file.name + ' (' + fmtSize(file.size)
+            + ' > ' + fmtSize(EV.max_bytes) + ')');
+      return;
+    }
+    const job = {name: file.name, loaded: 0, total: file.size};
+    (evUploads[etype] = evUploads[etype] || []).push(job);
     evRenderList(etype);
+    compressPhoto(file).then(ready => {
+      job.total = ready.size;
+      const data = new FormData();
+      data.append('ref', 'ev:' + etype);
+      data.append('file', ready, ready.name);
+      if (EV.template_id) { data.append('template_id', EV.template_id); data.append('version', EV.version); }
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', EV.upload);
+      xhr.setRequestHeader('X-CSRF-Token', EV.csrf);
+      xhr.upload.onprogress = e => { if (e.lengthComputable) { job.loaded = e.loaded; job.total = e.total; evRenderList(etype); } };
+      const finish = () => {
+        evUploads[etype] = evUploads[etype].filter(j => j !== job);
+        evRenderList(etype);
+      };
+      xhr.onload = () => {
+        let res = null;
+        try { res = JSON.parse(xhr.responseText); } catch (err) {}
+        if (xhr.status === 200 && res && res.ok) {
+          (evFiles[etype] = evFiles[etype] || []).push(res.file);
+          if (typeof saveDraft === 'function') saveDraft();
+        } else {
+          alert({{ tr('上传失败：', 'Upload failed: ')|tojson }} + file.name + '\n' + ((res && res.message) || ('HTTP ' + xhr.status)));
+        }
+        finish();
+      };
+      xhr.onerror = () => {
+        alert({{ tr('网络中断，上传失败：', 'Network error, upload failed: ')|tojson }} + file.name);
+        finish();
+      };
+      xhr.send(data);
+    });
   });
 }
 
@@ -940,38 +976,43 @@ function evDrop(e, etype) {
   evHandleFiles(e.dataTransfer.files, etype);
 }
 
-function evRemoveFile(etype, idx) {
-  const dt = evGetDT(etype);
-  const newDt = new DataTransfer();
-  Array.from(dt.files).forEach((f, i) => { if (i !== idx) newDt.items.add(f); });
-  while (dt.items.length) dt.items.remove(0);
-  Array.from(newDt.files).forEach(f => dt.items.add(f));
-  evRenderList(etype);
-  document.getElementById('ev-file-' + etype).files = dt.files;
+function evRemoveFile(etype, id) {
+  if (!confirm({{ tr('删除这个文件？', 'Delete this file?')|tojson }})) return;
+  fetch(EV.delete.replace('/0/delete', '/' + id + '/delete'),
+        {method: 'POST', headers: {'X-CSRF-Token': EV.csrf}, credentials: 'same-origin'})
+    .then(r => r.json())
+    .then(res => {
+      if (!res.ok) return;
+      evFiles[etype] = (evFiles[etype] || []).filter(f => f.id !== id);
+      evRenderList(etype);
+    });
 }
 
 function fmtSize(bytes) {
   return bytes > 1048576 ? (bytes/1048576).toFixed(1)+' MB' : (bytes/1024).toFixed(0)+' KB';
 }
 
+const EV_UPLOADING = {{ tr('上传中', 'Uploading')|tojson }}, EV_SAVED = {{ tr('已保存', 'Saved')|tojson }};
 function evRenderList(etype) {
   const list = document.getElementById('ev-list-' + etype);
-  list.innerHTML = evPending[etype] > 0
-    ? '<div class="ev-file-busy">⏳ ' + {{ tr('正在压缩照片…', 'Compressing photos…')|tojson }} + '</div>' : '';
-  Array.from(evGetDT(etype).files).forEach((f, i) => {
-    const icon = f.type.startsWith('image') ? '🖼️'
-               : f.type.startsWith('video') ? '🎥'
-               : f.name.endsWith('.pdf')    ? '📄'
-               : f.name.match(/\.xlsx?$/i)  ? '📊' : '📎';
-    const before = evOriginalSize.get(f);
-    const sz = before ? fmtSize(before) + ' → <span class="ev-file-saved">' + fmtSize(f.size) + '</span>' : fmtSize(f.size);
-    list.innerHTML += `<div class="ev-file-item">
+  if (!list) return;
+  let html = '';
+  (evUploads[etype] || []).forEach(job => {
+    const pct = job.total ? Math.round(job.loaded / job.total * 100) : 0;
+    html += `<div class="ev-file-item ev-file-busy"><span>⏳</span>
+      <span class="ev-file-name">${escapeHtml(job.name)}</span>
+      <span class="ev-file-size">${EV_UPLOADING} ${pct}% · ${fmtSize(job.loaded)} / ${fmtSize(job.total)}</span></div>`;
+  });
+  (evFiles[etype] || []).forEach(f => {
+    const icon = f.video ? '🎥' : f.doc ? (/\.(xlsx?|csv)$/i.test(f.name) ? '📊' : '📄') : '🖼️';
+    html += `<div class="ev-file-item">
       <span>${icon}</span>
-      <span class="ev-file-name">${escapeHtml(f.name)}</span>
-      <span class="ev-file-size">${sz}</span>
-      <button class="ev-remove" type="button" onclick="evRemoveFile('${etype}',${i})">✕</button>
+      <a class="ev-file-name" href="${f.url}" target="_blank">${escapeHtml(f.name)}</a>
+      <span class="ev-file-size ev-file-saved">${EV_SAVED}</span>
+      <button class="ev-remove" type="button" onclick="evRemoveFile('${etype}',${f.id})">✕</button>
     </div>`;
   });
+  list.innerHTML = html;
 }
 
 function escapeHtml(text) {
@@ -1030,7 +1071,7 @@ function daqCheck() {
 function missingEvidence() {
   return [...document.querySelectorAll('.ev-card[data-ev]')].filter(card => {
     const etype = card.dataset.ev;
-    const files = (typeof evDTs !== 'undefined' && evDTs[etype]) ? evDTs[etype].files.length : 0;
+    const files = (evFiles[etype] || []).length;
     const result = (document.getElementById('ev-result-' + etype) || {}).value;
     return !files && result !== 'N/A';
   }).map(card => card.dataset.label);
@@ -1052,18 +1093,34 @@ function formSnapshot() {
   return data;
 }
 window.formSnapshot = formSnapshot;
+let fieldSaveTimer = null;
+function saveFieldsToServer() {
+  fieldSaveTimer = null;
+  fetch({{ url_for('inspection_draft_save', job_key=job.job_key)|tojson }}, {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': EV.csrf},
+    body: JSON.stringify({template_id: null, version: null, answers: {}, fields: formSnapshot()})
+  }).catch(() => {});
+}
 function saveDraft() {
   if (!inspectForm) return;
   try { localStorage.setItem(DRAFT_KEY, JSON.stringify({reports: REPORT_COUNT, data: formSnapshot()})); } catch (e) {}
-  if (window.ckChanged) window.ckChanged();      // checklist pages also keep the draft on the server
+  if (window.ckChanged) window.ckChanged();      // checklist pages keep the draft on the server
+  else if ({{ 'true' if can_inspect else 'false' }}) {   // so do the others (fields + evidence files)
+    clearTimeout(fieldSaveTimer);
+    fieldSaveTimer = setTimeout(saveFieldsToServer, 1500);
+  }
 }
+window.addEventListener('pagehide', () => { if (fieldSaveTimer) saveFieldsToServer(); });
 function restoreDraft() {
   if (!inspectForm) return;
   let draft;
   try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) { draft = null; }
   const serverFields = {{ (draft.fields if draft else none)|tojson }};
   if (serverFields && Object.keys(serverFields).length) draft = {reports: REPORT_COUNT, data: serverFields};
-  if (!draft) return;
+  const hasEvFiles = Object.values(evFiles).some(list => list.length);
+  Object.keys(evFiles).forEach(evRenderList);
+  if (!draft) { if (hasEvFiles) document.getElementById('draft-note').style.display = 'block'; return; }
   // A report was submitted after this draft was saved: the draft is done.
   if (draft.reports !== REPORT_COUNT) { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} return; }
   Object.entries(draft.data || {}).forEach(([name, value]) => {
@@ -1155,7 +1212,7 @@ if (inspectForm) inspectForm.addEventListener('submit', function (e) {
   }
   if (evBusy()) {
     e.preventDefault();
-    alert({{ tr('照片还在压缩中，请稍等几秒再提交。', 'Photos are still being compressed. Please wait a few seconds.')|tojson }});
+    alert({{ tr('证据文件还在上传，请等上传完成再提交。', 'Evidence files are still uploading. Please wait until they finish.')|tojson }});
     return;
   }
   if (!missingConfirmed) {

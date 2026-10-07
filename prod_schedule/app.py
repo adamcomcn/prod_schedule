@@ -2653,6 +2653,9 @@ def inspect_form(job_key):
                            inspect_block_message=inspect_permission(job_key)[1],
                            task=job_task(job_key),
                            assignees=_assignable() if g.can_assign else [],
+                           ev_files={ref[len(EV_REF_PREFIX):]: files for ref, files in (draft or {}).get('files', {}).items()
+                                     if ref.startswith(EV_REF_PREFIX)},
+                           draft_file_max_bytes=DRAFT_FILE_MAX_BYTES,
                            now_date=china_today().isoformat())
 
 INSPECTION_RESULTS = {'Pass', 'Fail', 'Partial Pass'}
@@ -2753,8 +2756,15 @@ def submit_inspection(job_key):
     insp_index = len(cache.get(job_key, []))
     inspection_data['report_no'] = readable_report_number(inspection_data, insp_index)
 
+    # Evidence files already uploaded into the draft (ref "ev:<type>")
+    ev_draft_files = defaultdict(list)
+    for f in draft_files:
+        if f['ref'].startswith(EV_REF_PREFIX):
+            ev_draft_files[f['ref'][len(EV_REF_PREFIX):]].append(f)
+
     # Evidence type names from form (ev_result_brt, ev_result_daq, …)
     ev_types = [k[10:] for k in form if k.startswith('ev_result_')]
+    ev_types += [t for t in ev_draft_files if t not in ev_types]
 
     job_dir = os.path.join(UPLOAD_DIR, hashlib.sha256(job_key.encode('utf-8')).hexdigest())
     os.makedirs(job_dir, exist_ok=True)
@@ -2763,8 +2773,19 @@ def submit_inspection(job_key):
         for etype in ev_types:
             ev_result = form.get(f'ev_result_{etype}', '')
             ev_notes  = form.get(f'ev_notes_{etype}', '')
-            ev_files  = request.files.getlist(f'ev_file_{etype}')
+            ev_files  = request.files.getlist(f'ev_file_{etype}')   # pages opened before draft uploads
             evidence_results[etype] = {'result': ev_result, 'notes': ev_notes, 'files': []}
+
+            for f in ev_draft_files.get(etype, []):
+                all_file_names.append(f['original_name'])
+                all_file_links.append(f"[local] {f['saved_name']}")
+                evidence_results[etype]['files'].append(f['original_name'])
+                conn.execute(
+                    'INSERT INTO inspection_attachments '
+                    '(job_key, insp_index, evidence_type, original_name, saved_name, '
+                    ' file_path, drive_link, result, notes) VALUES (?,?,?,?,?,?,?,?,?)',
+                    (job_key, insp_index, etype, f['original_name'], f['saved_name'],
+                     f['file_path'], '', ev_result, ev_notes))
 
             for uploaded_file in ev_files:
                 if not uploaded_file.filename:
@@ -2822,6 +2843,8 @@ def submit_inspection(job_key):
         photos = defaultdict(list)
         with db_conn() as conn:
             for f in draft_files:
+                if f['ref'].startswith(EV_REF_PREFIX):
+                    continue                  # already attached as required evidence above
                 kind = 'product_photo' if f['ref'] == 'product' else 'checklist_photo'
                 aid = conn.execute(
                     'INSERT INTO inspection_attachments (job_key, insp_index, evidence_type, original_name, '
@@ -2849,6 +2872,7 @@ def submit_inspection(job_key):
     else:
         with db_conn() as conn:
             if draft:
+                conn.execute('DELETE FROM draft_files WHERE draft_id=?', (draft['id'],))
                 conn.execute('DELETE FROM inspection_drafts WHERE id=?', (draft['id'],))
 
     # Save to local cache
@@ -5010,6 +5034,12 @@ def _save_product_image(file_obj):
 # user until the report is submitted.
 
 CHECKLIST_FILE_EXTENSIONS = IMAGE_EXTENSIONS | {'.heic', '.mp4', '.mov', '.avi', '.mkv', '.pdf', '.xlsx', '.xls', '.csv'}
+# Required-evidence files (BRT, test videos, DAQ …) are uploaded one by one into
+# the draft as soon as they are picked, under ref "ev:<type>", so a report
+# started on an iPad can be finished on a PC.
+EV_REF_PREFIX = 'ev:'
+# One draft file per request, so videos may be larger than the overall limit.
+DRAFT_FILE_MAX_BYTES = int(os.environ.get('DRAFT_FILE_MAX_BYTES', 300 * 1024 * 1024))
 
 CHECKLIST_REASONS = {
     'product_photo': ('缺少产品照片（能看清编号 / 批号）', 'Product photo missing (serial / batch number visible)'),
@@ -5101,11 +5131,12 @@ def inspection_draft_upload(job_key):
     ref = (request.form.get('ref') or '').strip()[:40]
     if not upload or not upload.filename or not ref:
         return jsonify(ok=False, message=tr('没有文件', 'No file')), 400
-    if _upload_extension(upload.filename) not in CHECKLIST_FILE_EXTENSIONS:
+    allowed = CHECKLIST_FILE_EXTENSIONS | (EVIDENCE_EXTENSIONS if ref.startswith(EV_REF_PREFIX) else set())
+    if _upload_extension(upload.filename) not in allowed:
         return jsonify(ok=False, message=tr('只能上传照片、视频、PDF 或 Excel', 'Photos, videos, PDF or Excel only')), 400
     folder = os.path.join(UPLOAD_DIR, hashlib.sha256(job_key.encode('utf-8')).hexdigest(), 'drafts')
     os.makedirs(folder, exist_ok=True)
-    original, saved = _save_uploaded_file(upload, folder, CHECKLIST_FILE_EXTENSIONS)
+    original, saved = _save_uploaded_file(upload, folder, allowed)
     with db_conn() as conn:
         draft = _ensure_draft(conn, job_key, request.form.get('template_id', type=int),
                               request.form.get('version', type=int))
@@ -6501,8 +6532,10 @@ def user_update(uid):
 
 @app.before_request
 def _auth_check():
+    if request.endpoint == 'inspection_draft_upload' and session.get('user_id'):
+        request.max_content_length = DRAFT_FILE_MAX_BYTES   # signed-in users only; set before the body is read
     if request.method == 'POST' and request.endpoint != 'cron_reminders':
-        submitted = request.form.get('_csrf_token') or request.headers.get('X-CSRF-Token')
+        submitted = request.headers.get('X-CSRF-Token') or request.form.get('_csrf_token')
         expected = session.get('_csrf_token', '')
         if not submitted or not expected or not hmac.compare_digest(submitted, expected):
             return 'Invalid CSRF token', 400
@@ -6670,9 +6703,12 @@ def redirect_as_json_for_uploads(response):
 
 @app.errorhandler(413)
 def upload_too_large(_error):
-    limit_mb = (app.config.get('MAX_CONTENT_LENGTH') or 0) // (1024 * 1024)
-    return tr(f'上传文件过大（上限 {limit_mb} MB），请压缩后重试或分次提交。',
-              f'Upload too large (limit {limit_mb} MB). Compress the files or submit in parts.'), 413
+    limit_mb = (request.max_content_length or 0) // (1024 * 1024)
+    message = tr(f'上传文件过大（上限 {limit_mb} MB），请压缩后重试或分次提交。',
+                 f'Upload too large (limit {limit_mb} MB). Compress the files or submit in parts.')
+    if request.endpoint == 'inspection_draft_upload':
+        return jsonify(ok=False, message=message), 413
+    return message, 413
 
 @app.errorhandler(500)
 def internal_error(_error):

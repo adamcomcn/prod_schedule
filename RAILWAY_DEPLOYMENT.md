@@ -28,7 +28,8 @@ Optional integrations:
 - `SMTP_PASSWORD`
 - `SMTP_FROM`
 - `GOOGLE_SERVICE_ACCOUNT_JSON_B64`: base64-encoded service account JSON
-- `MAX_UPLOAD_BYTES`: defaults to 50 MB
+- `MAX_UPLOAD_BYTES`: defaults to 50 MB (one request: report submit, schedule upload)
+- `DRAFT_FILE_MAX_BYTES`: defaults to 300 MB (one evidence / checklist file, e.g. a video)
 - `SESSION_HOURS`: defaults to 8 hours
 
 ## Volume layout
