@@ -10,6 +10,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import msoffcrypto
 import openpyxl
 from db import db_conn, init_db
+import geoip
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -176,6 +177,19 @@ def device_label(user_agent):
     return ' · '.join(p for p in (system, browser) if p) or (ua[:40] if ua else '—')
 
 app.jinja_env.filters['device_label'] = device_label
+
+def ip_country(ip):
+    """'CN 中国' / 'CN China' for an IP address (offline DB-IP Lite database)."""
+    hit = geoip.lookup(ip, APP_DATA_DIR, auto_download=not app.config.get('TESTING'))
+    if not hit:
+        return ''
+    code, names = hit
+    if code == 'LAN':
+        return tr('内网', 'Local')
+    name = names.get('zh-CN') if current_lang() == 'zh' else names.get('en')
+    return f'{code} {name}' if name else code
+
+app.jinja_env.filters['ip_country'] = ip_country
 
 def _safe_next_url(value):
     if not value or not value.startswith('/') or value.startswith('//') or '\\' in value:

@@ -72,7 +72,7 @@
           <td>{{ tr('启用', 'Active') if user.active else tr('已停用', 'Disabled') }}</td>
           <td style="white-space:nowrap;font-size:.8rem;">
             {% set last = last_logins.get(user.id) %}
-            {% if last %}<a href="{{ url_for('user_logins', user=user.username) }}">{{ last.created_at | localtime }}</a><br><span style="color:#6b7280;font-family:monospace;">{{ last.ip }}</span>
+            {% if last %}<a href="{{ url_for('user_logins', user=user.username) }}">{{ last.created_at | localtime }}</a><br><span style="color:#6b7280;font-family:monospace;">{{ last.ip }}</span>{% set cc = last.ip | ip_country %}{% if cc %} <span style="color:#6b7280;">· {{ cc }}</span>{% endif %}
             {% else %}<span style="color:#9ca3af;">{{ tr('从未登录', 'Never') }}</span>{% endif %}
           </td>
           <td>

@@ -48,7 +48,7 @@
     <table class="login-table">
       <thead><tr>
         <th>{{ tr('时间', 'Time') }}</th><th>{{ tr('用户名', 'Username') }}</th><th>{{ tr('类型', 'Event') }}</th>
-        <th>{{ tr('IP 地址', 'IP address') }}</th><th>{{ tr('设备 / 浏览器', 'Device / browser') }}</th>
+        <th>{{ tr('IP 地址', 'IP address') }}</th><th>{{ tr('国家 / 地区', 'Country') }}</th><th>{{ tr('设备 / 浏览器', 'Device / browser') }}</th>
       </tr></thead>
       <tbody>
       {% for e in events %}
@@ -58,10 +58,11 @@
             {% if e.username and not e.user_id %}<span style="color:#6b7280;font-size:.75rem;">{{ tr('（账号不存在）', '(no such account)') }}</span>{% endif %}</td>
           <td><span class="ev ev-{{ e.event }}">{{ labels.get(e.event, e.event) }}</span></td>
           <td style="white-space:nowrap;font-family:monospace;">{{ e.ip or '—' }}{% if e.new_ip %}<span class="new-ip" title="{{ tr('该账号第一次从这个 IP 登录', 'First sign-in for this account from this IP') }}">{{ tr('新 IP', 'New IP') }}</span>{% endif %}</td>
+          <td style="white-space:nowrap;">{{ (e.ip | ip_country) or '—' }}</td>
           <td title="{{ e.user_agent }}">{{ e.user_agent | device_label }}</td>
         </tr>
       {% else %}
-        <tr><td colspan="5" style="color:#6b7280;">{{ tr('暂无记录', 'No sign-ins recorded yet') }}</td></tr>
+        <tr><td colspan="6" style="color:#6b7280;">{{ tr('暂无记录', 'No sign-ins recorded yet') }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -69,8 +70,9 @@
     <div class="login-note">
       {{ tr('显示最近 %d 条；记录保留 %d 天。时间按你的浏览器所在时区显示。' % (limit, retention_days),
             'Showing the latest %d entries; entries are kept for %d days. Times are shown in the time zone of your browser.' % (limit, retention_days)) }}<br>
-      {{ tr('“新 IP”表示该账号第一次从这个 IP 登录。手机网络的 IP 经常变化，单独出现不一定有问题；如果同时有多次密码错误，建议核实。',
-            '"New IP" = first sign-in for this account from that IP. Mobile networks change IPs often, so on its own it is not a concern; check it if it comes with failed attempts.') }}
+      {{ tr('“新 IP”表示该账号第一次从这个 IP 登录。手机网络的 IP 经常变化，单独出现不一定有问题；如果同时有多次密码错误，建议核实。国家 / 地区按 IP 判断，使用 VPN 或公司网络时显示的是出口所在地。',
+            '"New IP" = first sign-in for this account from that IP. Mobile networks change IPs often, so on its own it is not a concern; check it if it comes with failed attempts. The country comes from the IP address; with a VPN or company network it shows where that network exits.') }}<br>
+      {{ tr('IP 归属地数据：', 'IP geolocation by ') }}<a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a>（CC BY 4.0）
     </div>
   </div>
 </div>

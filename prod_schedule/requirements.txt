@@ -6,3 +6,4 @@ reportlab==5.0.1
 pillow==12.3.0
 pillow-heif==1.8.0
 tzdata==2026.4
+maxminddb==3.2.0
