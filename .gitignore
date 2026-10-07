@@ -20,6 +20,7 @@
 
 # ── 用户上传内容 & 大型图片资源 ──────────────────────────────────────────────
 /prod_schedule/uploads/
+/prod_schedule/geoip/
 /prod_schedule/static/kb_images/
 /prod_schedule/static/product_images/
 
