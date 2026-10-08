@@ -4761,37 +4761,87 @@ def _task_recipients(tasks):
     return recipients
 
 
+DATE_CHANGE_GROUPS = (('delayed', '⬆ 延后 / Delayed'), ('earlier', '⬇ 提前 / Earlier'),
+                      ('added', '＋ 新增日期 / Date added'), ('removed', '✕ 日期被删除 / Date removed'),
+                      ('remark', '✎ 只改了备注 / Remark only'))
+
+
+def date_change_kind(old, new):
+    """How a schedule date cell changed: (kind, days, label) with kind in
+    delayed / earlier / added / removed / remark."""
+    (d1, _n1), (d2, _n2) = split_est(old), split_est(new)
+    if d1 and d2 and d1 != d2:
+        days = (d2 - d1).days
+        if days > 0:
+            return 'delayed', days, f'⬆ 延后 {days} 天 / delayed {days} d'
+        return 'earlier', -days, f'⬇ 提前 {-days} 天 / earlier by {-days} d'
+    if d2 and not d1:
+        return 'added', None, '＋ 新增日期 / date added'
+    if d1 and not d2:
+        return 'removed', None, '✕ 日期被删除 / date removed'
+    return 'remark', None, '✎ 只改了备注 / remark only'
+
+
 def _send_date_change_email(changes, edited_by=''):
     """Tell the lead and the assigned inspectors that completion / ship dates
-    moved (earlier or later) or the remark text next to the date changed."""
+    moved: grouped as delayed (most first), earlier, date added / removed and
+    remark only, each date with its trend and a warning when the new
+    completion date is already in the past."""
     recipients = _task_recipients(changes)
     if not recipients:
         return False, tr('未设置通知邮箱', 'No notification e-mail configured')
-    today = china_today().isoformat()
-    lines = [f"预计完成日变动 Completion date changes — {today}",
-             f"{len(changes)} 个未完成任务的日期有变动 / {len(changes)} open task(s) changed.", '']
+    today = china_today()
+    ids = {c['assigned_to'] for c in changes if c.get('assigned_to')}
+    names = {}
+    if ids:
+        with db_conn() as conn:
+            names = {r['id']: r['display_name'] or r['username'] for r in conn.execute(
+                f"SELECT id, username, display_name FROM users WHERE id IN ({','.join('?' * len(ids))})", tuple(ids))}
+    items = []
+    for c in changes:
+        est = date_change_kind(c['old_est'], c['new_est']) if est_changed(c['old_est'], c['new_est']) else None
+        ship = (date_change_kind(c.get('old_ship'), c.get('new_ship'))
+                if est_changed(c.get('old_ship'), c.get('new_ship')) else None)
+        if est or ship:
+            # group by the completion date, unless only its remark changed and the ship date moved
+            main = est if est and (est[0] != 'remark' or not ship) else ship
+            items.append((c, est, ship, main[0], main[1] or 0))
+    counts = {kind: sum(1 for item in items if item[3] == kind) for kind, _ in DATE_CHANGE_GROUPS}
+    zh = {'delayed': '延后', 'earlier': '提前', 'added': '新增日期', 'removed': '日期被删除', 'remark': '只改备注'}
+    en = {'delayed': 'delayed', 'earlier': 'earlier', 'added': 'date added', 'removed': 'date removed', 'remark': 'remark only'}
+    summary_zh = ' · '.join(f'{zh[k]} {n}' for k, n in counts.items() if n)
+    summary_en = ', '.join(f'{n} {en[k]}' for k, n in counts.items() if n)
+    lines = [f"预计完成日变动 Completion date changes — {today.isoformat()}",
+             f"{len(items)} 个未完成任务的日期有变动：{summary_zh}",
+             f"{len(items)} open task(s) changed: {summary_en}.", '']
     if edited_by:
-        lines.insert(2, f"由 {edited_by} 手动修改 / Edited manually by {edited_by}")
-    for i, c in enumerate(changes, 1):
-        lines.append(f"{i}. [{c['region']}]  {c['order_number']}  {c['item_code']}")
-        old_d, _ = split_est(c['old_est'])
-        new_d, _ = split_est(c['new_est'])
-        if est_changed(c['old_est'], c['new_est']):
-            if old_d and new_d and old_d != new_d:
-                delta = (new_d - old_d).days
-                trend = (f"延后 {delta} 天 / delayed {delta} d" if delta > 0
-                         else f"提前 {-delta} 天 / earlier by {-delta} d")
-            else:
-                trend = '备注变化 / remark changed'
-            lines.append(f"    预计完成 Est. completion: {_est_label(c['old_est'])}  →  "
-                         f"{_est_label(c['new_est'])}   [{trend}]")
-        if est_changed(c['old_ship'], c['new_ship']):
-            lines.append(f"    最迟出货 Must ship: {_est_label(c['old_ship'])}  →  {_est_label(c['new_ship'])}")
-        if c.get('assigned_to'):
-            lines.append("    已分配 Assigned")
-        lines.append('    ' + url_for('inspect_form', job_key=c['job_key'], _external=True))
-        lines.append('')
-    return _smtp_send(f"【日期变动】{len(changes)} 项检验任务 / {len(changes)} inspection task(s) with date changes",
+        lines.insert(3, f"由 {edited_by} 手动修改 / Edited manually by {edited_by}")
+    n = 0
+    for kind, heading in DATE_CHANGE_GROUPS:
+        group = [item for item in items if item[3] == kind]
+        if not group:
+            continue
+        if kind in ('delayed', 'earlier'):
+            group.sort(key=lambda item: -item[4])                           # biggest move first
+        lines.append(f"■ {heading} ({len(group)})")
+        for c, est, ship, _kind, _days in group:
+            n += 1
+            lines.append(f"{n}. [{c['region']}]  {c['order_number']}  {c['item_code']}"
+                         + (f"  {c['description']}" if c.get('description') else ''))
+            if est:
+                new_d, _ = split_est(c['new_est'])
+                past = (f"   ⚠ 新日期已过 {(today - new_d).days} 天 / already {(today - new_d).days} d ago"
+                        if new_d and new_d < today else '')
+                lines.append(f"    预计完成 Est. completion: {_est_label(c['old_est'])}  →  "
+                             f"{_est_label(c['new_est'])}   [{est[2]}]{past}")
+            if ship:
+                lines.append(f"    最迟出货 Must ship: {_est_label(c.get('old_ship'))}  →  "
+                             f"{_est_label(c.get('new_ship'))}   [{ship[2]}]")
+            if c.get('assigned_to'):
+                lines.append(f"    已分配 Assigned: {names.get(c['assigned_to'], '')}")
+            lines.append('    ' + url_for('inspect_form', job_key=c['job_key'], _external=True))
+            lines.append('')
+    return _smtp_send(f"【日期变动】{len(items)} 项：{summary_zh} / {len(items)} inspection task(s): {summary_en}",
                       '\n'.join(lines), recipients)
 
 

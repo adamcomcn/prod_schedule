@@ -61,6 +61,46 @@ class NotifyTests(unittest.TestCase):
         body = next(p for p in email.message_from_string(raw).walk() if p.get_content_type() == 'text/plain').get_payload(decode=True).decode()
         self.assertIn('提前 7 天', body)
 
+    def test_date_change_mail_says_how_each_date_moved(self):
+        t = self.add('')
+        with db_conn() as conn:
+            conn.execute("UPDATE users SET display_name='Mr. Yu'")
+        changes = [
+            # the screenshot case: no date before, a date in the past now, must-ship added
+            dict(t, order_number='DPL2607', item_code='RSVSP100ACC', description='DN100 Spigot Gate Valve',
+                 old_est='', new_est='2026-06-15 ready for ship', old_ship='', new_ship='2026-10-10'),
+            dict(t, order_number='DPL2', item_code='A', old_est='2026-10-01', new_est='2026-10-31', old_ship='', new_ship=''),
+            dict(t, order_number='DPL3', item_code='B', old_est='2026-10-01', new_est='2026-10-06', old_ship='', new_ship=''),
+            dict(t, order_number='DPL4', item_code='C', old_est='2026-10-20', new_est='2026-10-17',
+                 old_ship='2026-11-01', new_ship='2026-11-05'),
+            dict(t, order_number='DPL5', item_code='D', old_est='2026-10-30', new_est='2026-10-30 waiting casting',
+                 old_ship='2026-11-01', new_ship='2026-11-08'),                  # remark + ship delayed
+            dict(t, order_number='DPL6', item_code='E', old_est='2026-10-30', new_est='TBC', old_ship='', new_ship=''),
+        ]
+        sent = []
+        with app.app.test_request_context(), \
+                mock.patch.object(app, 'china_today', return_value=date(2026, 10, 9)), \
+                mock.patch.object(app, '_smtp_send', side_effect=lambda s, b, r, **k: (sent.append((s, b)), (True, 'ok'))[1]):
+            app._send_date_change_email(changes)
+        subject, body = sent[0]
+        self.assertIn('6 项：延后 3 · 提前 1 · 新增日期 1 · 日期被删除 1', subject)
+        self.assertIn('3 delayed, 1 earlier, 1 date added, 1 date removed', subject)
+        sections = [l for l in body.splitlines() if l.startswith('■')]
+        self.assertEqual(sections, ['■ ⬆ 延后 / Delayed (3)', '■ ⬇ 提前 / Earlier (1)',
+                                    '■ ＋ 新增日期 / Date added (1)', '■ ✕ 日期被删除 / Date removed (1)'])
+        delayed = body.split('■ ⬆ 延后 / Delayed (3)')[1].split('■')[0]
+        self.assertLess(delayed.index('DPL2'), delayed.index('DPL5'))            # 30 d before 7 d
+        self.assertLess(delayed.index('DPL5'), delayed.index('DPL3'))            # 7 d before 5 d
+        self.assertIn('[⬆ 延后 30 天 / delayed 30 d]', body)
+        self.assertIn('[⬇ 提前 3 天 / earlier by 3 d]', body)
+        self.assertIn('最迟出货 Must ship: 2026-11-01  →  2026-11-05   [⬆ 延后 4 天 / delayed 4 d]', body)
+        self.assertIn('[✎ 只改了备注 / remark only]', body)                    # DPL5 est, grouped as delayed
+        added = body.split('■ ＋ 新增日期 / Date added (1)')[1]
+        self.assertIn('DPL2607  RSVSP100ACC  DN100 Spigot Gate Valve', added)
+        self.assertIn('—  →  2026-06-15 (ready for ship)   [＋ 新增日期 / date added]   ⚠ 新日期已过 116 天', added)
+        self.assertIn('已分配 Assigned: Mr. Yu', body)
+        self.assertNotIn('备注变化 / remark changed', body)
+
     @mock.patch.dict(os.environ, SMTP_ENV)
     @mock.patch('smtplib.SMTP_SSL', FakeSMTP)
     def test_reminder_within_two_weeks_sent_once_and_rearmed_on_change(self):
