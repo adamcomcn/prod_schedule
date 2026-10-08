@@ -108,6 +108,21 @@ class PurchasingExportTests(unittest.TestCase):
         self.assertEqual((dc[2][9], dc[2][13]), ('-3', '+4'))
         self.assertEqual(s['Region Moves'][1][:3], ['DPL6', 'PO-6', 'XM'])
 
+    def test_earlier_upload_compares_with_the_one_before_it(self):
+        third = os.path.join(app.HISTORY_DIR, '20261015-080000-000000')
+        os.makedirs(third)
+        app.save_json(os.path.join(third, 'replaced_schedule.json'), AFTER)    # state after the 08.10 upload
+        app.save_json(os.path.join(third, 'meta.json'), {'filename': 'Production Schedule 15.10.xlsx', 'applied_at': '2026-10-15 08:00'})
+        app.save_json(app.CURRENT_FILE, AFTER)                                   # nothing changed on 15.10
+        uploads = app.schedule_upload_history()
+        self.assertEqual([u['id'] for u in uploads], ['20261015-080000-000000', '20261008-080000-000000'])
+        _data, name, latest, _u = app.purchasing_export()
+        self.assertEqual((name[-15:], latest['shipped'], latest['date_changes']), ('2026-10-15.xlsx', [], []))
+        _data, name, earlier, upload = app.purchasing_export('20261008-080000-000000')
+        self.assertEqual(name[-15:], '2026-10-08.xlsx')
+        self.assertEqual(len(earlier['shipped']), 2)
+        self.assertEqual(upload['previous']['filename'], 'Production Schedule 01.10.xlsx')
+
     def test_needs_two_uploads(self):
         shutil.rmtree(os.path.join(app.HISTORY_DIR, '20261008-080000-000000'))
         self.assertIsNone(app.purchasing_export())
@@ -127,6 +142,10 @@ class PurchasingExportTests(unittest.TestCase):
         self.assertEqual(self.client('boss').get('/export/purchasing.xlsx?upload=nope').status_code, 302)
         page = self.client('boss').get('/').get_data(as_text=True)
         self.assertIn('/export/purchasing.xlsx', page)
+        self.assertIn('<option value="20261008-080000-000000">2026-10-08 08:00 UTC · Production Schedule 08.10.xlsx', page)
+        self.assertNotIn('20261001-080000-000000', page)          # first upload: nothing before it to compare
+        self.assertEqual(self.client('boss').get('/export/purchasing.xlsx?upload=20261008-080000-000000').status_code, 200)
+        self.assertNotIn('/export/purchasing.xlsx', self.client('yu').get('/').get_data(as_text=True))
 
         boss = self.client('boss')
         boss.post('/settings', data={'_csrf_token': 'tok', 'purchasing_emails': 'buy@example.com, bad'})

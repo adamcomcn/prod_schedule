@@ -132,11 +132,16 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     <a href="{{ url_for('export_comparison_excel') }}" class="btn btn-outline btn-sm">
       {{ tr('导出对比 Excel', 'Export comparison Excel') }}
     </a>
-    {% if g.can_review %}
-    <a href="{{ url_for('export_purchasing_excel') }}" class="btn btn-outline btn-sm"
-       title="{{ tr('最近一次上传与上一次相比：已发货、日期变化、新增、地区转移（不含价格）', 'Latest upload vs the one before: shipped, date changes, new lines, region moves (no prices)') }}">
-      &#128666; {{ tr('导出给采购', 'Changes for purchasing') }}
-    </a>
+    {% if g.can_review and purchasing_uploads %}
+    <form method="GET" action="{{ url_for('export_purchasing_excel') }}" style="display:flex;gap:6px;align-items:center;"
+          title="{{ tr('所选上传与它的上一次相比：已发货、日期变化、新增、地区转移（不含价格）', 'The chosen upload vs the one before it: shipped, date changes, new lines, region moves (no prices)') }}">
+      <select name="upload" style="width:auto;max-width:300px;font-size:.8rem;padding:5px 8px;">
+        {% for u in purchasing_uploads %}
+        <option value="{{ u.id }}">{{ u.applied_at[:16] or u.id }} UTC · {{ u.filename }}{% if loop.first %} ({{ tr('最新', 'latest') }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-outline btn-sm">&#128666; {{ tr('导出给采购', 'Changes for purchasing') }}</button>
+    </form>
     {% endif %}
     <form method="GET" action="{{ url_for('index') }}" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
       <input type="hidden" name="sheet" value="{{ selected_sheet }}">

@@ -1396,6 +1396,7 @@ def index():
     with db_conn() as _c:
         est_overrides = {r['job_key']: dict(r) for r in _c.execute('SELECT * FROM est_overrides')}
     return render_template('index.html',
+                           purchasing_uploads=schedule_upload_history()[:30] if g.can_review else [],
                            move_notes=move_notes,
                            est_overrides=est_overrides,
                            data=display_data,
