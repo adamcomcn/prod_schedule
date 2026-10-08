@@ -313,7 +313,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% set is_est = loop.index0 < headers|length and headers[loop.index0]|lower == 'estimated completion date' %}
           <td data-col="{{ headers[loop.index0]|lower if loop.index0 < headers|length else '' }}">{{ cell|status_label if headers[loop.index0] == 'Current Status' else cell }}
             {% if is_est and job_key in est_overrides %}<span title="{{ tr('已由', 'Corrected by') }} {{ est_overrides[job_key].edited_by }} {{ tr('修正，供应商原值：', ', supplier value: ') }}{{ est_overrides[job_key].original }}" style="color:#d97706;cursor:help;">&#9998;*</span>{% endif %}
-            {% if is_est and g.can_assign %}<button type="button" class="est-edit" data-key="{{ job_key }}" data-val="{{ cell }}" title="{{ tr('修改预计完成日', 'Edit completion date') }}" style="border:none;background:none;cursor:pointer;color:#2563eb;">&#9998;</button>{% endif %}
+            {% if is_est and g.is_admin %}<button type="button" class="est-edit" data-key="{{ job_key }}" data-val="{{ cell }}" title="{{ tr('修改预计完成日', 'Edit completion date') }}" style="border:none;background:none;cursor:pointer;color:#2563eb;">&#9998;</button>{% endif %}
           </td>
           {% endfor %}
           <td class="inspect-col" data-sort="{{ {'Fail': '0', 'Partial Pass': '1', 'Pass': '3'}.get(insp[-1].result, '1') if insp else '2' }}-{{ insp[-1].inspection_date if insp else '' }}">

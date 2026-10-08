@@ -934,6 +934,16 @@ def init_db():
             PRIMARY KEY (job_key, est_date)
         )''')
 
+        # Reports an admin left out of the inspectors' on-time rate (with the reason)
+        conn.execute('''CREATE TABLE IF NOT EXISTS kpi_exclusions (
+            job_key     TEXT NOT NULL,
+            insp_index  INTEGER NOT NULL,
+            reason      TEXT NOT NULL,
+            excluded_by TEXT DEFAULT '',
+            excluded_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (job_key, insp_index)
+        )''')
+
         # V-Trust job numbers entered by admins (one per order line; one job may cover many lines)
         conn.execute('''CREATE TABLE IF NOT EXISTS vtrust_bookings (
             job_key          TEXT PRIMARY KEY,

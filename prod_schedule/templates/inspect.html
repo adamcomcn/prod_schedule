@@ -712,6 +712,30 @@ input[name=result] { display:none; }
             </form>
           </details>
           {% endif %}
+          {% set ki = kpi_info.reports.get(pidx, {}) %}
+          {% if kpi_info.deadline or ki.exclusion %}
+          <div class="hq-mail" style="font-size:.75rem;">
+            {{ tr('考核截止日', 'KPI deadline') }}: <strong>{{ kpi_info.deadline or '—' }}</strong>
+            {% if kpi_info.extended %}<span style="color:#1e40af;">{{ tr('（日期被提前，已顺延到收到变动后 %d 个工作日）' % kpi_info.grace, ' (date brought forward: moved to %d working days after the change)' % kpi_info.grace) }}</span>{% endif %}
+            {% if ki.exclusion %}
+              · <span style="color:#92400e;font-weight:600;">{{ tr('不计入按时率', 'Left out of the on-time rate') }}</span>: {{ ki.exclusion.reason }}
+              <span style="color:#9ca3af;">· {{ ki.exclusion.excluded_by }} · {{ ki.exclusion.excluded_at|localtime }}</span>
+            {% elif ki.on_time is not none %}
+              · {% if ki.on_time %}<span style="color:#059669;font-weight:600;">{{ tr('按时', 'On time') }} &#10003;</span>{% else %}<span style="color:#dc2626;font-weight:600;">{{ tr('逾期', 'Late') }} &#10007;</span>{% endif %}
+            {% endif %}
+            {% if g.is_admin %}
+            <form method="POST" action="{{ url_for('report_kpi_exclusion', job_key=job.job_key, index=pidx) }}" style="display:inline-flex; gap:4px; align-items:center; margin-left:6px;">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              {% if ki.exclusion %}
+              <button type="submit" name="action" value="include" class="hq-resend">{{ tr('恢复计入', 'Count it again') }}</button>
+              {% else %}
+              <input type="text" name="reason" maxlength="300" placeholder="{{ tr('不计入原因', 'Reason to leave out') }}" style="padding:2px 6px; font-size:.75rem; min-width:150px;">
+              <button type="submit" name="action" value="exclude" class="hq-resend">{{ tr('不计入按时率', 'Leave out of on-time rate') }}</button>
+              {% endif %}
+            </form>
+            {% endif %}
+          </div>
+          {% endif %}
           {% for c in p.get('inspector_changes', []) %}
           <div style="font-size:.72rem; color:#9ca3af;">{{ tr('检验员由 ' ~ c['from'] ~ ' 改为 ' ~ c['to'], 'Inspector changed from ' ~ c['from'] ~ ' to ' ~ c['to']) }} · {{ c['by'] }} · {{ c['at']|localtime }}</div>
           {% endfor %}

@@ -143,7 +143,7 @@ class EstEditTests(unittest.TestCase):
         with db_conn() as conn:
             for t in ('users', 'inspection_tasks', 'est_overrides', 'task_date_changes'):
                 conn.execute(f'DELETE FROM {t}')
-            for u, role, mail in (('murphy', 'lead', 'murphy@example.test'),
+            for u, role, mail in (('boss', 'admin', 'boss@example.test'), ('murphy', 'lead', 'murphy@example.test'),
                                   ('yu', 'inspector', 'yu@example.test'),
                                   ('other', 'inspector', 'other@example.test')):
                 conn.execute('INSERT INTO users (username,password_hash,role,email) VALUES (?,?,?,?)',
@@ -164,8 +164,8 @@ class EstEditTests(unittest.TestCase):
 
     @mock.patch.dict(os.environ, SMTP_ENV)
     @mock.patch('smtplib.SMTP_SSL', FakeSMTP)
-    def test_lead_edit_updates_everything_and_notifies(self):
-        r = self.client('murphy').post('/schedule/est', data={
+    def test_admin_edit_updates_everything_and_notifies(self):
+        r = self.client('boss').post('/schedule/est', data={
             '_csrf_token': 'tok', 'job_key': 'MEL|PO1|ITM', 'est': '2026-07-12', 'next': '/'})
         self.assertEqual(r.status_code, 302)
         self.assertEqual(app.load_json(app.CURRENT_FILE)['MEL'][1][3], '2026-07-12')
@@ -175,16 +175,17 @@ class EstEditTests(unittest.TestCase):
         self.assertEqual((ov['original'], ov['corrected']), ('2026-06-12', '2026-07-12'))
         self.assertEqual(FakeSMTP.sent[0][1], ['lead@example.test', 'yu@example.test'])
 
-    def test_inspector_cannot_edit(self):
-        r = self.client('yu').post('/schedule/est', data={
-            '_csrf_token': 'tok', 'job_key': 'MEL|PO1|ITM', 'est': '2026-07-12'})
-        self.assertEqual(r.status_code, 403)
+    def test_lead_and_inspector_cannot_edit(self):
+        for user in ('murphy', 'yu'):                     # the date drives their KPI: admin only
+            r = self.client(user).post('/schedule/est', data={
+                '_csrf_token': 'tok', 'job_key': 'MEL|PO1|ITM', 'est': '2026-07-12'})
+            self.assertEqual(r.status_code, 403)
         self.assertEqual(app.load_json(app.CURRENT_FILE)['MEL'][1][3], '2026-06-12')
 
     @mock.patch.dict(os.environ, SMTP_ENV)
     @mock.patch('smtplib.SMTP_SSL', FakeSMTP)
     def test_correction_survives_upload_until_supplier_changes_it(self):
-        self.client('murphy').post('/schedule/est', data={
+        self.client('boss').post('/schedule/est', data={
             '_csrf_token': 'tok', 'job_key': 'MEL|PO1|ITM', 'est': '2026-07-12'})
         data, kept = app._apply_est_overrides(self.sched('2026-06-12'))      # supplier unchanged
         self.assertEqual((data['MEL'][1][3], kept), ('2026-07-12', 1))

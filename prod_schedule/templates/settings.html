@@ -107,6 +107,19 @@
           </div>
 
           <div class="form-group">
+            <label>&#9201; {{ tr('KPI：日期被提前时至少留给检验员', 'KPI: when a date is brought forward, give inspectors at least') }}</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="number" name="kpi_grace_workdays" min="0" max="15" style="width:80px;"
+                     value="{{ config.get('kpi_grace_workdays', 3) }}">
+              <span style="font-size:.85rem;">{{ tr('个工作日', 'working days') }}</span>
+            </div>
+            <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
+              {{ tr('按时完成率按“考核截止日”计算：日期延后时截止日跟着延后；供应商把日期提前（或新填日期）时，截止日不早于系统收到变动后这么多个工作日（周一至周五，不含节假日）。',
+                    'The on-time rate uses a KPI deadline: a later date moves it; when the supplier brings a date forward (or adds one), the deadline is no earlier than this many working days (Mon–Fri, holidays not known) after the change reached the system.') }}
+            </div>
+          </div>
+
+          <div class="form-group">
             <label>{{ tr('阀门物料编码前缀（需要 V-Trust）', 'Valve Item Code Prefixes (V-Trust required)') }}</label>
             <input type="text" name="valve_prefixes"
                    value="{{ config.get('valve_prefixes', ['RSV'])|join(', ') }}"

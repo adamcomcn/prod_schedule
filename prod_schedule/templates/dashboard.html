@@ -386,7 +386,7 @@
   <!-- Inspector KPI -->
   <div class="card">
     <div class="card-title">&#128100; {{ tr('检验员 KPI', 'Inspector KPIs') }}</div>
-    <div class="card-note">{{ tr('<b>总检验数</b> 按报告份数计（同一订单复检会计多份）；<b>质检通过率</b> = 通过份数 ÷ 总份数；<b>按时完成率</b> = 检验日期不晚于订单预计完成日的报告占比，只统计订单有预计完成日的报告，样本少于 ' ~ ontime_min ~ ' 份时仅供参考（灰色）。管理员和总部账号不做检验，不计入。', '<b>Inspections</b> counts reports (re-inspections count again); <b>Pass rate</b> = passed ÷ reports; <b>On-time rate</b> = share of reports done on or before the order\'s estimated completion date, only for orders that have one; under ' ~ ontime_min ~ ' reports it is indicative only (grey). Admin and HQ accounts do not inspect and are not listed.')|safe }}</div>
+    <div class="card-note">{{ tr('<b>总检验数</b> 按报告份数计（同一订单复检会计多份）；<b>质检通过率</b> = 通过份数 ÷ 总份数；<b>按时完成率</b> = 检验日期不晚于考核截止日的报告占比（考核截止日 = 预计完成日；供应商把日期提前时，至少顺延到收到变动后 ' ~ grace ~ ' 个工作日；管理员可注明原因不计入），只统计订单有预计完成日的报告，样本少于 ' ~ ontime_min ~ ' 份时仅供参考（灰色）。管理员和总部账号不做检验，不计入。', '<b>Inspections</b> counts reports (re-inspections count again); <b>Pass rate</b> = passed ÷ reports; <b>On-time rate</b> = share of reports done on or before the KPI deadline (the estimated completion date; when the supplier brings it forward, at least ' ~ grace ~ ' working days after the change reached the system; admins can leave a report out with a reason), only for orders that have one; under ' ~ ontime_min ~ ' reports it is indicative only (grey). Admin and HQ accounts do not inspect and are not listed.')|safe }}</div>
     {% if inspector_stats %}
 
     {# ── Summary table ── #}
@@ -449,6 +449,8 @@
               <span style="color:#d1d5db;margin:0 2px;">/</span>
               <span style="color:{% if s.late %}#dc2626{% else %}#d1d5db{% endif %};">{{ s.late }}↓</span>
               {% if s.no_est %}<span style="color:#9ca3af;font-size:.7rem;"> ({{ tr(s.no_est ~ ' 无日期', s.no_est ~ ' no date') }})</span>{% endif %}
+              {% if s.extended %}<div style="color:#1e40af;font-size:.7rem;">{{ tr('顺延 ' ~ s.extended, s.extended ~ ' extended') }}</div>{% endif %}
+              {% if s.excluded %}<div style="color:#92400e;font-size:.7rem;">{{ tr('不计入 ' ~ s.excluded, s.excluded ~ ' left out') }}</div>{% endif %}
             </td>
             <td style="color:#6b7280;font-size:.82rem;">{{ s.last_date or '—' }}</td>
           </tr>

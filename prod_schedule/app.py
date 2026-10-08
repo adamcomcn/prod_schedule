@@ -81,7 +81,7 @@ ADMIN_ENDPOINTS = {
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
     'settings_purchasing_send', 'export_purchasing_excel', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
-    'vtrust_page', 'vtrust_book', 'vtrust_unbook',
+    'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'report_kpi_exclusion', 'schedule_est_edit',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -1881,11 +1881,75 @@ ONTIME_MIN_SAMPLE = 5   # below this the on-time rate is shown as indicative onl
 KPI_EXCLUDED_ROLES = ('admin', 'hq')   # they do not inspect: keep them out of the inspector KPIs
 
 
-def inspector_kpis(inspections, est_map, users, weeks):
+# ── KPI deadline: the completion date an inspection is measured against ──────
+# A later completion date simply moves the deadline. When the supplier brings
+# a date forward (or adds one), the inspector still gets KPI_GRACE_WORKDAYS
+# working days from the day the change reached the system, so a sudden change
+# in the weekly schedule does not count against them.
+
+KPI_GRACE_WORKDAYS = 3
+
+
+def add_workdays(day, n):
+    """`day` plus n working days (Monday to Friday; public holidays are not known)."""
+    while n > 0:
+        day += timedelta(days=1)
+        if day.weekday() < 5:
+            n -= 1
+    return day
+
+
+def kpi_grace_workdays():
+    try:
+        return max(0, int(load_config().get('kpi_grace_workdays', KPI_GRACE_WORKDAYS)))
+    except (TypeError, ValueError):
+        return KPI_GRACE_WORKDAYS
+
+
+def kpi_deadline(current_est, changes, grace=None):
+    """(deadline date or None, extended) for one order line.
+    changes: its task_date_changes rows (old_est, new_est, created_at), oldest first."""
+    grace = kpi_grace_workdays() if grace is None else grace
+    if not changes:
+        return _parse_date(current_est), False
+    deadline, extended = _parse_date(changes[0]['old_est']), False
+    for ch in changes:
+        new = _parse_date(ch['new_est'])
+        if not new:
+            continue                                     # date removed: keep the last one
+        if deadline is not None and new >= deadline:
+            deadline, extended = new, False              # delayed: the new date
+            continue
+        noticed = parse_server_time(ch['created_at'])
+        floor = add_workdays(noticed.astimezone(BUSINESS_TZ).date() if noticed else new, grace)
+        deadline, extended = (floor, True) if floor > new else (new, False)
+    return deadline, extended
+
+
+def kpi_deadlines(est_map):
+    """{job_key: (deadline, extended)} for the given current completion cells
+    and every line with a recorded date change."""
+    changes = defaultdict(list)
+    with db_conn() as conn:
+        for r in conn.execute('SELECT job_key, old_est, new_est, created_at FROM task_date_changes ORDER BY id'):
+            changes[r['job_key']].append(dict(r))
+    grace = kpi_grace_workdays()
+    return {k: kpi_deadline(est_map.get(k, ''), changes.get(k, []), grace) for k in set(est_map) | set(changes)}
+
+
+def kpi_exclusions():
+    """{(job_key, report index): row} — reports an admin left out of the on-time rate."""
+    with db_conn() as conn:
+        return {(r['job_key'], r['insp_index']): dict(r) for r in conn.execute('SELECT * FROM kpi_exclusions')}
+
+
+def inspector_kpis(inspections, est_map, users, weeks, deadlines=None, exclusions=()):
     """Per-inspector report counts, pass / on-time rates and a weekly series.
 
     inspections: {job_key: [report, ...]}; est_map: {job_key: estimated completion cell};
-    users: rows with id, username, display_name, role; weeks: ['2026-W40', ...].
+    users: rows with id, username, display_name, role; weeks: ['2026-W40', ...];
+    deadlines: {job_key: (deadline, extended)} (from kpi_deadlines; else est_map is used);
+    exclusions: {(job_key, index)} reports left out of the on-time rate.
     A report belongs to the account whose display name or username equals its
     inspector name (case-insensitive); reports of admin / HQ accounts are left out.
     Names without an account are kept under the name as written."""
@@ -1897,8 +1961,11 @@ def inspector_kpis(inspections, est_map, users, weeks):
                 by_name.setdefault(key, u)
     raw = {}
     for job_key, records in inspections.items():
-        est = _parse_date(est_map.get(job_key, ''))
-        for rec in records:
+        if deadlines is not None:
+            est, extended = deadlines.get(job_key, (None, False))
+        else:
+            est, extended = _parse_date(est_map.get(job_key, '')), False
+        for index, rec in enumerate(records):
             name = (rec.get('inspector_name') or '').strip()
             if not name:
                 continue
@@ -1909,7 +1976,7 @@ def inspector_kpis(inspections, est_map, users, weeks):
             s = raw.setdefault(key, dict(
                 name=(user['display_name'] or user['username']) if user else name,
                 total=0, passed=0, failed=0, partial=0, on_time=0, late=0, no_est=0,
-                last_date='', weekly=defaultdict(int)))
+                extended=0, excluded=0, last_date='', weekly=defaultdict(int)))
             s['total'] += 1
             result = (rec.get('result') or '').lower()
             if 'fail' in result:
@@ -1923,8 +1990,11 @@ def inspector_kpis(inspections, est_map, users, weeks):
                 s['last_date'] = max(s['last_date'], insp_date.isoformat())
                 year, week, _ = insp_date.isocalendar()
                 s['weekly'][f'{year}-W{week:02d}'] += 1
-            if est and insp_date:
+            if (job_key, index) in exclusions:
+                s['excluded'] += 1                       # left out by an admin, with a reason
+            elif est and insp_date:
                 s['on_time' if insp_date <= est else 'late'] += 1
+                s['extended'] += 1 if extended else 0
             else:
                 s['no_est'] += 1
     stats = []
@@ -2063,7 +2133,8 @@ def dashboard():
     for _i in range(7, -1, -1):
         _yr, _wk, _ = (_today - timedelta(weeks=_i)).isocalendar()
         recent_weeks.append(f"{_yr}-W{_wk:02d}")
-    inspector_stats = inspector_kpis(inspections, est_map, users, recent_weeks)
+    inspector_stats = inspector_kpis(inspections, est_map, users, recent_weeks,
+                                     deadlines=kpi_deadlines(est_map), exclusions=set(kpi_exclusions()))
 
     outside = {k: v for k, v in inspections.items() if v and k not in seen_all}
     inspections_outside = {'jobs': len(outside), 'reports': sum(len(v) for v in outside.values())}
@@ -2117,6 +2188,7 @@ def dashboard():
                            chart_dates=_chart_dates,
                            chart_datasets=_chart_datasets,
                            ontime_min=ONTIME_MIN_SAMPLE,
+                           grace=kpi_grace_workdays(),
                            inspections_all=inspections_all,
                            inspections_outside=inspections_outside)
 
@@ -2354,9 +2426,10 @@ def _apply_est_overrides(data, commit=True):
 
 @app.route('/schedule/est', methods=['POST'])
 def schedule_est_edit():
-    """Lead inspector / admin corrects a (typo) estimated completion date.
-    Notifies the task notification e-mails and the assigned inspector."""
-    if not g.can_assign:
+    """Admin corrects a (typo) estimated completion date (lead inspectors may
+    not: the date drives their KPI). Notifies the task notification e-mails
+    and the assigned inspector."""
+    if not g.is_admin:
         return tr('无权限访问此页面', 'Forbidden'), 403
     job_key = request.form.get('job_key', '')
     new_est = ' '.join(request.form.get('est', '').split())
@@ -2904,6 +2977,23 @@ def inspect_assign(job_key):
     return back
 
 
+def _kpi_info(job_key, job_info, records):
+    """KPI deadline of this order line and, per report, on time / late / left out."""
+    with db_conn() as conn:
+        task = conn.execute('SELECT est_completion FROM inspection_tasks WHERE job_key=?', (job_key,)).fetchone()
+        changes = [dict(r) for r in conn.execute(
+            'SELECT old_est, new_est, created_at FROM task_date_changes WHERE job_key=? ORDER BY id', (job_key,))]
+        excluded = {r['insp_index']: dict(r) for r in conn.execute(
+            'SELECT * FROM kpi_exclusions WHERE job_key=?', (job_key,))}
+    current = (task['est_completion'] if task else '') or (job_info or {}).get('Estimated Completion Date', '')
+    deadline, extended = kpi_deadline(current, changes)
+    reports = {}
+    for i, rec in enumerate(records):
+        day = _parse_date(rec.get('inspection_date'))
+        reports[i] = {'on_time': (day <= deadline) if day and deadline else None, 'exclusion': excluded.get(i)}
+    return {'deadline': deadline, 'extended': extended, 'grace': kpi_grace_workdays(), 'reports': reports}
+
+
 @app.route('/inspect/<path:job_key>')
 def inspect_form(job_key):
     job_info = find_job(job_key)
@@ -3011,6 +3101,7 @@ def inspect_form(job_key):
                            checklist_photos=checklist_photos,
                            related_reports=related_reports,
                            past_inspections=past,
+                           kpi_info=_kpi_info(job_key, job_info, past),
                            past_attachments=dict(past_attachments),
                            report_emails=report_email_status(job_key),
                            reviews=review_status(job_key),
@@ -3659,6 +3750,28 @@ def review_inspection(job_key, index):
     return redirect(url_for('inspect_form', job_key=job_key))
 
 
+@app.route('/inspect/<path:job_key>/report/<int:index>/kpi', methods=['POST'])
+def report_kpi_exclusion(job_key, index):
+    """Admin leaves a report out of the on-time rate (reason required) or puts it back."""
+    if not 0 <= index < len(load_json(INSPECTIONS_CACHE, {}).get(job_key, [])):
+        abort(404)
+    with db_conn() as conn:
+        if request.form.get('action') == 'include':
+            conn.execute('DELETE FROM kpi_exclusions WHERE job_key=? AND insp_index=?', (job_key, index))
+            flash(tr('已恢复计入按时完成率', 'The report counts towards the on-time rate again'), 'success')
+        else:
+            reason = ' '.join(request.form.get('reason', '').split())[:300]
+            if not reason:
+                flash(tr('请填写不计入的原因', 'Please give the reason'), 'error')
+                return redirect(url_for('inspect_form', job_key=job_key))
+            conn.execute('INSERT INTO kpi_exclusions (job_key, insp_index, reason, excluded_by) VALUES (?,?,?,?) '
+                         "ON CONFLICT(job_key, insp_index) DO UPDATE SET reason=excluded.reason, "
+                         "excluded_by=excluded.excluded_by, excluded_at=datetime('now')",
+                         (job_key, index, reason, g.get('username', '')))
+            flash(tr('这份报告不计入按时完成率', 'This report is left out of the on-time rate'), 'success')
+    return redirect(url_for('inspect_form', job_key=job_key))
+
+
 @app.route('/inspect/<path:job_key>/report/<int:index>/inspector', methods=['POST'])
 def change_report_inspector(job_key, index):
     """Admin corrects who did a submitted inspection (e.g. entered under the
@@ -3888,6 +4001,8 @@ def settings():
         config['weekly_summary'] = request.form.get('weekly_summary') == '1'
         config['vtrust_notify_emails'] = ', '.join(_email_list(request.form.get('vtrust_notify_emails', '')))
         config['purchasing_emails'] = ', '.join(_email_list(request.form.get('purchasing_emails', '')))
+        grace = request.form.get('kpi_grace_workdays', type=int)
+        config['kpi_grace_workdays'] = grace if grace is not None and 0 <= grace <= 15 else KPI_GRACE_WORKDAYS
         config['qa_mismatch_emails'] = ', '.join(_email_list(request.form.get('qa_mismatch_emails', '')))
         lead = request.form.get('vtrust_lead_days', type=int)
         config['vtrust_lead_days'] = lead if lead and 1 <= lead <= 90 else VTRUST_LEAD_DAYS
@@ -4805,6 +4920,7 @@ def _send_date_change_email(changes, edited_by=''):
     if not recipients:
         return False, tr('未设置通知邮箱', 'No notification e-mail configured')
     today = china_today()
+    grace = kpi_grace_workdays()
     ids = {c['assigned_to'] for c in changes if c.get('assigned_to')}
     names = {}
     if ids:
@@ -4849,6 +4965,10 @@ def _send_date_change_email(changes, edited_by=''):
                         if new_d and new_d < today else '')
                 lines.append(f"    预计完成 Est. completion: {_est_label(c['old_est'])}  →  "
                              f"{_est_label(c['new_est'])}   [{est[2]}]{past}")
+                if est[0] in ('earlier', 'added') and new_d:
+                    deadline = max(new_d, add_workdays(today, grace))
+                    lines.append(f"    考核截止日 KPI deadline: {deadline.isoformat()}"
+                                 + (f"（顺延 {grace} 个工作日 / {grace} working days given）" if deadline > new_d else ''))
             if ship:
                 lines.append(f"    最迟出货 Must ship: {_est_label(c.get('old_ship'))}  →  "
                              f"{_est_label(c.get('new_ship'))}   [{ship[2]}]")
