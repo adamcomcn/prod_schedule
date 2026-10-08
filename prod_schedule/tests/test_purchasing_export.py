@@ -135,10 +135,12 @@ class PurchasingExportTests(unittest.TestCase):
         return c
 
     def test_download_permissions_and_e_mail(self):
-        r = self.client('hq1').get('/export/purchasing.xlsx')
+        r = self.client('boss').get('/export/purchasing.xlsx')
         self.assertEqual(r.status_code, 200)
         self.assertIn('schedule-changes-for-purchasing', r.headers['Content-Disposition'])
-        self.assertEqual(self.client('yu').get('/export/purchasing.xlsx').status_code, 403)
+        for other in ('hq1', 'yu'):                                  # admin only
+            self.assertEqual(self.client(other).get('/export/purchasing.xlsx').status_code, 403)
+            self.assertNotIn('/export/purchasing.xlsx', self.client(other).get('/').get_data(as_text=True))
         self.assertEqual(self.client('boss').get('/export/purchasing.xlsx?upload=nope').status_code, 302)
         page = self.client('boss').get('/').get_data(as_text=True)
         self.assertIn('/export/purchasing.xlsx', page)

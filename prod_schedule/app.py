@@ -80,7 +80,7 @@ ADMIN_ENDPOINTS = {
     'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
-    'settings_purchasing_send',
+    'settings_purchasing_send', 'export_purchasing_excel',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -1396,7 +1396,7 @@ def index():
     with db_conn() as _c:
         est_overrides = {r['job_key']: dict(r) for r in _c.execute('SELECT * FROM est_overrides')}
     return render_template('index.html',
-                           purchasing_uploads=schedule_upload_history()[:30] if g.can_review else [],
+                           purchasing_uploads=schedule_upload_history()[:30] if g.is_admin else [],
                            move_notes=move_notes,
                            est_overrides=est_overrides,
                            data=display_data,
@@ -1826,8 +1826,6 @@ def purchasing_export(upload_id=None):
 
 @app.route('/export/purchasing.xlsx')
 def export_purchasing_excel():
-    if not g.can_review:
-        abort(403)
     result = purchasing_export(request.args.get('upload') or None)
     if not result:
         flash(tr('至少要有两次排期上传才能对比', 'At least two schedule uploads are needed for a comparison'), 'warning')

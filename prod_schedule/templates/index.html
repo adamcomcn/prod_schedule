@@ -132,7 +132,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     <a href="{{ url_for('export_comparison_excel') }}" class="btn btn-outline btn-sm">
       {{ tr('导出对比 Excel', 'Export comparison Excel') }}
     </a>
-    {% if g.can_review and purchasing_uploads %}
+    {% if g.is_admin and purchasing_uploads %}
     <form method="GET" action="{{ url_for('export_purchasing_excel') }}" style="display:flex;gap:6px;align-items:center;"
           title="{{ tr('所选上传与它的上一次相比：已发货、日期变化、新增、地区转移（不含价格）', 'The chosen upload vs the one before it: shipped, date changes, new lines, region moves (no prices)') }}">
       <select name="upload" style="width:auto;max-width:300px;font-size:.8rem;padding:5px 8px;">
