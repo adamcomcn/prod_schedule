@@ -926,6 +926,14 @@ def init_db():
             PRIMARY KEY (job_key, insp_index)
         )''')
 
+        # V-Trust booking reminder: once per valve line and estimated completion date
+        conn.execute('''CREATE TABLE IF NOT EXISTS vtrust_reminders (
+            job_key  TEXT NOT NULL,
+            est_date TEXT NOT NULL,
+            sent_at  TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (job_key, est_date)
+        )''')
+
         # Sign-in history shown to admins: login / failed / blocked / logout
         conn.execute('''CREATE TABLE IF NOT EXISTS login_events (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,

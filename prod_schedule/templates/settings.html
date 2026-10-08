@@ -117,6 +117,22 @@
             </div>
           </div>
 
+          <div class="form-group">
+            <label>&#128276; {{ tr('V-Trust 预约提醒邮箱', 'V-Trust booking reminder e-mails') }}</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="text" name="vtrust_notify_emails" value="{{ config.get('vtrust_notify_emails', '') }}"
+                     placeholder="{{ tr('留空 = 发给所有有邮箱的管理员', 'Empty = every admin with an e-mail') }}">
+              <span style="white-space:nowrap;font-size:.85rem;">{{ tr('提前', 'Lead') }}</span>
+              <input type="number" name="vtrust_lead_days" min="1" max="90" style="width:80px;"
+                     value="{{ config.get('vtrust_lead_days') or 14 }}">
+              <span style="white-space:nowrap;font-size:.85rem;">{{ tr('天', 'days') }}</span>
+            </div>
+            <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
+              {{ tr('阀门（不含阀门箱盖等不需要 V-Trust 的产品）在预计完成日前这么多天（或刚过完成日 7 天内）且仍无 V-Trust 合格记录时，每天检查一次，把新进入的阀门汇总成一封邮件，附 Excel，方便转发给 V-Trust 预约来厂检验。同一行同一完成日只提醒一次，完成日变了会再提醒。',
+                    'Once a day, valves (not valve-box covers and other products without V-Trust) whose estimated completion is this close (or up to 7 days past) with no passed V-Trust inspection are listed in one e-mail with an Excel attachment to forward to V-Trust. Each line is sent once per completion date; a changed date sends it again.') }}
+            </div>
+          </div>
+
           <button type="submit" class="btn btn-primary">{{ tr('保存设置', 'Save Settings') }}</button>
         </form>
       </div>
@@ -142,6 +158,11 @@
       </form>
       <form method="POST" action="{{ url_for('settings_weekly_summary') }}" style="margin-top:8px;">
         <button type="submit" class="btn btn-outline btn-sm">&#128197; {{ tr('立即发送每周汇总', 'Send the weekly summary now') }}</button>
+      </form>
+      <form method="POST" action="{{ url_for('settings_vtrust_send') }}" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
+            onsubmit="return confirm({{ tr('把当前所有需要预约 V-Trust 的阀门发一封邮件？', 'E-mail the full current V-Trust list now?')|tojson }});">
+        <a class="btn btn-outline btn-sm" href="{{ url_for('settings_vtrust_preview') }}" target="_blank">&#128269; {{ tr('预览 V-Trust 提醒', 'Preview V-Trust reminder') }}</a>
+        <button type="submit" class="btn btn-outline btn-sm">&#128276; {{ tr('立即发送 V-Trust 提醒（当前全部）', 'Send the V-Trust reminder now (full list)') }}</button>
       </form>
     </div>
 

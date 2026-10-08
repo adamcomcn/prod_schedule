@@ -79,7 +79,7 @@ ADMIN_ENDPOINTS = {
     'region_edit', 'region_delete', 'leave_approve', 'leave_reject',
     'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
-    'user_update', 'user_logins', 'change_report_inspector',
+    'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -3520,6 +3520,9 @@ def settings():
         config['hq_report_emails'] = ', '.join(_email_list(request.form.get('hq_report_emails', '')))
         config['backup_emails'] = ', '.join(_email_list(request.form.get('backup_emails', '')))
         config['weekly_summary'] = request.form.get('weekly_summary') == '1'
+        config['vtrust_notify_emails'] = ', '.join(_email_list(request.form.get('vtrust_notify_emails', '')))
+        lead = request.form.get('vtrust_lead_days', type=int)
+        config['vtrust_lead_days'] = lead if lead and 1 <= lead <= 90 else VTRUST_LEAD_DAYS
         if 'schedule_hidden_columns' in request.form:
             config['schedule_hidden_columns'] = [
                 ' '.join(c.split()).lower()
@@ -4209,9 +4212,9 @@ def smtp_sender():
     return address, formataddr((name, address), charset='utf-8') if name else address
 
 
-def _smtp_send(subject, body, recipients, attachments=()):
+def _smtp_send(subject, body, recipients, attachments=(), html=None):
     """Send a UTF-8 e-mail (plain text plus an HTML version with short link
-    labels). Returns (ok, message).
+    labels, or the given `html`). Returns (ok, message).
     attachments: [(filename, bytes, 'maintype/subtype'), ...]
 
     Port 465 uses implicit TLS (common for Chinese corporate mail such as
@@ -4234,7 +4237,7 @@ def _smtp_send(subject, body, recipients, attachments=()):
     from email.mime.text import MIMEText
     content = MIMEMultipart('alternative')
     content.attach(MIMEText(body, 'plain', 'utf-8'))
-    content.attach(MIMEText(email_html(body), 'html', 'utf-8'))
+    content.attach(MIMEText(html or email_html(body), 'html', 'utf-8'))
     if attachments:
         msg = MIMEMultipart('mixed')
         msg.attach(content)
@@ -4379,7 +4382,7 @@ def send_review_reminders():
 
 
 def run_daily_reminders():
-    return send_due_reminders(), send_review_reminders()
+    return send_due_reminders(), send_review_reminders(), send_vtrust_reminders()[0]
 
 
 def _est_label(value):
@@ -4490,6 +4493,239 @@ def send_due_reminders():
         release()
         return 0
     return len(due)
+
+
+# ── V-Trust booking reminder ─────────────────────────────────────────────────
+# Valves need a third-party (V-Trust) inspection at the factory. Two weeks
+# before a valve line is due, admins are told to book it.
+
+VTRUST_LEAD_DAYS = 14
+VTRUST_PAST_DAYS = 7     # lines further past their date are taken as already handled
+
+
+def needs_vtrust(item_code, description, config=None):
+    """Valves (code prefix / "valve" in the description) except product types
+    whose evidence rules have no V-Trust, e.g. a "Valve Box COVER"."""
+    if not is_valve(description, item_code, config):
+        return False
+    ptype = product_type_for(item_code, description)
+    if not ptype:
+        return True
+    return any(e['type'] == 'vtrust' for e in evidence_rules.PRODUCT_TYPES[ptype]['evidence'])
+
+
+def _qty_sum(a, b):
+    try:
+        total = float(a or 0) + float(b or 0)
+        return str(int(total)) if total == int(total) else str(total)
+    except ValueError:
+        return ' + '.join(x for x in (a, b) if x)
+
+
+def vtrust_due_lines(lead_days=None):
+    """Valve lines in the current schedule due within `lead_days` (or up to
+    VTRUST_PAST_DAYS past their date) that have no passed V-Trust inspection
+    yet, sorted by supplier then date. Split lots of one PO + item are added
+    together."""
+    import copy
+    config = load_config()
+    lead = int(lead_days if lead_days is not None else config.get('vtrust_lead_days') or VTRUST_LEAD_DAYS)
+    schedule, _ = _apply_est_overrides(copy.deepcopy(load_schedule(CURRENT_FILE)), commit=False)
+    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
+    today = china_today()
+    lines = {}
+    for sheet, rows in schedule.items():
+        if not rows or len(rows) < 2:
+            continue
+        headers = rows[0]
+        low = [str(h).strip().lower() for h in headers]
+
+        def col(row, *names):
+            for name in names:
+                if name in low:
+                    i = low.index(name)
+                    return str(row[i]).strip() if i < len(row) and row[i] is not None else ''
+            return ''
+
+        for row in rows[1:]:
+            code, desc = col(row, 'item code'), col(row, 'item description')
+            if not code or not needs_vtrust(code, desc, config):
+                continue
+            job_key = make_job_key(sheet, row, headers)
+            if not job_key.split('|')[1]:
+                continue
+            est_text = col(row, 'estimated completion date')
+            est, _ = split_est(est_text)
+            if not est or not -VTRUST_PAST_DAYS <= (est - today).days <= lead:
+                continue
+            if get_vtrust_status(inspections.get(job_key, [])).lower() == 'pass':
+                continue
+            line = lines.get(job_key)
+            if line:                                   # another lot of the same line
+                line['qty'] = _qty_sum(line['qty'], col(row, 'quantity'))
+                if est < line['est']:
+                    line.update(est=est, est_text=est_text)
+                continue
+            lines[job_key] = {'job_key': job_key, 'region': sheet, 'dpl': col(row, 'order number'),
+                              'po': col(row, 'daemco purchase order', 'purchase order'), 'code': code,
+                              'description': desc, 'qty': col(row, 'quantity'),
+                              'supplier': col(row, 'supplier', 'foundry'), 'est': est, 'est_text': est_text}
+    for line in lines.values():
+        line['days'] = (line['est'] - today).days
+    return sorted(lines.values(), key=lambda l: (l['supplier'] or '~', l['est'], l['dpl'], l['code']))
+
+
+def vtrust_recipients():
+    """'V-Trust reminder e-mails' from Settings, else every active admin with an e-mail."""
+    configured = _email_list(load_config().get('vtrust_notify_emails', ''))
+    if configured:
+        return configured
+    with db_conn() as conn:
+        return _email_list(', '.join(r['email'] for r in conn.execute(
+            "SELECT email FROM users WHERE role='admin' AND active=1 AND IFNULL(email, '') != ''")))
+
+
+def _vtrust_days_text(days):
+    if days > 0:
+        return f'还有 {days} 天 / in {days} d'
+    if days == 0:
+        return '今天 / today'
+    return f'已过 {-days} 天 / {-days} d past'
+
+
+VTRUST_COLUMNS = ('DPL', 'Daemco purchase order number', 'PRODUCT CODE', 'DESCRIPTION', 'QTY',
+                  'ESTIMATED COMPLETION TIME', 'SUPPLIER', 'REGION')
+
+
+def vtrust_email(lines, lead):
+    """(subject, plain text, html, xlsx bytes) for a list of due valve lines."""
+    today = china_today().isoformat()
+    subject = (f'【V-Trust 预约提醒】{len(lines)} 个阀门订单行将在 {lead} 天内完工 / '
+               f'{len(lines)} valve line(s) ready within {lead} days — book V-Trust')
+    intro_zh = f'以下阀门预计在 {lead} 天内完工（或刚过预计完成日不超过 {VTRUST_PAST_DAYS} 天），尚无 V-Trust 合格记录，请安排第三方来厂检验。'
+    intro_en = (f'These valves are due within {lead} days (or at most {VTRUST_PAST_DAYS} days past their date) and have no passed V-Trust '
+                f'inspection yet. Please book the third-party inspection at the factory.')
+    text = [f'V-Trust 预约提醒 V-Trust booking reminder — {today}', intro_zh, intro_en, '']
+    for i, l in enumerate(lines, 1):
+        text.append(f"{i}. {l['dpl']}  {l['po']}  {l['code']}  {l['description']}  QTY {l['qty']}")
+        text.append(f"    {l['est_text']}  ({_vtrust_days_text(l['days'])})  · {l['supplier'] or '—'} · {l['region']}")
+    text += ['', '附件为同样内容的 Excel，可直接转发给 V-Trust。', 'The attached Excel has the same list, ready to forward to V-Trust.']
+
+    cell = 'border:1px solid #d0d5dd;padding:6px 10px;font-size:13px;'
+    head = cell + 'background:#1a3a5c;color:#fff;font-weight:700;text-align:center;'
+    rows_html, supplier = [], None
+    for l in lines:
+        if l['supplier'] != supplier:
+            supplier = l['supplier']
+            rows_html.append(f'<tr><td colspan="8" style="{cell}background:#eef2f7;font-weight:700;">'
+                             f'{_escape(supplier or "—")}</td></tr>')
+        late = l['days'] < 0
+        rows_html.append(
+            '<tr>' + ''.join(f'<td style="{cell}{extra}">{_escape(v)}</td>' for v, extra in (
+                (l['dpl'], 'text-align:center;'), (l['po'], 'text-align:center;'), (l['code'], ''),
+                (l['description'], ''), (l['qty'], 'text-align:center;'), (l['est_text'], 'text-align:center;'),
+                (_vtrust_days_text(l['days']), 'text-align:center;' + ('color:#b91c1c;font-weight:700;' if late else '')),
+                (l['region'], 'text-align:center;'))) + '</tr>')
+    headers = ('DPL', 'Daemco PO', 'PRODUCT CODE', 'DESCRIPTION', 'QTY', 'ESTIMATED COMPLETION TIME',
+               '距完成 / Days', 'REGION')
+    head_row = ''.join(f'<th style="{head}">{_escape(h)}</th>' for h in headers)
+    font = "Arial,'Microsoft YaHei',sans-serif"
+    html = (f'<div style="font-family:{font};color:#1a1a2e;">'
+            f'<p style="font-size:14px;margin:0 0 4px;"><b>V-Trust 预约提醒 / V-Trust booking reminder — {today}</b></p>'
+            f'<p style="font-size:13px;margin:0 0 2px;">{_escape(intro_zh)}</p>'
+            f'<p style="font-size:13px;margin:0 0 12px;color:#4b5563;">{_escape(intro_en)}</p>'
+            f'<table style="border-collapse:collapse;">'
+            f'<tr>{head_row}</tr>'
+            + ''.join(rows_html) + '</table>'
+            f'<p style="font-size:12px;color:#6b7280;margin-top:12px;">附件为同样内容的 Excel，可直接转发给 V-Trust。'
+            f' The attached Excel has the same list, ready to forward to V-Trust.<br>'
+            f'<a href="{url_for("index", _external=True)}">{_escape(url_for("index", _external=True))}</a></p></div>')
+
+    from openpyxl.styles import Alignment, Font, PatternFill
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'V-Trust'
+    ws.append(list(VTRUST_COLUMNS))
+    for l in lines:
+        ws.append([_xl_safe(v) for v in (l['dpl'], l['po'], l['code'], l['description'], l['qty'],
+                                         l['est_text'], l['supplier'], l['region'])])
+    for c in ws[1]:
+        c.font = Font(bold=True, color='FFFFFF')
+        c.fill = PatternFill('solid', fgColor='1A3A5C')
+        c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    for letter, width in zip('ABCDEFGH', (12, 16, 18, 48, 8, 28, 12, 14)):
+        ws.column_dimensions[letter].width = width
+    ws.freeze_panes = 'A2'
+    buf = io.BytesIO()
+    wb.save(buf)
+    return subject, '\n'.join(text), html, buf.getvalue()
+
+
+def send_vtrust_reminders(force=False):
+    """E-mail admins about valve lines entering the V-Trust booking window.
+    Each line is sent once per estimated completion date (a changed date sends
+    it again); force=True sends the whole current list. Returns (count, message)."""
+    config = load_config()
+    lead = int(config.get('vtrust_lead_days') or VTRUST_LEAD_DAYS)
+    lines = vtrust_due_lines(lead)
+    claimed = []
+    if not force:
+        with db_conn() as conn:
+            for l in lines:
+                if conn.execute('INSERT OR IGNORE INTO vtrust_reminders (job_key, est_date) VALUES (?,?)',
+                                (l['job_key'], l['est'].isoformat())).rowcount:
+                    claimed.append(l)
+        lines = claimed
+    if not lines:
+        return 0, tr('没有需要提醒的阀门', 'No valves to remind about')
+
+    def release():
+        with db_conn() as conn:
+            for l in claimed:
+                conn.execute('DELETE FROM vtrust_reminders WHERE job_key=? AND est_date=?',
+                             (l['job_key'], l['est'].isoformat()))
+
+    recipients = vtrust_recipients()
+    if not recipients:
+        release()
+        return 0, tr('未设置 V-Trust 提醒邮箱，管理员账号也没有邮箱', 'No V-Trust reminder e-mail and no admin e-mail')
+    subject, text, html, xlsx = vtrust_email(lines, lead)
+    ok, msg = _smtp_send(subject, text, recipients, html=html, attachments=[
+        (f'V-Trust_{china_today().isoformat()}.xlsx', xlsx,
+         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')])
+    if not ok:
+        release()
+        return 0, msg
+    return len(lines), msg
+
+
+@app.route('/settings/vtrust-preview')
+def settings_vtrust_preview():
+    """The V-Trust reminder as it would look today (nothing is sent)."""
+    lead = int(load_config().get('vtrust_lead_days') or VTRUST_LEAD_DAYS)
+    lines = vtrust_due_lines(lead)
+    if request.args.get('format') == 'xlsx':
+        return send_file(io.BytesIO(vtrust_email(lines, lead)[3]), as_attachment=True,
+                         download_name=f'V-Trust_{china_today().isoformat()}.xlsx')
+    with db_conn() as conn:
+        sent = {(r['job_key'], r['est_date']) for r in conn.execute('SELECT job_key, est_date FROM vtrust_reminders')}
+    pending = sum(1 for l in lines if (l['job_key'], l['est'].isoformat()) not in sent)
+    note = (f'<div style="font-family:Arial,sans-serif;font-size:13px;background:#fffbeb;border:1px solid #fcd34d;'
+            f'padding:8px 12px;margin-bottom:14px;">预览，未发送 / Preview only — nothing was sent. '
+            f'收件人 Recipients: {_escape(", ".join(vtrust_recipients()) or "—")} · '
+            f'共 {len(lines)} 行，其中 {pending} 行尚未提醒过 / {len(lines)} line(s), {pending} not reminded yet · '
+            f'<a href="?format=xlsx">Excel</a> · <a href="{url_for("settings")}#email">返回设置 / Back</a></div>')
+    if not lines:
+        return note + f'<p style="font-family:Arial,sans-serif;">{tr("目前没有需要提醒的阀门。", "No valves to remind about right now.")}</p>'
+    subject, _text, html, _xlsx = vtrust_email(lines, lead)
+    return note + f'<p style="font-family:Arial,sans-serif;font-size:13px;"><b>{_escape(subject)}</b></p>' + html
+
+
+@app.route('/settings/vtrust-send', methods=['POST'])
+def settings_vtrust_send():
+    count, msg = send_vtrust_reminders(force=True)
+    flash(msg, 'success' if count else 'error')
+    return redirect(url_for('settings') + '#email')
 
 
 def _send_assignment_email(tasks, assignee, note=''):
@@ -6629,6 +6865,7 @@ def cron_reminders():
     if not token or not hmac.compare_digest(supplied, token):
         abort(404)
     return {'reminders_sent': send_due_reminders(), 'review_reminders_sent': send_review_reminders(),
+            'vtrust_reminders_sent': send_vtrust_reminders()[0],
             'backup': send_backup_email()[1], 'weekly_summary': send_weekly_summary()[1]}
 
 
