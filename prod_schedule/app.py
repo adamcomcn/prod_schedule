@@ -4967,8 +4967,9 @@ def _send_date_change_email(changes, edited_by=''):
                              f"{_est_label(c['new_est'])}   [{est[2]}]{past}")
                 if est[0] in ('earlier', 'added') and new_d:
                     deadline = max(new_d, add_workdays(today, grace))
-                    lines.append(f"    考核截止日 KPI deadline: {deadline.isoformat()}"
-                                 + (f"（顺延 {grace} 个工作日 / {grace} working days given）" if deadline > new_d else ''))
+                    lines.append(f"    最晚检验日 Inspect by: {deadline.isoformat()}"
+                                 + (f"（含 {grace} 个工作日准备时间 / incl. {grace} working days to prepare）"
+                                    if deadline > new_d else ''))
             if ship:
                 lines.append(f"    最迟出货 Must ship: {_est_label(c.get('old_ship'))}  →  "
                              f"{_est_label(c.get('new_ship'))}   [{ship[2]}]")

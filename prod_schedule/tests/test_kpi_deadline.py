@@ -137,7 +137,9 @@ class KpiPagesTests(unittest.TestCase):
             app._send_date_change_email([dict(job_key=JOB, region='MELBOURNE', order_number='DPL1', item_code='RSV0100',
                                               assigned_to=None, old_est='2026-10-30', new_est='2026-10-10',
                                               old_ship='', new_ship='')])
-        self.assertIn('考核截止日 KPI deadline: 2026-10-16（顺延 5 个工作日', sent[0])
+        self.assertIn('最晚检验日 Inspect by: 2026-10-16（含 5 个工作日准备时间', sent[0])
+        self.assertNotIn('考核', sent[0])
+        self.assertNotIn('KPI', sent[0])
         self.assertIn('个工作日', self.client('boss').get('/settings').get_data(as_text=True))
 
 
