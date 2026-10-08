@@ -1580,8 +1580,11 @@ def _date_shift(old, new):
     return None, 'Remark changed'
 
 
-def purchasing_changes(before, after):
-    """Changes between two saved schedules, as lists of rows for the export."""
+def purchasing_changes(before, after, inspections=None):
+    """Changes between two saved schedules, as lists of rows for the export.
+    Shipped lines carry has_report: is there an inspection report (QA BRT) now."""
+    if inspections is None:
+        inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
     moves_info = {}
     statuses, typo_flags, _ = compute_changes(before, after, moves_out=moves_info)
     moves = moves_info.get('moves', [])
@@ -1629,6 +1632,8 @@ def purchasing_changes(before, after):
                              'supplier': line.get('supplier', ''), 'description': line.get('description', ''),
                              'from': src, 'to': dst, 'kept': kept,
                              'note': 'Total went down: part of it also shipped' if m['also_shipped'] else ''})
+    for line in shipped:
+        line['has_report'] = bool(inspections.get(line['key']))
     return {'shipped': sorted(shipped, key=lambda l: (l['type'] != 'Fully shipped', order(l))),
             'date_changes': sorted(date_changes, key=lambda l: (-(l['est_days'] if l['est_days'] is not None
                                                                   else l['ship_days'] or -10 ** 6), order(l))),
@@ -1720,14 +1725,19 @@ def purchasing_workbook(changes, before_label, after_label):
     ws = table('Shipped', [('Type', 17, 'c'), ('Region', 13, 'c'), ('DPL', 10, 'c'), ('PO', 11, 'c'),
                            ('Supplier', 10, 'c'), ('Item Code', 18, 'l'), ('Description', 46, 'l'),
                            ('Previous Qty', 11, 'c'), ('Current Qty', 11, 'c'), ('Shipped Qty', 11, 'c'),
-                           ('Est. Completion (previous)', 22, 'c')],
+                           ('QA Report', 11, 'c'), ('Est. Completion (previous)', 22, 'c')],
                [(l['type'], l['region'], l['dpl'], l['po'], l['supplier'], l['item_code'], l['description'],
-                 qty(l['before']), qty(l['after']), qty(l['shipped']), day(l['est'])) for l in changes['shipped']])
+                 qty(l['before']), qty(l['after']), qty(l['shipped']), 'Yes' if l.get('has_report') else 'No',
+                 day(l['est'])) for l in changes['shipped']])
     for (cell,) in ws.iter_rows(min_row=2, max_col=1):
         if cell.value in fills:
             cell.fill = fills[cell.value]
     for (cell,) in ws.iter_rows(min_row=2, min_col=10, max_col=10):
         cell.font = Font(bold=True)
+    for (cell,) in ws.iter_rows(min_row=2, min_col=11, max_col=11):
+        if cell.value == 'No':                     # shipped without an inspection report
+            cell.font = Font(bold=True, color='B91C1C')
+            cell.fill = PatternFill('solid', fgColor='FEE2E2')
 
     ws = table('Date Changes', [('Region', 13, 'c'), ('DPL', 10, 'c'), ('PO', 11, 'c'), ('Supplier', 10, 'c'),
                                 ('Item Code', 18, 'l'), ('Description', 40, 'l'), ('Qty', 8, 'c'),
@@ -1775,6 +1785,8 @@ def purchasing_workbook(changes, before_label, after_label):
     head_row = summary.max_row
     for row in (('Fully shipped (line left the schedule)', len(fully), 'Shipped'),
                 ('Partially shipped (quantity went down)', len(partly), 'Shipped'),
+                ('Shipped without a QA report', sum(1 for l in changes['shipped'] if not l.get('has_report')),
+                 'Shipped (QA Report = No)'),
                 ('Est. completion delayed', delayed, 'Date Changes'),
                 ('Est. completion earlier', earlier, 'Date Changes'),
                 ('Other date / remark changes', len(changes['date_changes']) - delayed - earlier, 'Date Changes'),
@@ -5071,132 +5083,240 @@ def settings_vtrust_send():
     return redirect(url_for('settings') + '#email')
 
 
-# ── QA BRT mismatch: Excel says sent, the platform has no report ─────────────
-# Same rule as the orange "Excel 已标 YES，系统无报告" badge on the schedule page
-# (qa_excel_mismatch). After each weekly upload the supplier and the lead
-# inspector get the list so they either submit the report or correct the Excel.
+# ── QA BRT checks after each weekly upload ───────────────────────────────────
+# Compare the Excel "QA BRTs Sent?" column with the reports in the platform:
+#  · Excel YES but no report (orange badge on the schedule page) and
+#  · a report exists but the Excel is not YES      → supplier + lead inspector
+#  · lines that shipped with this upload, no report → HQ + lead + supplier
 
-def qa_brt_mismatches():
-    """Lines of the current schedule, plus the lines that shipped with this
-    upload, whose 'QA BRTs Sent?' cell is YES while no report exists."""
+QA_STATE_LABELS = {'new': 'New 新增', 'typo': 'New 新增', 'not_shipped': 'Not shipped 未出货',
+                   'partially_shipped': 'Partially shipped 部分出货', 'moved_in': 'Moved in 转入',
+                   'partially_moved': 'Part moved 部分转出'}
+
+
+def _qa_cell(row, headers):
+    """The row's 'QA BRTs Sent?' text, or None when the sheet has no such column."""
+    idx = next((i for i, h in enumerate(headers) if 'qa brt' in str(h).lower()), None)
+    if idx is None:
+        return None
+    return str(row[idx]).strip() if idx < len(row) and row[idx] is not None else ''
+
+
+def _qa_line(sheet, row, headers, key, **extra):
+    low = [str(h).strip().lower() for h in headers]
+    supplier = next((str(row[low.index(n)]).strip() for n in ('supplier', 'foundry')
+                     if n in low and low.index(n) < len(row) and row[low.index(n)] is not None), '')
+    cell = _qa_cell(row, headers)
+    return dict(_row_details(sheet, row, headers), key=key, supplier=supplier,
+                excel_qa='' if cell is None else (cell or '空 / blank'), **extra)
+
+
+def _report_text(reports):
+    last = reports[-1]
+    return ' '.join(x for x in (last.get('result', ''), (last.get('inspection_date') or '')[:10]) if x)
+
+
+def qa_brt_check():
+    """{'yes_no_report', 'report_not_yes', 'shipped_no_report'}: lists of lines
+    for the current schedule compared with the previous one."""
     current, previous = load_schedule(CURRENT_FILE), load_schedule(PREVIOUS_FILE)
     inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
     statuses, _, shipped_rows = compute_changes(previous, current) if current and previous else ({}, [], {})
-    labels = {'new': 'New 新增', 'not_shipped': 'Not shipped 未出货', 'partially_shipped': 'Partially shipped 部分出货',
-              'typo': 'New 新增', 'moved_in': 'Moved in 转入', 'partially_moved': 'Part moved 部分转出'}
-    lines, seen = [], set()
-    sources = [('active', sheet, rows[0], rows[1:]) for sheet, rows in current.items() if rows]
-    sources += [('shipped', sheet, (current.get(sheet) or previous.get(sheet) or [[]])[0], rows)
-                for sheet, rows in shipped_rows.items()]
-    for kind, sheet, headers, rows in sources:
-        low = [str(h).strip().lower() for h in headers]
-        for row in rows:
+    old_qty = {k: l['qty'] for k, l in _schedule_lines(previous).items()}
+    new_qty = {k: l['qty'] for k, l in _schedule_lines(current).items()}
+    result = {'yes_no_report': [], 'report_not_yes': [], 'shipped_no_report': []}
+    seen = set()
+    for sheet, rows in current.items():
+        if not rows:
+            continue
+        headers = rows[0]
+        for row in rows[1:]:
             key = make_job_key(sheet, row, headers)
             if not key.split('|')[1] or key in seen:
                 continue
-            if not qa_excel_mismatch(row, headers, inspections.get(key, [])):
-                continue
             seen.add(key)
-            detail = _row_details(sheet, row, headers)
-            supplier = next((str(row[low.index(n)]).strip() for n in ('supplier', 'foundry')
-                             if n in low and low.index(n) < len(row) and row[low.index(n)] is not None), '')
-            lines.append(dict(detail, key=key, supplier=supplier,
-                              state='Shipped 已出货' if kind == 'shipped' else labels.get(statuses.get(key), 'In schedule 在排期中')))
-    return sorted(lines, key=lambda l: (l['state'] != 'Shipped 已出货', l['sheet'], l['order_number'], l['item_code']))
+            reports = inspections.get(key, [])
+            status = statuses.get(key)
+            line = _qa_line(sheet, row, headers, key, state=QA_STATE_LABELS.get(status, 'In schedule 在排期中'))
+            if status == 'partially_shipped' and not reports:
+                b, a = old_qty.get(key), new_qty.get(key)
+                result['shipped_no_report'].append(dict(line, shipment='Partially shipped 部分出货',
+                                                        shipped_qty=_qty_text(b - a) if b is not None and a is not None else ''))
+                continue                       # reported once, under "shipped without a report"
+            cell = _qa_cell(row, headers)
+            if cell is None:
+                continue
+            yes = cell.lower() in {'yes', 'y'}
+            if yes and not reports:
+                result['yes_no_report'].append(line)
+            elif reports and not yes:
+                result['report_not_yes'].append(dict(line, report=_report_text(reports)))
+    for sheet, rows in shipped_rows.items():
+        headers = (current.get(sheet) or previous.get(sheet) or [[]])[0]
+        for row in rows:
+            key = make_job_key(sheet, row, headers)
+            if not key.split('|')[1] or inspections.get(key):
+                continue
+            q = old_qty.get(key)
+            result['shipped_no_report'].append(_qa_line(sheet, row, headers, key, shipment='Fully shipped 全部出货',
+                                                        shipped_qty=_qty_text(q) if q is not None else ''))
+    order = lambda l: (l['sheet'], l['order_number'], l['item_code'])
+    return {k: sorted(v, key=order) for k, v in result.items()}
+
+
+def qa_brt_mismatches():
+    """Lines still in the schedule whose Excel 'QA BRTs Sent?' is YES while no report exists."""
+    return qa_brt_check()['yes_no_report']
+
+
+def _lead_emails():
+    with db_conn() as conn:
+        return [r['email'] for r in conn.execute(
+            "SELECT email FROM users WHERE role='lead' AND active=1 AND IFNULL(email, '') != ''")]
 
 
 def qa_mismatch_recipients():
-    """'QA BRT mismatch e-mails' from Settings (the supplier) + every active lead inspector with an e-mail."""
-    configured = _email_list(load_config().get('qa_mismatch_emails', ''))
-    with db_conn() as conn:
-        leads = [r['email'] for r in conn.execute(
-            "SELECT email FROM users WHERE role='lead' AND active=1 AND IFNULL(email, '') != ''")]
-    return _email_list(', '.join(configured + leads))
+    """Supplier ('QA BRT e-mails (supplier)' in Settings) + every active lead inspector with an e-mail."""
+    return _email_list(', '.join(_email_list(load_config().get('qa_mismatch_emails', '')) + _lead_emails()))
 
 
-def qa_mismatch_email(lines):
-    """(subject, plain text, html, xlsx bytes) for the mismatch list."""
+def shipped_no_report_recipients():
+    """HQ ('HQ report e-mails') + lead inspectors + the supplier."""
+    config = load_config()
+    return _email_list(', '.join(_email_list(config.get('hq_report_emails', '')) + _lead_emails()
+                                 + _email_list(config.get('qa_mismatch_emails', ''))))
+
+
+_QA_BASE_COLUMNS = [('Region 区域', 'sheet', 'c'), ('DPL', 'order_number', 'c'), ('PO', 'po', 'c'),
+                    ('Supplier 供应商', 'supplier', 'c'), ('Item Code 编码', 'item_code', 'l'),
+                    ('Description 描述', 'description', 'l')]
+
+
+def _qa_mail(title, subject, intro, sections):
+    """(subject, plain text, html, xlsx) with one table / worksheet per section.
+    sections: [(heading, sheet name, lines, columns, link label)]; columns: [(header, field, align)]."""
     today = china_today().isoformat()
-    subject = (f'【QA BRT 不符】{len(lines)} 行 Excel 标 YES 但系统无检验报告 / '
-               f'{len(lines)} line(s): QA BRT marked sent, no report in the system')
-    intro = ['以下订单行在排期 Excel 的 "QA BRTs Sent?" 一列标为 YES，但质检平台里没有对应的检验报告。请核对并处理：',
-             '1. 如果已经检验：请检验员在平台提交检验报告（打开下面的链接）。',
-             '2. 如果还没有检验：请把 Excel 里这一行改为 NO，下次上传排期时更新。',
-             'In the schedule Excel these lines say "QA BRTs Sent? = YES", but the QC platform has no '
-             'inspection report for them. If inspected, please submit the report; if not, please change the Excel to NO.']
-    text = [f'QA BRT 不符提醒 QA BRT mismatch — {today}', *intro, '']
-    for i, l in enumerate(lines, 1):
-        text.append(f"{i}. [{l['sheet']}] {l['order_number']}  {l['po']}  {l['item_code']}  {l['description']}"
-                    f"  QTY {l['quantity']}  · {l['state']}")
-        text.append('    ' + url_for('inspect_form', job_key=l['key'], _external=True))
-
+    text = [f'{title} — {today}', *intro, '']
     cell = 'border:1px solid #d0d5dd;padding:6px 10px;font-size:13px;'
     head = cell + 'background:#1a3a5c;color:#fff;font-weight:700;text-align:center;'
-    headers = ('Region 区域', 'DPL', 'PO', 'Supplier 供应商', 'Item Code 编码', 'Description 描述', 'QTY',
-               'Status 状态', 'Report 报告')
-    head_row = ''.join(f'<th style="{head}">{_escape(h)}</th>' for h in headers)
-    body_rows = []
-    for l in lines:
-        link = url_for('inspect_form', job_key=l['key'], _external=True)
-        values = [(l['sheet'], 'text-align:center;'), (l['order_number'], 'text-align:center;'),
-                  (l['po'], 'text-align:center;'), (l['supplier'], 'text-align:center;'), (l['item_code'], ''),
-                  (l['description'], ''), (l['quantity'], 'text-align:center;'), (l['state'], 'text-align:center;')]
-        body_rows.append('<tr>' + ''.join(f'<td style="{cell}{extra}">{_escape(v)}</td>' for v, extra in values)
-                         + f'<td style="{cell}text-align:center;"><a href="{_escape(link)}">提交 / Submit</a></td></tr>')
     font = "Arial,'Microsoft YaHei',sans-serif"
-    html = (f'<div style="font-family:{font};color:#1a1a2e;">'
-            f'<p style="font-size:14px;margin:0 0 6px;"><b>QA BRT 不符提醒 / QA BRT mismatch — {today}</b></p>'
-            + ''.join(f'<p style="font-size:13px;margin:0 0 3px;">{_escape(t)}</p>' for t in intro)
-            + f'<table style="border-collapse:collapse;margin-top:10px;"><tr>{head_row}</tr>'
-            + ''.join(body_rows) + '</table>'
-            + '<p style="font-size:12px;color:#6b7280;margin-top:12px;">附件为同样内容的 Excel。 '
-              'The attached Excel has the same list.</p></div>')
-
+    html = [f'<div style="font-family:{font};color:#1a1a2e;">',
+            f'<p style="font-size:14px;margin:0 0 6px;"><b>{_escape(title)} — {today}</b></p>']
+    html += [f'<p style="font-size:13px;margin:0 0 3px;">{_escape(t)}</p>' for t in intro]
     from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = 'QA BRT mismatch'
-    ws.append(['Region', 'DPL', 'Daemco PO', 'Supplier', 'Item Code', 'Description', 'QTY',
-               'Estimated Completion', 'Status', 'Excel QA BRTs Sent?', 'Report in system'])
-    for l in lines:
-        ws.append([_xl_safe(v) for v in (l['sheet'], l['order_number'], l['po'], l['supplier'], l['item_code'],
-                                         l['description'], l['quantity'], l['est_completion'], l['state'],
-                                         'YES', 'NO')])
-    for c in ws[1]:
-        c.font = Font(bold=True, color='FFFFFF')
-        c.fill = PatternFill('solid', fgColor='1A3A5C')
-        c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    for letter, width in zip('ABCDEFGHIJK', (13, 10, 12, 10, 18, 46, 8, 20, 22, 12, 12)):
-        ws.column_dimensions[letter].width = width
-    ws.freeze_panes = 'A2'
+    wb.remove(wb.active)
+    for heading, sheet_name, lines, columns, link_label in sections:
+        if not lines:
+            continue
+        text += [f'■ {heading} ({len(lines)})']
+        html.append(f'<p style="font-size:14px;margin:16px 0 6px;"><b>{_escape(heading)} ({len(lines)})</b></p>')
+        html.append('<table style="border-collapse:collapse;"><tr>'
+                    + ''.join(f'<th style="{head}">{_escape(c[0])}</th>' for c in columns)
+                    + f'<th style="{head}">{_escape(link_label)}</th></tr>')
+        ws = wb.create_sheet(sheet_name)
+        ws.append([c[0] for c in columns])
+        for i, l in enumerate(lines, 1):
+            link = url_for('inspect_form', job_key=l['key'], _external=True)
+            text.append(f'{i}. ' + '  '.join(str(l.get(c[1], '')) for c in columns if l.get(c[1])))
+            text.append('    ' + link)
+            html.append('<tr>' + ''.join(
+                f'<td style="{cell}{"text-align:center;" if c[2] == "c" else ""}">{_escape(l.get(c[1], ""))}</td>'
+                for c in columns) + f'<td style="{cell}text-align:center;"><a href="{_escape(link)}">'
+                f'{_escape(link_label)}</a></td></tr>')
+            ws.append([_xl_safe(l.get(c[1], '')) for c in columns])
+        html.append('</table>')
+        text.append('')
+        for c in ws[1]:
+            c.font = Font(bold=True, color='FFFFFF')
+            c.fill = PatternFill('solid', fgColor='1A3A5C')
+            c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        for i, c in enumerate(columns, 1):
+            ws.column_dimensions[get_column_letter(i)].width = 44 if c[1] == 'description' else 16
+        ws.freeze_panes = 'A2'
+    html.append('<p style="font-size:12px;color:#6b7280;margin-top:12px;">附件为同样内容的 Excel。 '
+                'The attached Excel has the same list.</p></div>')
+    if not wb.sheetnames:                      # nothing to list: a workbook needs one sheet
+        wb.create_sheet('List').append(['No lines 没有需要提醒的行'])
     buf = io.BytesIO()
     wb.save(buf)
-    return subject, '\n'.join(text), html, buf.getvalue()
+    return subject, '\n'.join(text), ''.join(html), buf.getvalue()
+
+
+def qa_check_email(check):
+    a, b = check['yes_no_report'], check['report_not_yes']
+    subject = (f'【QA BRT 核对】Excel 与系统不一致 {len(a) + len(b)} 行 / '
+               f'QA BRT check: {len(a) + len(b)} line(s) where the Excel and the platform disagree')
+    intro = ['排期 Excel 的 "QA BRTs Sent?" 一列与质检平台的检验报告不一致，请核对：',
+             '① Excel 标 YES 但平台没有报告：已检验的请检验员在平台提交报告；没检验的请把 Excel 改为 NO。',
+             '② 平台已有报告但 Excel 不是 YES：请把 Excel 这一行改为 YES。',
+             'The "QA BRTs Sent?" column of the schedule Excel and the reports in the QC platform disagree: '
+             '(1) Excel YES but no report: submit the report, or change the Excel to NO; '
+             '(2) a report exists but the Excel is not YES: please change the Excel to YES.']
+    status = ('Status 状态', 'state', 'c')
+    qty = ('QTY', 'quantity', 'c')
+    return _qa_mail('QA BRT 核对 / QA BRT check', subject, intro, [
+        ('① Excel 标 YES，平台无报告 / Excel YES, no report', 'Excel YES no report', a, _QA_BASE_COLUMNS + [qty, status], '提交 / Submit'),
+        ('② 平台有报告，Excel 未标 YES / Report exists, Excel not YES', 'Report but Excel not YES', b,
+         _QA_BASE_COLUMNS + [qty, status, ('Excel', 'excel_qa', 'c'), ('Report 报告', 'report', 'c')], '查看 / View')])
+
+
+def shipped_no_report_email(lines):
+    subject = (f'【出货缺 QA BRT】{len(lines)} 行已出货但系统无检验报告 / '
+               f'{len(lines)} shipped line(s) without a QA BRT report')
+    intro = ['以下订单行在本次上传的排期中已出货（全部或部分），但质检平台里没有检验报告：',
+             '请 Murphy 确认是否检验过并补交报告；请供应商说明出货前是否完成检验。',
+             'These lines shipped (fully or partly) according to this week\'s schedule, but the QC platform has '
+             'no inspection report for them. Lead inspector: confirm and submit the report; supplier: confirm '
+             'whether they were inspected before shipping.']
+    return _qa_mail('出货缺 QA BRT / Shipped without a QA BRT report', subject, intro, [
+        ('Shipped 出货', 'Shipped without report', lines, [('Shipment 出货', 'shipment', 'c')] + _QA_BASE_COLUMNS
+         + [('Shipped QTY 出货数量', 'shipped_qty', 'c'), ('Excel QA BRTs Sent?', 'excel_qa', 'c')], '补交 / Submit')])
 
 
 def send_qa_mismatch_email():
-    """E-mail the mismatch list to the supplier + lead. Returns (count, message)."""
-    lines = qa_brt_mismatches()
-    if not lines:
-        return 0, tr('没有 QA BRT 不符的行', 'No QA BRT mismatches')
+    """QA BRT check e-mail to the supplier + lead. Returns (count, message)."""
+    check = qa_brt_check()
+    count = len(check['yes_no_report']) + len(check['report_not_yes'])
+    if not count:
+        return 0, tr('Excel 与系统的 QA BRT 状态一致', 'The Excel and the platform agree on QA BRTs')
     recipients = qa_mismatch_recipients()
     if not recipients:
-        return 0, tr('未设置 QA BRT 不符提醒邮箱，检验主管账号也没有邮箱',
-                     'No QA BRT mismatch e-mail and no lead inspector e-mail')
-    subject, text, html, xlsx = qa_mismatch_email(lines)
+        return 0, tr('未设置供应商 QA BRT 邮箱，检验主管账号也没有邮箱', 'No supplier QA BRT e-mail and no lead inspector e-mail')
+    subject, text, html, xlsx = qa_check_email(check)
     ok, msg = _smtp_send(subject, text, recipients, html=html, attachments=[
-        (f'QA BRT mismatch {china_today().isoformat()}.xlsx', xlsx,
+        (f'QA BRT check {china_today().isoformat()}.xlsx', xlsx,
+         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')])
+    return (count if ok else 0), msg
+
+
+def send_shipped_no_report_email():
+    """Shipped-without-report e-mail to HQ + lead + supplier. Returns (count, message)."""
+    lines = qa_brt_check()['shipped_no_report']
+    if not lines:
+        return 0, tr('本次出货的行都有检验报告', 'Every shipped line has a report')
+    recipients = shipped_no_report_recipients()
+    if not recipients:
+        return 0, tr('未设置总部 / 供应商邮箱，检验主管账号也没有邮箱', 'No HQ / supplier / lead e-mail')
+    subject, text, html, xlsx = shipped_no_report_email(lines)
+    ok, msg = _smtp_send(subject, text, recipients, html=html, attachments=[
+        (f'Shipped without QA BRT {china_today().isoformat()}.xlsx', xlsx,
          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')])
     return (len(lines) if ok else 0), msg
 
 
+AFTER_UPLOAD_EMAILS = (('Purchasing', 'send_purchasing_email'), ('QA BRT check', 'send_qa_mismatch_email'),
+                       ('Shipped without report', 'send_shipped_no_report_email'))
+
+
 def _after_upload_emails_in_background(host_url):
-    """Purchasing comparison + QA BRT mismatch e-mails after a weekly upload."""
+    """Purchasing comparison + QA BRT e-mails after a weekly upload."""
     def work():
         with app.test_request_context(base_url=host_url):
-            for name, job in (('Purchasing', send_purchasing_email), ('QA BRT mismatch', send_qa_mismatch_email)):
+            for name, job in AFTER_UPLOAD_EMAILS:
                 try:
-                    result = job()
+                    result = globals()[job]()
                     if not result[0]:
                         logger.info('%s e-mail not sent: %s', name, result[1])
                 except Exception:
@@ -5205,27 +5325,40 @@ def _after_upload_emails_in_background(host_url):
     threading.Thread(target=work, daemon=True).start()
 
 
+def _qa_preview(kind):
+    """(subject, html, xlsx, count, recipients) for 'check' or 'shipped'."""
+    check = qa_brt_check()
+    if kind == 'shipped':
+        lines = check['shipped_no_report']
+        subject, _t, html, xlsx = shipped_no_report_email(lines)
+        return subject, html, xlsx, len(lines), shipped_no_report_recipients()
+    count = len(check['yes_no_report']) + len(check['report_not_yes'])
+    subject, _t, html, xlsx = qa_check_email(check)
+    return subject, html, xlsx, count, qa_mismatch_recipients()
+
+
 @app.route('/settings/qa-mismatch-preview')
 def settings_qa_mismatch_preview():
-    """The QA BRT mismatch e-mail as it would look now (nothing is sent)."""
-    lines = qa_brt_mismatches()
+    """A QA BRT e-mail as it would look now (nothing is sent). ?kind=check|shipped"""
+    kind = 'shipped' if request.args.get('kind') == 'shipped' else 'check'
+    subject, html, xlsx, count, recipients = _qa_preview(kind)
     if request.args.get('format') == 'xlsx':
-        return send_file(io.BytesIO(qa_mismatch_email(lines)[3]), as_attachment=True,
-                         download_name=f'QA BRT mismatch {china_today().isoformat()}.xlsx')
+        return send_file(io.BytesIO(xlsx), as_attachment=True,
+                         download_name=f'QA BRT {kind} {china_today().isoformat()}.xlsx')
     note = (f'<div style="font-family:Arial,sans-serif;font-size:13px;background:#fffbeb;border:1px solid #fcd34d;'
             f'padding:8px 12px;margin-bottom:14px;">预览，未发送 / Preview only — nothing was sent. '
-            f'收件人 Recipients: {_escape(", ".join(qa_mismatch_recipients()) or "—")} · '
-            f'共 {len(lines)} 行 / {len(lines)} line(s) · <a href="?format=xlsx">Excel</a> · '
+            f'收件人 Recipients: {_escape(", ".join(recipients) or "—")} · '
+            f'共 {count} 行 / {count} line(s) · <a href="?kind={kind}&format=xlsx">Excel</a> · '
             f'<a href="{url_for("settings")}#email">返回设置 / Back</a></div>')
-    if not lines:
-        return note + f'<p style="font-family:Arial,sans-serif;">{tr("目前没有 QA BRT 不符的行。", "No QA BRT mismatches right now.")}</p>'
-    subject, _text, html, _xlsx = qa_mismatch_email(lines)
+    if not count:
+        return note + f'<p style="font-family:Arial,sans-serif;">{tr("目前没有需要提醒的行。", "Nothing to report right now.")}</p>'
     return note + f'<p style="font-family:Arial,sans-serif;font-size:13px;"><b>{_escape(subject)}</b></p>' + html
 
 
 @app.route('/settings/qa-mismatch-send', methods=['POST'])
 def settings_qa_mismatch_send():
-    count, msg = send_qa_mismatch_email()
+    send = send_shipped_no_report_email if request.form.get('kind') == 'shipped' else send_qa_mismatch_email
+    count, msg = send()
     flash(msg, 'success' if count else 'error')
     return redirect(url_for('settings') + '#email')
 

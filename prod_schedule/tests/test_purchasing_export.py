@@ -57,6 +57,7 @@ class PurchasingExportTests(unittest.TestCase):
         app.save_json(os.path.join(second, 'replaced_schedule.json'), BEFORE)
         app.save_json(os.path.join(second, 'meta.json'), {'filename': 'Production Schedule 08.10.xlsx', 'applied_at': '2026-10-08 08:00'})
         app.save_json(app.CURRENT_FILE, AFTER)
+        app.save_json(app.INSPECTIONS_CACHE, {'MELBOURNE|PO-2|ES0300': [{'result': 'Pass'}]})
         with db_conn() as conn:
             conn.execute('DELETE FROM users')
             for name, role in (('boss', 'admin'), ('hq1', 'hq'), ('yu', 'inspector')):
@@ -104,6 +105,11 @@ class PurchasingExportTests(unittest.TestCase):
         self.assertEqual(counts['New lines'], 1)
         self.assertEqual(s['Shipped'][1][:3], ['Fully shipped', 'MELBOURNE', 'DPL1'])
         self.assertEqual(s['Shipped'][2][7:10], [50, 20, 30])
+        self.assertEqual(s['Shipped'][0][10], 'QA Report')
+        self.assertEqual([r[10] for r in s['Shipped'][1:]], ['No', 'Yes'])     # RSV0100 has no report
+        self.assertEqual(counts['Shipped without a QA report'], 1)
+        red = openpyxl.load_workbook(io.BytesIO(data))['Shipped'].cell(2, 11)
+        self.assertEqual(red.font.color.rgb[-6:], 'B91C1C')
         dc = s['Date Changes']
         self.assertEqual(dc[1][4], 'ACSVL')
         self.assertEqual((dc[1][9], dc[1][10]), ('+6', 'Delayed 6 d'))

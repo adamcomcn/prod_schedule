@@ -128,12 +128,12 @@
           </div>
 
           <div class="form-group">
-            <label>&#9888; {{ tr('QA BRT 不符提醒邮箱（供应商）', 'QA BRT mismatch e-mails (supplier)') }}</label>
+            <label>&#9888; {{ tr('供应商邮箱（QA BRT 提醒）', 'Supplier e-mails (QA BRT reminders)') }}</label>
             <input type="text" name="qa_mismatch_emails" value="{{ config.get('qa_mismatch_emails', '') }}"
                    placeholder="supplier@example.com">
             <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
-              {{ tr('每次确认上传新排期后，如果 Excel 的“QA BRTs Sent?”标为 YES、但系统里没有检验报告（排期页的橙色“Excel 已标 YES，系统无报告”），就把这些行发到这里，同时抄送所有填了邮箱的检验主管。基准重新同步时不发送。',
-                    'After each confirmed schedule upload, lines whose Excel "QA BRTs Sent?" is YES but that have no report in the system (the orange badge on the schedule page) are e-mailed here and to every lead inspector with an e-mail. Not sent for a baseline re-sync.') }}
+              {{ tr('每次确认上传新排期后检查两件事（基准重新同步时不发送）：① Excel 的“QA BRTs Sent?”与系统报告不一致（标 YES 但无报告，或有报告但没标 YES）→ 发给这里和检验主管；② 本次已出货、但系统里没有检验报告的行 → 发给这里、检验主管和上面的“总部报告邮箱”。',
+                    'After each confirmed schedule upload (not a baseline re-sync): (1) lines where the Excel "QA BRTs Sent?" and the system disagree (YES without a report, or a report but not YES) go to these addresses and the lead inspectors; (2) lines that shipped without an inspection report go to these addresses, the lead inspectors and the "HQ report e-mails" above.') }}
             </div>
           </div>
 
@@ -183,11 +183,18 @@
         <a class="btn btn-outline btn-sm" href="{{ url_for('export_purchasing_excel') }}">&#11015; {{ tr('下载采购用排期变化 Excel', 'Download schedule changes for purchasing') }}</a>
         <button type="submit" class="btn btn-outline btn-sm">&#128666; {{ tr('立即发给采购（最近一次上传）', 'E-mail purchasing now (latest upload)') }}</button>
       </form>
+      {% for kind, preview_label, send_label, confirm_text in [
+           ('check', tr('预览 QA BRT 核对', 'Preview QA BRT check'), tr('立即发送 QA BRT 核对', 'Send the QA BRT check now'),
+            tr('把 Excel 与系统不一致的行发给供应商和检验主管？', 'E-mail the QA BRT check to the supplier and lead now?')),
+           ('shipped', tr('预览出货缺 QA BRT', 'Preview shipped without report'), tr('立即发送出货缺 QA BRT', 'Send shipped without report now'),
+            tr('把本次出货但无检验报告的行发给总部、检验主管和供应商？', 'E-mail the shipped-without-report list to HQ, lead and supplier now?'))] %}
       <form method="POST" action="{{ url_for('settings_qa_mismatch_send') }}" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
-            onsubmit="return confirm({{ tr('把当前 QA BRT 不符的行发给供应商和检验主管？', 'E-mail the current QA BRT mismatches to the supplier and lead now?')|tojson }});">
-        <a class="btn btn-outline btn-sm" href="{{ url_for('settings_qa_mismatch_preview') }}" target="_blank">&#128269; {{ tr('预览 QA BRT 不符提醒', 'Preview QA BRT mismatch e-mail') }}</a>
-        <button type="submit" class="btn btn-outline btn-sm">&#9888; {{ tr('立即发送 QA BRT 不符提醒', 'Send the QA BRT mismatch e-mail now') }}</button>
+            onsubmit="return confirm({{ confirm_text|tojson }});">
+        <input type="hidden" name="kind" value="{{ kind }}">
+        <a class="btn btn-outline btn-sm" href="{{ url_for('settings_qa_mismatch_preview', kind=kind) }}" target="_blank">&#128269; {{ preview_label }}</a>
+        <button type="submit" class="btn btn-outline btn-sm">&#9888; {{ send_label }}</button>
       </form>
+      {% endfor %}
       <form method="POST" action="{{ url_for('settings_vtrust_send') }}" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
             onsubmit="return confirm({{ tr('把当前所有需要预约 V-Trust 的阀门发一封邮件？', 'E-mail the full current V-Trust list now?')|tojson }});">
         <a class="btn btn-outline btn-sm" href="{{ url_for('settings_vtrust_preview') }}" target="_blank">&#128269; {{ tr('预览 V-Trust 提醒', 'Preview V-Trust reminder') }}</a>
