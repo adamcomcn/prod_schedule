@@ -967,6 +967,11 @@ def init_db():
         if 'result' not in booking_cols:
             for col in ('result', 'result_note', 'result_by', 'result_at'):
                 conn.execute(f"ALTER TABLE vtrust_bookings ADD COLUMN {col} TEXT DEFAULT ''")
+        # Booking date entered by the admin; "no need to reschedule" decisions
+        if 'booked_on' not in booking_cols:
+            for col in ('booked_on', 'reschedule_dismissed', 'dismissed_by'):
+                conn.execute(f"ALTER TABLE vtrust_bookings ADD COLUMN {col} TEXT DEFAULT ''")
+            conn.execute("UPDATE vtrust_bookings SET booked_on=substr(booked_at, 1, 10)")
         # The third party's report / video files, per V-Trust job number
         conn.execute('''CREATE TABLE IF NOT EXISTS vtrust_files (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,

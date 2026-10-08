@@ -81,7 +81,7 @@ ADMIN_ENDPOINTS = {
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
     'settings_purchasing_send', 'export_purchasing_excel', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
-    'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'report_kpi_exclusion', 'schedule_est_edit',
+    'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'vtrust_keep', 'report_kpi_exclusion', 'schedule_est_edit',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -4977,8 +4977,8 @@ def _send_date_change_email(changes, edited_by=''):
             if booking:
                 when = booking_window_text(booking)
                 if vtrust_too_early(booking, split_est(c['new_est'])[0], vtrust_lead_days(), today):
-                    lines.append(f"    ⚠ V-Trust 已预约 Job {booking['job_number']}（检验时间 {when}），完成日推迟太多，"
-                                 f"V-Trust 需要改期 / V-Trust inspection {when} is now too early: reschedule")
+                    lines.append(f"    ⚠ V-Trust 已预约 Job {booking['job_number']}（检验时间 {when}），完成日推迟较多，"
+                                 f"请确认 V-Trust 是否需要改期 / V-Trust inspection {when} may now be too early")
                 else:
                     lines.append(f"    V-Trust 已预约 Job {booking['job_number']}（检验时间 {when}）/ V-Trust inspection {when}")
             if c.get('assigned_to'):
@@ -5072,7 +5072,7 @@ def _qty_sum(a, b):
 
 
 VTRUST_STATUS = {
-    'reschedule': ('需改期', 'Reschedule'), 'to_book': ('待预约', 'To book'), 'booked': ('已预约', 'Booked'),
+    'reschedule': ('待确认改期', 'Check reschedule'), 'to_book': ('待预约', 'To book'), 'booked': ('已预约', 'Booked'),
     'later': ('以后再约', 'Later'), 'overdue': ('已过完成日', 'Past due'), 'no_date': ('无完成日', 'No date'),
     'inspected': ('已检验 · 待录结果', 'Inspected · result to enter'), 'failed': ('不合格', 'Failed'),
     'done': ('已完成', 'Done'),
@@ -5112,7 +5112,9 @@ def vtrust_lead_days():
 def vtrust_too_early(booking, est, lead, today):
     """V-Trust is booked ~lead days before completion. When the completion
     date has since moved more than `lead` days past the end of an inspection
-    window that is still to come, V-Trust would come too early: reschedule."""
+    window that is still to come, V-Trust may come too early. The admin
+    decides: they reschedule, or confirm it is not needed for that date
+    (the factory may have made the batch already) - see vtrust_keep."""
     _start, end = booking_window(booking)
     return bool(end and est and end >= today and (est - end).days > lead)
 
@@ -5171,7 +5173,10 @@ def vtrust_lines(lead_days=None):
         end = booking_window(booking)[1] if booking else None
         # days from the end of the inspection window to the completion date
         line['gap'] = (line['est'] - end).days if end and line['est'] else None
-        line['late_by'] = line['gap'] if booking and vtrust_too_early(booking, line['est'], lead, today) else 0
+        too_early = bool(booking and vtrust_too_early(booking, line['est'], lead, today))
+        # the admin confirmed "no need to reschedule" for this completion date
+        line['kept'] = too_early and booking.get('reschedule_dismissed') == line['est'].isoformat()
+        line['late_by'] = line['gap'] if too_early and not line['kept'] else 0
         if get_vtrust_status(inspections.get(line['job_key'], [])).lower() == 'pass':
             line['status'] = 'done'
         elif booking and booking.get('result'):
@@ -5373,11 +5378,15 @@ def send_vtrust_reschedule_alerts():
         release()
         return 0, tr('未设置 V-Trust 提醒邮箱，管理员账号也没有邮箱', 'No V-Trust reminder e-mail and no admin e-mail')
     today = china_today().isoformat()
-    lines_txt = [f'V-Trust 需改期 V-Trust reschedule — {today}',
+    lines_txt = [f'V-Trust 请确认是否改期 V-Trust: reschedule? — {today}',
                  f'以下 {len(claimed)} 个已预约 V-Trust 的阀门，预计完成日推迟后比检验结束日晚了超过 {lead} 天，'
-                 f'V-Trust 来的时候产品可能还没到可检阶段。请联系 V-Trust 改期，并在系统 V-Trust 页面更新检验时间。',
-                 f'{len(claimed)} booked valve line(s) will now be ready more than {lead} days after the end of the '
-                 f'V-Trust inspection window. Please reschedule with V-Trust and update the dates on the V-Trust page.', '']
+                 f'V-Trust 来的时候产品可能还没做好。请确认：',
+                 '· 工厂已经把这批赶出来、不用改期：在 V-Trust 页面勾选后点“确认无需改期”；',
+                 '· 需要改期：联系 V-Trust，并在 V-Trust 页面更新检验时间。',
+                 f'{len(claimed)} booked valve line(s) are now due more than {lead} days after the end of the V-Trust '
+                 f'inspection window, so V-Trust may come too early. If the factory has the batch ready anyway, tick the '
+                 f'lines on the V-Trust page and confirm "no need to reschedule"; otherwise reschedule with V-Trust and '
+                 f'update the dates.', '']
     for i, l in enumerate(sorted(claimed, key=lambda l: -l['late_by']), 1):
         b = l['booking']
         lines_txt.append(f"{i}. Job {b['job_number']}  ·  {l['dpl']}  {l['po']}  {l['code']}  {l['description']}  QTY {l['qty']}")
@@ -5386,8 +5395,8 @@ def send_vtrust_reschedule_alerts():
                          f"   [比检验结束日晚 {l['late_by']} 天 / {l['late_by']} d after the inspection]")
         lines_txt.append('')
     lines_txt.append(url_for('vtrust_page', _external=True))
-    ok, msg = _smtp_send(f'【V-Trust 需改期】{len(claimed)} 个阀门完工推迟，V-Trust 来得太早 / '
-                         f'{len(claimed)} V-Trust booking(s) need rescheduling', '\n'.join(lines_txt), recipients)
+    ok, msg = _smtp_send(f'【V-Trust 请确认是否改期】{len(claimed)} 个阀门完工推迟 / '
+                         f'{len(claimed)} V-Trust booking(s): reschedule?', '\n'.join(lines_txt), recipients)
     if not ok:
         release()
         return 0, msg
@@ -5421,6 +5430,7 @@ def vtrust_book():
     job_number = ' '.join(request.form.get('job_number', '').split())[:60]
     start = _parse_date(request.form.get('window_start', '').strip())
     end = _parse_date(request.form.get('window_end', '').strip())
+    booked_on = _parse_date(request.form.get('booked_on', '').strip()) or china_today()
     note = ' '.join(request.form.get('note', '').split())[:300]
     if not keys:
         flash(tr('请先勾选阀门', 'Select at least one valve line'), 'error')
@@ -5436,16 +5446,34 @@ def vtrust_book():
             for key in keys:
                 conn.execute(
                     'INSERT INTO vtrust_bookings (job_key, job_number, planned_date, window_start, window_end, '
-                    "est_at_booking, note, booked_by, booked_at, reschedule_alert) "
-                    "VALUES (?,?,?,?,?,?,?,?,datetime('now'),'') ON CONFLICT(job_key) DO UPDATE SET "
+                    "est_at_booking, note, booked_by, booked_on, booked_at, reschedule_alert, reschedule_dismissed) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,datetime('now'),'','') ON CONFLICT(job_key) DO UPDATE SET "
                     'job_number=excluded.job_number, planned_date=excluded.planned_date, '
                     'window_start=excluded.window_start, window_end=excluded.window_end, '
                     'est_at_booking=excluded.est_at_booking, note=excluded.note, booked_by=excluded.booked_by, '
-                    "booked_at=excluded.booked_at, reschedule_alert=''",
+                    "booked_on=excluded.booked_on, booked_at=excluded.booked_at, reschedule_alert='', "
+                    "reschedule_dismissed=''",
                     (key, job_number, start.isoformat(), start.isoformat(), end.isoformat(), est.get(key, ''), note,
-                     g.get('username', '')))
+                     g.get('username', ''), booked_on.isoformat()))
         flash(tr(f'已为 {len(keys)} 行录入 V-Trust job {job_number}', f'V-Trust job {job_number} saved for {len(keys)} line(s)'),
               'success')
+    return redirect(url_for('vtrust_page', show=request.form.get('show', 'open')))
+
+
+@app.route('/vtrust/keep', methods=['POST'])
+def vtrust_keep():
+    """Admin: the flagged booking stays as it is (e.g. the factory made the batch
+    early). Holds for the current completion date; a new date flags it again."""
+    keys = set(request.form.getlist('job_key'))
+    flagged = [l for l in vtrust_lines() if l['job_key'] in keys and l['status'] == 'reschedule']
+    with db_conn() as conn:
+        for l in flagged:
+            conn.execute('UPDATE vtrust_bookings SET reschedule_dismissed=?, dismissed_by=? WHERE job_key=?',
+                         (l['est'].isoformat(), g.get('username', ''), l['job_key']))
+    if flagged:
+        flash(tr(f'已确认 {len(flagged)} 行无需改期', f'{len(flagged)} line(s) confirmed: no need to reschedule'), 'success')
+    else:
+        flash(tr('勾选的行里没有“待确认改期”的', 'None of the selected lines is waiting for a reschedule decision'), 'error')
     return redirect(url_for('vtrust_page', show=request.form.get('show', 'open')))
 
 

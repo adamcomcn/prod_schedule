@@ -70,10 +70,10 @@ class VtrustBase(unittest.TestCase):
             s['_csrf_token'] = 'tok'
         return c
 
-    def book(self, keys, job='JXW979734', start='2026-10-10', end='2026-10-11', client=None):
+    def book(self, keys, job='JXW979734', start='2026-10-10', end='2026-10-11', client=None, booked_on=''):
         return (client or self.client()).post('/vtrust/book', data={
             '_csrf_token': 'tok', 'job_key': keys, 'job_number': job, 'window_start': start, 'window_end': end,
-            'note': 'Ms Li'})
+            'note': 'Ms Li', 'booked_on': booked_on})
 
     def statuses(self):
         return {l['code']: l['status'] for l in app.vtrust_lines()}
@@ -144,6 +144,29 @@ class VtrustBookingTests(VtrustBase):
         app.save_json(app.CURRENT_FILE, schedule(a_est='2026/12/01'))
         self.assertEqual(self.line(A)['status'], 'inspected')              # nothing to reschedule
 
+    def test_admin_decides_no_reschedule_until_the_date_moves_again(self):
+        self.book([A, B])
+        app.save_json(app.CURRENT_FILE, schedule(a_est='2026/11/28'))       # 48 days after the window: flagged
+        self.assertEqual(self.line(A)['status'], 'reschedule')
+        keep = lambda keys, who='boss': self.client(who).post('/vtrust/keep', data={'_csrf_token': 'tok', 'job_key': keys})
+        self.assertEqual(keep([A], 'murphy').status_code, 403)
+        keep([A, B])                                                       # B is not flagged: ignored
+        line = self.line(A)
+        self.assertEqual((line['status'], line['kept'], line['late_by']), ('booked', True, 0))
+        self.assertEqual(app.vtrust_bookings()[B]['reschedule_dismissed'], '')
+        with self.capture(), app.app.test_request_context():
+            self.assertEqual(app.send_vtrust_reschedule_alerts()[0], 0)    # decided: no e-mail
+        self.assertIn('已确认无需改期', self.client().get('/vtrust').get_data(as_text=True))
+        app.save_json(app.CURRENT_FILE, schedule(a_est='2026/12/10'))       # moved again: ask again
+        self.assertEqual(self.line(A)['status'], 'reschedule')
+
+    def test_booking_date_entered_by_admin(self):
+        self.book([A], booked_on='2026-10-05')
+        self.book([B])                                                     # empty: today
+        b = app.vtrust_bookings()
+        self.assertEqual((b[A]['booked_on'], b[B]['booked_on']), ('2026-10-05', '2026-10-09'))
+        self.assertIn('预约于 2026-10-05', self.client().get('/vtrust').get_data(as_text=True))
+
     def test_reschedule_alert_once_per_new_date(self):
         self.book([A])
         with self.capture(), app.app.test_request_context(base_url='https://qc.example.com'):
@@ -155,7 +178,8 @@ class VtrustBookingTests(VtrustBase):
             self.assertEqual(app.send_vtrust_reschedule_alerts()[0], 1)               # moved again
         mail = self.sent[0]
         self.assertEqual(mail['to'], ['boss@example.com'])
-        self.assertIn('V-Trust 需改期', mail['subject'])
+        self.assertIn('V-Trust 请确认是否改期', mail['subject'])
+        self.assertIn('确认无需改期', mail['body'])
         self.assertIn('Job JXW979734', mail['body'])
         self.assertIn('检验时间 Inspection: 2026-10-10 ~ 2026-10-11', mail['body'])
         self.assertIn('比检验结束日晚 19 天', mail['body'])
@@ -176,7 +200,7 @@ class VtrustBookingTests(VtrustBase):
                 mock.patch.object(app, '_task_recipients', return_value=['m@example.com']):
             app._send_date_change_email([change])
             app._send_date_change_email([dict(change, new_est='2026/10/21')])
-        self.assertIn('⚠ V-Trust 已预约 Job JXW979734（检验时间 2026-10-10 ~ 2026-10-11），完成日推迟太多', self.sent[0]['body'])
+        self.assertIn('⚠ V-Trust 已预约 Job JXW979734（检验时间 2026-10-10 ~ 2026-10-11），完成日推迟较多，请确认', self.sent[0]['body'])
         self.assertIn('V-Trust 已预约 Job JXW979734（检验时间 2026-10-10 ~ 2026-10-11）/', self.sent[1]['body'])
         self.assertNotIn('⚠ V-Trust', self.sent[1]['body'])
 
@@ -275,8 +299,8 @@ class OldBookingMigrationTests(unittest.TestCase):
         conn.execute('''CREATE TABLE vtrust_bookings (job_key TEXT PRIMARY KEY, job_number TEXT NOT NULL,
             planned_date TEXT DEFAULT '', est_at_booking TEXT DEFAULT '', note TEXT DEFAULT '',
             booked_by TEXT DEFAULT '', booked_at TEXT DEFAULT (datetime('now')), reschedule_alert TEXT DEFAULT '')''')
-        conn.execute("INSERT INTO vtrust_bookings (job_key, job_number, planned_date, reschedule_alert) "
-                     "VALUES ('K', 'JXW979734', '2026-10-07', '2026-10-19')")
+        conn.execute("INSERT INTO vtrust_bookings (job_key, job_number, planned_date, reschedule_alert, booked_at) "
+                     "VALUES ('K', 'JXW979734', '2026-10-07', '2026-10-19', '2026-10-08 01:30:00')")
         conn.commit()
         conn.close()
         with mock.patch.object(db, 'DB_PATH', path):
@@ -285,6 +309,8 @@ class OldBookingMigrationTests(unittest.TestCase):
         row = sqlite3.connect(path).execute(
             'SELECT window_start, window_end, reschedule_alert FROM vtrust_bookings').fetchone()
         self.assertEqual(row, ('2026-10-07', '2026-10-07', ''))
+        self.assertEqual(sqlite3.connect(path).execute('SELECT booked_on FROM vtrust_bookings').fetchone()[0],
+                         '2026-10-08')
 
 
 if __name__ == '__main__':

@@ -26,8 +26,8 @@
   <div class="card">
     <div class="card-title">&#128269; V-Trust {{ tr('第三方检验预约', 'third-party inspection bookings') }}</div>
     <div class="vt-note">
-      {{ tr('阀门在预计完成日前 %d 天进入“待预约”。预约后勾选对应的行，填入 V-Trust 给的 job number 和检验开始日、结束日。还没到检验时间时，如果预计完成日推迟到比检验结束日晚 %d 天以上（V-Trust 会来得太早），这里标为“需改期”并发邮件提醒。检验结束日过后显示“已检验”（报告和视频由第三方提供）。' % (lead, lead),
-            'Valves become "To book" %d days before their estimated completion. After booking, tick the lines and enter the V-Trust job number and the inspection start and end dates. Before the inspection, if the completion date moves more than %d days past the end date (V-Trust would come too early), the line shows "Reschedule" and an e-mail is sent. After the end date it shows "Inspected" (the third party provides the report and video).' % (lead, lead)) }}
+      {{ tr('阀门在预计完成日前 %d 天进入“待预约”。预约后勾选对应的行，填入 V-Trust 给的 job number 和检验开始日、结束日。还没到检验时间时，如果预计完成日推迟到比检验结束日晚 %d 天以上（V-Trust 可能来得太早），这里标为“待确认改期”并发邮件提醒，由你决定改期或点“确认无需改期”。检验结束日过后显示“已检验”（报告和视频由第三方提供）。' % (lead, lead),
+            'Valves become "To book" %d days before their estimated completion. After booking, tick the lines and enter the V-Trust job number and the inspection start and end dates. Before the inspection, if the completion date moves more than %d days past the end date (V-Trust may come too early), the line shows "Check reschedule" and an e-mail is sent; you reschedule, or confirm "No need to reschedule". After the end date it shows "Inspected" (the third party provides the report and video).' % (lead, lead)) }}
     </div>
   </div>
 
@@ -46,6 +46,7 @@
         <div class="vt-section">① {{ tr('录入预约', 'Booking') }}</div>
         <div class="vt-form">
           <div><label>V-Trust job number *</label><input type="text" name="job_number" maxlength="60"></div>
+          <div><label>{{ tr('预约日期', 'Booked on') }}</label><input type="date" name="booked_on" value="{{ today }}"></div>
           <div><label>{{ tr('检验开始日', 'Inspection start') }} *</label><input type="date" name="window_start"></div>
           <div><label>{{ tr('检验结束日', 'Inspection end') }} *</label><input type="date" name="window_end"></div>
           <div><label>{{ tr('备注', 'Note') }}</label><input type="text" name="note" maxlength="300"></div>
@@ -53,6 +54,8 @@
             <button class="btn btn-primary btn-sm" type="submit" formaction="{{ url_for('vtrust_book') }}">{{ tr('保存到勾选的行', 'Save to selected lines') }}</button>
             <button class="btn btn-outline btn-sm" type="submit" formaction="{{ url_for('vtrust_unbook') }}"
                     onclick="return confirm({{ tr('删除勾选行的 V-Trust 预约？', 'Remove the V-Trust booking from the selected lines?')|tojson }});">{{ tr('删除预约', 'Remove booking') }}</button>
+            <button class="btn btn-outline btn-sm" type="submit" formaction="{{ url_for('vtrust_keep') }}"
+                    title="{{ tr('工厂已经赶出来等情况：勾选“待确认改期”的行，确认按原检验时间', 'E.g. the factory has the batch ready: keep the booked inspection for the selected lines') }}">{{ tr('确认无需改期', 'No need to reschedule') }}</button>
           </div>
         </div>
         <div class="vt-section" style="margin-top:12px;">② {{ tr('录入第三方结果（勾选的行需已有 job number）', 'Third-party result (ticked lines need a job number)') }}</div>
@@ -84,7 +87,8 @@
           <tr>
             <td>{% if l.status != 'done' %}<input type="checkbox" class="vt-pick" name="job_key" value="{{ l.job_key }}" onchange="vtCount()">{% endif %}</td>
             <td><span class="vt-st vt-{{ l.status }}">{{ tr(statuses[l.status][0], statuses[l.status][1]) }}</span>
-              {% if l.late_by %}<div style="color:#b91c1c;font-size:.72rem;margin-top:2px;">{{ tr('完成日比检验结束日晚 %d 天' % l.late_by, 'ready %d d after the inspection' % l.late_by) }}</div>{% endif %}</td>
+              {% if l.late_by %}<div style="color:#b91c1c;font-size:.72rem;margin-top:2px;">{{ tr('完成日比检验结束日晚 %d 天，请确认' % l.late_by, 'due %d d after the inspection: check' % l.late_by) }}</div>{% endif %}
+              {% if l.kept %}<div style="color:#6b7280;font-size:.72rem;margin-top:2px;">{{ tr('已确认无需改期', 'kept as booked') }} · {{ l.booking.dismissed_by }}</div>{% endif %}</td>
             <td>{{ l.dpl }}<br><span style="color:#6b7280;">{{ l.po }} · {{ l.region }}</span></td>
             <td><a href="{{ url_for('inspect_form', job_key=l.job_key) }}">{{ l.code }}</a><br><span style="color:#6b7280;">{{ l.description }}</span></td>
             <td>{{ l.qty }}</td>
@@ -97,7 +101,7 @@
               {% if b %}{% for f in b.files %}<div class="vt-file"><a href="{{ url_for('vtrust_file', fid=f.id) }}" target="_blank">&#128206; {{ f.original_name }}</a>
                 <button type="submit" formaction="{{ url_for('vtrust_file_delete', fid=f.id) }}" title="{{ tr('删除文件', 'Delete file') }}"
                         onclick="return confirm({{ tr('删除这个文件？', 'Delete this file?')|tojson }});">&#10005;</button></div>{% endfor %}{% endif %}</td>
-            <td style="white-space:nowrap;">{{ window_text(b) if b else '' }}{% if b %}<div style="color:#9ca3af;font-size:.72rem;">{{ tr('预约于', 'Booked') }} {{ b.booked_at[:10] }} · {{ b.booked_by }}</div>{% endif %}</td>
+            <td style="white-space:nowrap;">{{ window_text(b) if b else '' }}{% if b %}<div style="color:#9ca3af;font-size:.72rem;">{{ tr('预约于', 'Booked') }} {{ b.booked_on or b.booked_at[:10] }} · {{ b.booked_by }}</div>{% endif %}</td>
           </tr>
         {% else %}
           <tr><td colspan="9" style="color:#6b7280;">{{ tr('没有阀门。', 'No valves.') }}</td></tr>
