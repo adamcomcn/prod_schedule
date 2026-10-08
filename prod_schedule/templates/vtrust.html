@@ -11,6 +11,11 @@
 .vt-reschedule { background:#fee2e2; color:#991b1b; } .vt-to_book { background:#fef3c7; color:#92400e; }
 .vt-booked { background:#dbeafe; color:#1e40af; } .vt-done { background:#d1fae5; color:#065f46; }
 .vt-later, .vt-no_date, .vt-overdue { background:#f3f4f6; color:#4b5563; }
+.vt-inspected { background:#ede9fe; color:#5b21b6; } .vt-failed { background:#fee2e2; color:#991b1b; }
+.vt-result { margin-top:4px; font-size:.75rem; }
+.vt-file { display:inline-flex; gap:4px; align-items:center; margin:2px 6px 0 0; font-size:.75rem; }
+.vt-file button { border:none; background:none; color:#dc2626; cursor:pointer; padding:0; }
+.vt-section { font-size:.78rem; font-weight:700; color:#1a3a5c; margin:4px 0 6px; }
 .vt-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; align-items:end; }
 .vt-bar { background:#fff; padding:10px 0; border-bottom:1px solid #e2e8f0; margin-bottom:8px; }
 @media (min-width: 900px) { .vt-bar { position:sticky; top:0; z-index:5; } }
@@ -35,9 +40,10 @@
       <a class="vt-tab {{ 'on' if show == 'all' }}" href="{{ url_for('vtrust_page', show='all') }}">{{ tr('全部', 'All') }}</a>
     </div>
 
-    <form method="POST" id="vt-form">
+    <form method="POST" id="vt-form" enctype="multipart/form-data">
       <input type="hidden" name="show" value="{{ show }}">
       <div class="vt-bar">
+        <div class="vt-section">① {{ tr('录入预约', 'Booking') }}</div>
         <div class="vt-form">
           <div><label>V-Trust job number *</label><input type="text" name="job_number" maxlength="60"></div>
           <div><label>{{ tr('检验开始日', 'Inspection start') }} *</label><input type="date" name="window_start"></div>
@@ -49,7 +55,19 @@
                     onclick="return confirm({{ tr('删除勾选行的 V-Trust 预约？', 'Remove the V-Trust booking from the selected lines?')|tojson }});">{{ tr('删除预约', 'Remove booking') }}</button>
           </div>
         </div>
-        <div class="vt-note" style="margin-top:6px;"><span id="vt-count">0</span> {{ tr('行已勾选', 'line(s) selected') }}</div>
+        <div class="vt-section" style="margin-top:12px;">② {{ tr('录入第三方结果（勾选的行需已有 job number）', 'Third-party result (ticked lines need a job number)') }}</div>
+        <div class="vt-form">
+          <div><label>{{ tr('检验结果', 'Result') }}</label>
+            <select name="result"><option value="">—</option>
+              {% for key, label in results.items() %}<option value="{{ key }}">{{ tr(label[0], label[1]) }}</option>{% endfor %}
+            </select></div>
+          <div><label>{{ tr('发现的问题 / 说明', 'Findings / note') }}</label><input type="text" name="result_note" maxlength="500"></div>
+          <div><label>{{ tr('报告 / 视频（可多选）', 'Report / video (several allowed)') }}</label>
+            <input type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.mp4,.mov,.avi,.mkv"></div>
+          <div><button class="btn btn-primary btn-sm" type="submit" formaction="{{ url_for('vtrust_result') }}">{{ tr('保存结果到勾选的行', 'Save result to selected lines') }}</button></div>
+        </div>
+        <div class="vt-note" style="margin-top:6px;"><span id="vt-count">0</span> {{ tr('行已勾选', 'line(s) selected') }} ·
+          {{ tr('文件按 job number 保存，同一个 job 的所有行都能看到。', 'Files are kept per job number and shown on all its lines.') }}</div>
       </div>
 
       <div style="overflow-x:auto;">
@@ -72,7 +90,13 @@
             <td>{{ l.qty }}</td>
             <td>{{ l.supplier or '—' }}</td>
             <td style="white-space:nowrap;">{{ l.est_text or '—' }}{% if l.days is not none %}<br><span style="color:{{ '#b91c1c' if l.days < 0 else '#6b7280' }};font-size:.75rem;">{{ tr('还有 %d 天' % l.days, 'in %d d' % l.days) if l.days >= 0 else tr('已过 %d 天' % -l.days, '%d d past' % -l.days) }}</span>{% endif %}</td>
-            <td style="white-space:nowrap;font-weight:600;">{{ b.job_number if b else '' }}{% if b and b.note %}<div style="font-weight:400;color:#6b7280;font-size:.75rem;white-space:normal;">{{ b.note }}</div>{% endif %}</td>
+            <td style="font-weight:600;">{{ b.job_number if b else '' }}{% if b and b.note %}<div style="font-weight:400;color:#6b7280;font-size:.75rem;">{{ b.note }}</div>{% endif %}
+              {% if b and b.result %}<div class="vt-result" style="font-weight:600;color:{{ '#059669' if b.result == 'Pass' else '#dc2626' }};">
+                {{ tr(results[b.result][0], results[b.result][1]) }}{% if b.result_note %} <span style="font-weight:400;color:#374151;">— {{ b.result_note }}</span>{% endif %}
+                <span style="font-weight:400;color:#9ca3af;">· {{ b.result_by }} · {{ b.result_at[:10] }}</span></div>{% endif %}
+              {% if b %}{% for f in b.files %}<div class="vt-file"><a href="{{ url_for('vtrust_file', fid=f.id) }}" target="_blank">&#128206; {{ f.original_name }}</a>
+                <button type="submit" formaction="{{ url_for('vtrust_file_delete', fid=f.id) }}" title="{{ tr('删除文件', 'Delete file') }}"
+                        onclick="return confirm({{ tr('删除这个文件？', 'Delete this file?')|tojson }});">&#10005;</button></div>{% endfor %}{% endif %}</td>
             <td style="white-space:nowrap;">{{ window_text(b) if b else '' }}{% if b %}<div style="color:#9ca3af;font-size:.72rem;">{{ tr('预约于', 'Booked') }} {{ b.booked_at[:10] }} · {{ b.booked_by }}</div>{% endif %}</td>
           </tr>
         {% else %}

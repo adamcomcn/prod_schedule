@@ -660,6 +660,14 @@ input[name=result] { display:none; }
           · {{ tr('检验时间', 'Inspection') }}: <strong>{{ vtrust_booking.window_start or '—' }}{% if vtrust_booking.window_end and vtrust_booking.window_end != vtrust_booking.window_start %} ~ {{ vtrust_booking.window_end }}{% endif %}</strong>
           {% if vtrust_booking.note %}· {{ vtrust_booking.note }}{% endif %}
         </div>
+        {% if vtrust_booking.result %}
+        <div style="font-size:.85rem; margin-top:4px;">{{ tr('第三方结果', 'Third-party result') }}:
+          <strong style="color:{{ '#059669' if vtrust_booking.result == 'Pass' else '#dc2626' }};">{{ vtrust_booking.result|status_label }}</strong>
+          {% if vtrust_booking.result_note %}— {{ vtrust_booking.result_note }}{% endif %}</div>
+        {% endif %}
+        {% for f in vtrust_booking.files %}
+        <div style="font-size:.8rem;"><a href="{{ url_for('vtrust_file', fid=f.id) }}" target="_blank">&#128206; {{ f.original_name }}</a></div>
+        {% endfor %}
       </div>
       {% endif %}
 

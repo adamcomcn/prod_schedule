@@ -35,7 +35,7 @@ def schedule(a_est='2026/10/19 ready to ship', b_est='2026/10/16'):
         ['DPL6', 'PO-6', 'XM', 'ES0300', 'Extension Spindle', '8', '2026/10/12']]}              # not a valve
 
 
-class VtrustBookingTests(unittest.TestCase):
+class VtrustBase(unittest.TestCase):
     def setUp(self):
         app.app.config.update(TESTING=True)
         with db_conn() as conn:
@@ -81,6 +81,8 @@ class VtrustBookingTests(unittest.TestCase):
     def line(self, key):
         return next(l for l in app.vtrust_lines() if l['job_key'] == key)
 
+
+class VtrustBookingTests(VtrustBase):
     def test_statuses(self):
         self.assertEqual(self.statuses(), {'RSV020016FLFL': 'to_book', 'RSV030016FLFL': 'to_book',
                                            'RSVSO100ACC': 'later', 'RSV0080': 'overdue', 'RSV0100': 'no_date',
@@ -207,6 +209,63 @@ class VtrustBookingTests(unittest.TestCase):
         with mock.patch('pdf_report.build_inspection_pdf', return_value=b'%PDF') as build:
             app.build_report_pdf(A, 0)
         self.assertEqual(build.call_args[0][0]['V-Trust Job'], 'VT-OLD')
+
+
+class VtrustResultTests(VtrustBase):
+    """Third-party results and files on the V-Trust page."""
+
+    def result(self, keys, result='Pass', note='', files=(), client=None):
+        import io
+        data = {'_csrf_token': 'tok', 'job_key': keys, 'result': result, 'result_note': note,
+                'files': [(io.BytesIO(content), name) for name, content in files]}
+        return (client or self.client()).post('/vtrust/result', data=data, content_type='multipart/form-data')
+
+    def test_record_result_and_files(self):
+        self.book([A, B], start='2026-10-07', end='2026-10-07')            # inspected, result to enter
+        self.assertEqual(self.line(A)['status'], 'inspected')
+        self.assertIn('RSV020016FLFL', self.client().get('/vtrust').get_data(as_text=True))  # in "open"
+        r = self.result([A], 'Pass', 'OK', files=[('VT report.pdf', b'%PDF-1'), ('test.mp4', b'video')])
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(self.line(A)['status'], 'done')
+        b = app.vtrust_bookings()
+        self.assertEqual((b[A]['result'], b[A]['result_note'], b[A]['result_by']), ('Pass', 'OK', 'boss'))
+        self.assertEqual([f['original_name'] for f in b[B]['files']], ['VT report.pdf', 'test.mp4'])   # same job
+        self.assertEqual(b[B]['result'], '')
+        self.result([B], 'Fail', '保压时泄漏')
+        self.assertEqual(self.line(B)['status'], 'failed')
+        page = self.client().get('/vtrust').get_data(as_text=True)
+        self.assertIn('保压时泄漏', page)
+        fid = b[A]['files'][0]['id']
+        self.assertEqual(self.client('murphy').get(f'/vtrust/files/{fid}').get_data(), b'%PDF-1')  # anyone signed in
+        with mock.patch.object(app, 'find_job', return_value={'job_key': A, 'Item Code': 'RSV020016FLFL',
+                                                             'Item Description': 'DN200 Gate Valve'}):
+            insp = self.client('murphy').get(f'/inspect/{A}').get_data(as_text=True)
+        self.assertIn('VT report.pdf', insp)
+        self.assertIn('第三方结果', insp)
+        self.assertEqual(self.client('murphy').post(f'/vtrust/files/{fid}/delete', data={'_csrf_token': 'tok'}).status_code, 403)
+        self.client().post(f'/vtrust/files/{fid}/delete', data={'_csrf_token': 'tok'})
+        self.assertEqual([f['original_name'] for f in app.vtrust_bookings()[A]['files']], ['test.mp4'])
+        self.assertEqual(self.client().get(f'/vtrust/files/{fid}').status_code, 404)
+
+    def test_checks(self):
+        self.result([A], 'Pass')                                            # no booking yet
+        self.assertEqual(app.vtrust_bookings(), {})
+        self.book([A])
+        self.result([A], '', files=[('virus.exe', b'x')])                   # bad type
+        self.assertEqual(app.vtrust_bookings()[A]['files'], [])
+        self.result([A], '')                                                # nothing to save
+        self.assertEqual(app.vtrust_bookings()[A]['result'], '')
+        self.assertEqual(self.result([A], 'Pass', client=self.client('murphy')).status_code, 403)
+
+    def test_one_file_for_lines_of_different_jobs(self):
+        self.book([A], job='JOB-1')
+        self.book([B], job='JOB-2')
+        self.result([A, B], '', files=[('shared.pdf', b'%PDF')])
+        b = app.vtrust_bookings()
+        fa, fb = b[A]['files'][0], b[B]['files'][0]
+        self.assertNotEqual(fa['id'], fb['id'])
+        self.client().post(f"/vtrust/files/{fa['id']}/delete", data={'_csrf_token': 'tok'})
+        self.assertEqual(self.client().get(f"/vtrust/files/{fb['id']}").get_data(), b'%PDF')     # still there
 
 
 class OldBookingMigrationTests(unittest.TestCase):

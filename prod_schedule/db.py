@@ -963,6 +963,20 @@ def init_db():
             conn.execute("ALTER TABLE vtrust_bookings ADD COLUMN window_end TEXT DEFAULT ''")
             conn.execute("UPDATE vtrust_bookings SET window_start=planned_date, window_end=planned_date, "
                          "reschedule_alert=''")
+        # Result of the third-party V-Trust inspection, entered by an admin
+        if 'result' not in booking_cols:
+            for col in ('result', 'result_note', 'result_by', 'result_at'):
+                conn.execute(f"ALTER TABLE vtrust_bookings ADD COLUMN {col} TEXT DEFAULT ''")
+        # The third party's report / video files, per V-Trust job number
+        conn.execute('''CREATE TABLE IF NOT EXISTS vtrust_files (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_number    TEXT NOT NULL,
+            original_name TEXT DEFAULT '',
+            saved_name    TEXT DEFAULT '',
+            file_path     TEXT DEFAULT '',
+            uploaded_by   TEXT DEFAULT '',
+            uploaded_at   TEXT DEFAULT (datetime('now'))
+        )''')
 
         # Sign-in history shown to admins: login / failed / blocked / logout
         conn.execute('''CREATE TABLE IF NOT EXISTS login_events (

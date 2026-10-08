@@ -81,7 +81,7 @@ ADMIN_ENDPOINTS = {
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
     'settings_purchasing_send', 'export_purchasing_excel', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
-    'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'report_kpi_exclusion', 'schedule_est_edit',
+    'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'report_kpi_exclusion', 'schedule_est_edit',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -5074,14 +5074,22 @@ def _qty_sum(a, b):
 VTRUST_STATUS = {
     'reschedule': ('需改期', 'Reschedule'), 'to_book': ('待预约', 'To book'), 'booked': ('已预约', 'Booked'),
     'later': ('以后再约', 'Later'), 'overdue': ('已过完成日', 'Past due'), 'no_date': ('无完成日', 'No date'),
-    'inspected': ('已检验', 'Inspected'), 'done': ('已完成', 'Done'),
+    'inspected': ('已检验 · 待录结果', 'Inspected · result to enter'), 'failed': ('不合格', 'Failed'),
+    'done': ('已完成', 'Done'),
 }
+VTRUST_RESULTS = {'Pass': ('合格', 'Pass'), 'Fail': ('不合格', 'Fail'), 'Partial Pass': ('部分合格', 'Partial pass')}
+VTRUST_FILE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.xls', '.mp4', '.mov', '.avi', '.mkv'}
 
 
 def vtrust_bookings():
-    """{job_key: booking row} — V-Trust job numbers entered by admins."""
+    """{job_key: booking row} — V-Trust job numbers entered by admins; each
+    row also carries 'files': the third party's files for its job number."""
     with db_conn() as conn:
-        return {r['job_key']: dict(r) for r in conn.execute('SELECT * FROM vtrust_bookings')}
+        files = defaultdict(list)
+        for f in conn.execute('SELECT id, job_number, original_name, uploaded_by, uploaded_at FROM vtrust_files ORDER BY id'):
+            files[f['job_number']].append(dict(f))
+        return {r['job_key']: dict(r, files=files.get(r['job_number'], []))
+                for r in conn.execute('SELECT * FROM vtrust_bookings')}
 
 
 def booking_window(booking):
@@ -5166,6 +5174,8 @@ def vtrust_lines(lead_days=None):
         line['late_by'] = line['gap'] if booking and vtrust_too_early(booking, line['est'], lead, today) else 0
         if get_vtrust_status(inspections.get(line['job_key'], [])).lower() == 'pass':
             line['status'] = 'done'
+        elif booking and booking.get('result'):
+            line['status'] = 'done' if booking['result'] == 'Pass' else 'failed'
         elif booking and end and end < today:
             line['status'] = 'inspected'
         elif booking:
@@ -5393,14 +5403,15 @@ def vtrust_page():
     counts = Counter(l['status'] for l in lines)
     order = list(VTRUST_STATUS)
     if show == 'open':
-        shown = [l for l in lines if l['status'] in ('reschedule', 'to_book', 'booked', 'overdue')]
+        shown = [l for l in lines if l['status'] in ('reschedule', 'failed', 'to_book', 'inspected', 'booked',
+                                                    'overdue')]
     elif show in VTRUST_STATUS:
         shown = [l for l in lines if l['status'] == show]
     else:
         shown = lines
     shown.sort(key=lambda l: (order.index(l['status']), l['est'] or date.max, l['dpl'], l['code']))
     return render_template('vtrust.html', lines=shown, counts=counts, show=show, lead=lead,
-                           window_text=booking_window_text,
+                           window_text=booking_window_text, results=VTRUST_RESULTS,
                            statuses=VTRUST_STATUS, past_days=VTRUST_PAST_DAYS, today=china_today().isoformat())
 
 
@@ -5435,6 +5446,78 @@ def vtrust_book():
                      g.get('username', '')))
         flash(tr(f'已为 {len(keys)} 行录入 V-Trust job {job_number}', f'V-Trust job {job_number} saved for {len(keys)} line(s)'),
               'success')
+    return redirect(url_for('vtrust_page', show=request.form.get('show', 'open')))
+
+
+@app.route('/vtrust/result', methods=['POST'])
+def vtrust_result():
+    """Admin records the third party's V-Trust result for the ticked lines and
+    uploads their report / video files (kept per V-Trust job number)."""
+    keys = request.form.getlist('job_key')
+    result = request.form.get('result', '')
+    note = ' '.join(request.form.get('result_note', '').split())[:500]
+    uploads = [f for f in request.files.getlist('files') if f and f.filename]
+    back = redirect(url_for('vtrust_page', show=request.form.get('show', 'open')))
+    bookings = vtrust_bookings()
+    booked = [k for k in keys if k in bookings]
+    if not keys:
+        flash(tr('请先勾选阀门', 'Select at least one valve line'), 'error')
+        return back
+    if not booked:
+        flash(tr('勾选的行还没有 V-Trust job number，请先录入预约', 'The selected lines have no V-Trust job number yet'), 'error')
+        return back
+    if result not in VTRUST_RESULTS and not uploads:
+        flash(tr('请选择检验结果或上传文件', 'Choose a result or add files'), 'error')
+        return back
+    bad = [f.filename for f in uploads if _upload_extension(f.filename) not in VTRUST_FILE_EXTENSIONS]
+    if bad:
+        flash(tr('不支持的文件类型：', 'Unsupported file type: ') + ', '.join(bad), 'error')
+        return back
+    job_numbers = sorted({bookings[k]['job_number'] for k in booked})
+    with db_conn() as conn:
+        if result in VTRUST_RESULTS:
+            for key in booked:
+                conn.execute("UPDATE vtrust_bookings SET result=?, result_note=?, result_by=?, result_at=datetime('now') "
+                             'WHERE job_key=?', (result, note, g.get('username', ''), key))
+        for upload in uploads:
+            first = None
+            for number in job_numbers:
+                folder = os.path.join(UPLOAD_DIR, 'vtrust', hashlib.sha256(number.encode('utf-8')).hexdigest()[:16])
+                if first is None:
+                    original, saved = _save_uploaded_file(upload, folder, VTRUST_FILE_EXTENSIONS)
+                    first = (original, saved, os.path.join(folder, saved))
+                conn.execute('INSERT INTO vtrust_files (job_number, original_name, saved_name, file_path, uploaded_by) '
+                             'VALUES (?,?,?,?,?)', (number, first[0], first[1], first[2], g.get('username', '')))
+    skipped = len(keys) - len(booked)
+    flash(tr(f'已保存 {len(booked)} 行的 V-Trust 结果' + (f'，上传 {len(uploads)} 个文件' if uploads else '')
+             + (f'（{skipped} 行没有 job number，已跳过）' if skipped else ''),
+             f'V-Trust result saved for {len(booked)} line(s)' + (f', {len(uploads)} file(s) uploaded' if uploads else '')
+             + (f' ({skipped} line(s) without a job number skipped)' if skipped else '')), 'success')
+    return back
+
+
+@app.route('/vtrust/files/<int:fid>')
+def vtrust_file(fid):
+    """A third-party V-Trust file; anyone signed in may open it."""
+    with db_conn() as conn:
+        row = conn.execute('SELECT * FROM vtrust_files WHERE id=?', (fid,)).fetchone()
+    if not row or not os.path.exists(row['file_path']):
+        abort(404)
+    return send_from_directory(os.path.dirname(row['file_path']), os.path.basename(row['file_path']),
+                               download_name=row['original_name'])
+
+
+@app.route('/vtrust/files/<int:fid>/delete', methods=['POST'])
+def vtrust_file_delete(fid):
+    with db_conn() as conn:
+        row = conn.execute('SELECT * FROM vtrust_files WHERE id=?', (fid,)).fetchone()
+        if not row:
+            abort(404)
+        conn.execute('DELETE FROM vtrust_files WHERE id=?', (fid,))
+        still_used = conn.execute('SELECT 1 FROM vtrust_files WHERE file_path=?', (row['file_path'],)).fetchone()
+    if not still_used:
+        _remove_quietly(row['file_path'])
+    flash(tr(f'已删除文件 {row["original_name"]}', f'File {row["original_name"]} deleted'), 'success')
     return redirect(url_for('vtrust_page', show=request.form.get('show', 'open')))
 
 
@@ -7813,7 +7896,7 @@ def user_update(uid):
 
 @app.before_request
 def _auth_check():
-    if request.endpoint == 'inspection_draft_upload' and session.get('user_id'):
+    if request.endpoint in ('inspection_draft_upload', 'vtrust_result') and session.get('user_id'):
         request.max_content_length = DRAFT_FILE_MAX_BYTES   # signed-in users only; set before the body is read
     if request.method == 'POST' and request.endpoint != 'cron_reminders':
         submitted = request.headers.get('X-CSRF-Token') or request.form.get('_csrf_token')
