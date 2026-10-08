@@ -1764,12 +1764,11 @@ def purchasing_workbook(changes, before_label, after_label):
         summary.column_dimensions[letter].width = 16
     summary.append(['Production Schedule Changes — for Purchasing'])
     summary['A1'].font = Font(bold=True, size=16, color='1A3A5C')
-    summary.append(['生产排期变化 — 采购用'])
     summary.append([])
     summary.append(['Previous schedule', before_label])
     summary.append(['New schedule', after_label])
-    summary.append(['Generated', dual_zone_time()])
-    for r in range(4, 7):
+    summary.append(['Generated', dual_zone_time().replace('北京', 'Beijing')])
+    for r in range(3, 6):
         summary.cell(r, 1).font = Font(bold=True)
     summary.append([])
     summary.append(['Change', 'Lines', 'Sheet'])
@@ -1799,12 +1798,11 @@ def purchasing_workbook(changes, before_label, after_label):
         for cell in row[1:]:
             cell.alignment = Alignment(horizontal='center')
     summary.append([])
-    for note in ('How to read · 说明',
-                 '• A line that is no longer in the new schedule has fully shipped. 新排期里消失的行 = 全部出货。',
-                 '• A lower quantity means part of the line has shipped. 数量减少 = 部分出货。',
-                 '• Days: + = later than before (delayed, red), − = earlier (green). 天数：+ 延后（红），− 提前（绿）。',
-                 '• A PO + item that moved to another region is listed under Region Moves, not as shipped. '
-                 '同一 PO + 产品转到其他地区的，列在 Region Moves，不算出货。'):
+    for note in ('How to read',
+                 '• A line that is no longer in the new schedule has fully shipped.',
+                 '• A lower quantity means part of the line has shipped.',
+                 '• Days: + = later than before (delayed, red), − = earlier (green).',
+                 '• A PO + item that moved to another region is listed under Region Moves, not as shipped.'):
         summary.append([note])
     summary.cell(summary.max_row - 4, 1).font = Font(bold=True)
     buf = io.BytesIO()
@@ -1847,14 +1845,14 @@ def send_purchasing_email(upload_id=None):
     fully = sum(1 for l in changes['shipped'] if l['type'] == 'Fully shipped')
     partly = len(changes['shipped']) - fully
     delayed = sum(1 for l in changes['date_changes'] if (l['est_days'] or 0) > 0)
-    lines = ['Production schedule changes for purchasing / 生产排期变化（采购用）', '',
+    lines = ['Production schedule changes for purchasing', '',
              f"New schedule: {_upload_label(upload)}", f"Previous schedule: {_upload_label(upload['previous'])}", '',
-             f'Fully shipped 全部出货: {fully}', f'Partially shipped 部分出货: {partly}',
-             f"Date changes 日期变化: {len(changes['date_changes'])} (delayed 延后 {delayed})",
-             f"New lines 新增: {len(changes['new'])}", f"Region moves 地区转移: {len(changes['moves'])}", '',
-             'Details in the attached Excel. 详见附件 Excel。']
+             f'Fully shipped: {fully}', f'Partially shipped: {partly}',
+             f"Date changes: {len(changes['date_changes'])} ({delayed} delayed)",
+             f"New lines: {len(changes['new'])}", f"Region moves: {len(changes['moves'])}", '',
+             'Details are in the attached Excel.']
     subject = (f"Schedule changes {(upload['applied_at'] or '')[:10]}: {fully + partly} shipped, "
-               f"{len(changes['date_changes'])} date changes / 排期变化")
+               f"{len(changes['date_changes'])} date changes")
     return _smtp_send(subject, '\n'.join(lines), recipients, attachments=[
         (filename, data, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')])
 

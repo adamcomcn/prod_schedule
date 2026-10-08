@@ -89,6 +89,7 @@ class PurchasingExportTests(unittest.TestCase):
         s = self.sheets(data)
         self.assertEqual(list(s), ['Summary', 'Shipped', 'Date Changes', 'New Lines', 'Region Moves'])
         flat = str(s)
+        self.assertFalse(any('一' <= ch <= '鿿' for ch in flat), 'English only')
         self.assertNotIn('99', flat.replace('2026', ''))          # unit price never exported
         self.assertNotIn('unit price', flat.lower())
         summary = s['Summary']
@@ -158,7 +159,8 @@ class PurchasingExportTests(unittest.TestCase):
         (subject, body, to), kw = sent[0]
         self.assertEqual(to, ['buy@example.com'])
         self.assertIn('2 shipped, 3 date changes', subject)
-        self.assertIn('Fully shipped 全部出货: 1', body)
+        self.assertIn('Fully shipped: 1', body)
+        self.assertFalse(any('一' <= ch <= '鿿' for ch in subject + body))   # English only
         self.assertTrue(kw['attachments'][0][0].endswith('.xlsx'))
         self.assertEqual(self.client('hq1').post('/settings/purchasing-send', data={'_csrf_token': 'tok'}).status_code, 403)
 
