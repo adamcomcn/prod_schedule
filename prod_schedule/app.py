@@ -80,7 +80,7 @@ ADMIN_ENDPOINTS = {
     'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
-    'settings_purchasing_send', 'export_purchasing_excel',
+    'settings_purchasing_send', 'export_purchasing_excel', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -1857,18 +1857,6 @@ def send_purchasing_email(upload_id=None):
         (filename, data, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')])
 
 
-def _send_purchasing_email_in_background():
-    def work():
-        try:
-            ok, msg = send_purchasing_email()
-            if not ok:
-                logger.info('Purchasing e-mail not sent: %s', msg)
-        except Exception:
-            logger.exception('Purchasing e-mail failed')
-    import threading
-    threading.Thread(target=work, daemon=True).start()
-
-
 @app.route('/settings/purchasing-send', methods=['POST'])
 def settings_purchasing_send():
     ok, msg = send_purchasing_email()
@@ -2469,9 +2457,9 @@ def upload_confirm():
         return redirect(url_for('index'))
     if os.path.exists(PENDING_UPLOAD_FILE):
         os.remove(PENDING_UPLOAD_FILE)
-    # a baseline re-sync compares with stale data: no purchasing e-mail then
-    if not baseline and not app.config.get('TESTING') and load_config().get('purchasing_emails'):
-        _send_purchasing_email_in_background()
+    # a baseline re-sync compares with stale data: no follow-up e-mails then
+    if not baseline and not app.config.get('TESTING'):
+        _after_upload_emails_in_background(request.host_url)
     return redirect(url_for('index'))
 
 
@@ -3875,6 +3863,7 @@ def settings():
         config['weekly_summary'] = request.form.get('weekly_summary') == '1'
         config['vtrust_notify_emails'] = ', '.join(_email_list(request.form.get('vtrust_notify_emails', '')))
         config['purchasing_emails'] = ', '.join(_email_list(request.form.get('purchasing_emails', '')))
+        config['qa_mismatch_emails'] = ', '.join(_email_list(request.form.get('qa_mismatch_emails', '')))
         lead = request.form.get('vtrust_lead_days', type=int)
         config['vtrust_lead_days'] = lead if lead and 1 <= lead <= 90 else VTRUST_LEAD_DAYS
         if 'schedule_hidden_columns' in request.form:
@@ -5078,6 +5067,165 @@ def settings_vtrust_preview():
 @app.route('/settings/vtrust-send', methods=['POST'])
 def settings_vtrust_send():
     count, msg = send_vtrust_reminders(force=True)
+    flash(msg, 'success' if count else 'error')
+    return redirect(url_for('settings') + '#email')
+
+
+# ── QA BRT mismatch: Excel says sent, the platform has no report ─────────────
+# Same rule as the orange "Excel 已标 YES，系统无报告" badge on the schedule page
+# (qa_excel_mismatch). After each weekly upload the supplier and the lead
+# inspector get the list so they either submit the report or correct the Excel.
+
+def qa_brt_mismatches():
+    """Lines of the current schedule, plus the lines that shipped with this
+    upload, whose 'QA BRTs Sent?' cell is YES while no report exists."""
+    current, previous = load_schedule(CURRENT_FILE), load_schedule(PREVIOUS_FILE)
+    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
+    statuses, _, shipped_rows = compute_changes(previous, current) if current and previous else ({}, [], {})
+    labels = {'new': 'New 新增', 'not_shipped': 'Not shipped 未出货', 'partially_shipped': 'Partially shipped 部分出货',
+              'typo': 'New 新增', 'moved_in': 'Moved in 转入', 'partially_moved': 'Part moved 部分转出'}
+    lines, seen = [], set()
+    sources = [('active', sheet, rows[0], rows[1:]) for sheet, rows in current.items() if rows]
+    sources += [('shipped', sheet, (current.get(sheet) or previous.get(sheet) or [[]])[0], rows)
+                for sheet, rows in shipped_rows.items()]
+    for kind, sheet, headers, rows in sources:
+        low = [str(h).strip().lower() for h in headers]
+        for row in rows:
+            key = make_job_key(sheet, row, headers)
+            if not key.split('|')[1] or key in seen:
+                continue
+            if not qa_excel_mismatch(row, headers, inspections.get(key, [])):
+                continue
+            seen.add(key)
+            detail = _row_details(sheet, row, headers)
+            supplier = next((str(row[low.index(n)]).strip() for n in ('supplier', 'foundry')
+                             if n in low and low.index(n) < len(row) and row[low.index(n)] is not None), '')
+            lines.append(dict(detail, key=key, supplier=supplier,
+                              state='Shipped 已出货' if kind == 'shipped' else labels.get(statuses.get(key), 'In schedule 在排期中')))
+    return sorted(lines, key=lambda l: (l['state'] != 'Shipped 已出货', l['sheet'], l['order_number'], l['item_code']))
+
+
+def qa_mismatch_recipients():
+    """'QA BRT mismatch e-mails' from Settings (the supplier) + every active lead inspector with an e-mail."""
+    configured = _email_list(load_config().get('qa_mismatch_emails', ''))
+    with db_conn() as conn:
+        leads = [r['email'] for r in conn.execute(
+            "SELECT email FROM users WHERE role='lead' AND active=1 AND IFNULL(email, '') != ''")]
+    return _email_list(', '.join(configured + leads))
+
+
+def qa_mismatch_email(lines):
+    """(subject, plain text, html, xlsx bytes) for the mismatch list."""
+    today = china_today().isoformat()
+    subject = (f'【QA BRT 不符】{len(lines)} 行 Excel 标 YES 但系统无检验报告 / '
+               f'{len(lines)} line(s): QA BRT marked sent, no report in the system')
+    intro = ['以下订单行在排期 Excel 的 "QA BRTs Sent?" 一列标为 YES，但质检平台里没有对应的检验报告。请核对并处理：',
+             '1. 如果已经检验：请检验员在平台提交检验报告（打开下面的链接）。',
+             '2. 如果还没有检验：请把 Excel 里这一行改为 NO，下次上传排期时更新。',
+             'In the schedule Excel these lines say "QA BRTs Sent? = YES", but the QC platform has no '
+             'inspection report for them. If inspected, please submit the report; if not, please change the Excel to NO.']
+    text = [f'QA BRT 不符提醒 QA BRT mismatch — {today}', *intro, '']
+    for i, l in enumerate(lines, 1):
+        text.append(f"{i}. [{l['sheet']}] {l['order_number']}  {l['po']}  {l['item_code']}  {l['description']}"
+                    f"  QTY {l['quantity']}  · {l['state']}")
+        text.append('    ' + url_for('inspect_form', job_key=l['key'], _external=True))
+
+    cell = 'border:1px solid #d0d5dd;padding:6px 10px;font-size:13px;'
+    head = cell + 'background:#1a3a5c;color:#fff;font-weight:700;text-align:center;'
+    headers = ('Region 区域', 'DPL', 'PO', 'Supplier 供应商', 'Item Code 编码', 'Description 描述', 'QTY',
+               'Status 状态', 'Report 报告')
+    head_row = ''.join(f'<th style="{head}">{_escape(h)}</th>' for h in headers)
+    body_rows = []
+    for l in lines:
+        link = url_for('inspect_form', job_key=l['key'], _external=True)
+        values = [(l['sheet'], 'text-align:center;'), (l['order_number'], 'text-align:center;'),
+                  (l['po'], 'text-align:center;'), (l['supplier'], 'text-align:center;'), (l['item_code'], ''),
+                  (l['description'], ''), (l['quantity'], 'text-align:center;'), (l['state'], 'text-align:center;')]
+        body_rows.append('<tr>' + ''.join(f'<td style="{cell}{extra}">{_escape(v)}</td>' for v, extra in values)
+                         + f'<td style="{cell}text-align:center;"><a href="{_escape(link)}">提交 / Submit</a></td></tr>')
+    font = "Arial,'Microsoft YaHei',sans-serif"
+    html = (f'<div style="font-family:{font};color:#1a1a2e;">'
+            f'<p style="font-size:14px;margin:0 0 6px;"><b>QA BRT 不符提醒 / QA BRT mismatch — {today}</b></p>'
+            + ''.join(f'<p style="font-size:13px;margin:0 0 3px;">{_escape(t)}</p>' for t in intro)
+            + f'<table style="border-collapse:collapse;margin-top:10px;"><tr>{head_row}</tr>'
+            + ''.join(body_rows) + '</table>'
+            + '<p style="font-size:12px;color:#6b7280;margin-top:12px;">附件为同样内容的 Excel。 '
+              'The attached Excel has the same list.</p></div>')
+
+    from openpyxl.styles import Alignment, Font, PatternFill
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'QA BRT mismatch'
+    ws.append(['Region', 'DPL', 'Daemco PO', 'Supplier', 'Item Code', 'Description', 'QTY',
+               'Estimated Completion', 'Status', 'Excel QA BRTs Sent?', 'Report in system'])
+    for l in lines:
+        ws.append([_xl_safe(v) for v in (l['sheet'], l['order_number'], l['po'], l['supplier'], l['item_code'],
+                                         l['description'], l['quantity'], l['est_completion'], l['state'],
+                                         'YES', 'NO')])
+    for c in ws[1]:
+        c.font = Font(bold=True, color='FFFFFF')
+        c.fill = PatternFill('solid', fgColor='1A3A5C')
+        c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    for letter, width in zip('ABCDEFGHIJK', (13, 10, 12, 10, 18, 46, 8, 20, 22, 12, 12)):
+        ws.column_dimensions[letter].width = width
+    ws.freeze_panes = 'A2'
+    buf = io.BytesIO()
+    wb.save(buf)
+    return subject, '\n'.join(text), html, buf.getvalue()
+
+
+def send_qa_mismatch_email():
+    """E-mail the mismatch list to the supplier + lead. Returns (count, message)."""
+    lines = qa_brt_mismatches()
+    if not lines:
+        return 0, tr('没有 QA BRT 不符的行', 'No QA BRT mismatches')
+    recipients = qa_mismatch_recipients()
+    if not recipients:
+        return 0, tr('未设置 QA BRT 不符提醒邮箱，检验主管账号也没有邮箱',
+                     'No QA BRT mismatch e-mail and no lead inspector e-mail')
+    subject, text, html, xlsx = qa_mismatch_email(lines)
+    ok, msg = _smtp_send(subject, text, recipients, html=html, attachments=[
+        (f'QA BRT mismatch {china_today().isoformat()}.xlsx', xlsx,
+         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')])
+    return (len(lines) if ok else 0), msg
+
+
+def _after_upload_emails_in_background(host_url):
+    """Purchasing comparison + QA BRT mismatch e-mails after a weekly upload."""
+    def work():
+        with app.test_request_context(base_url=host_url):
+            for name, job in (('Purchasing', send_purchasing_email), ('QA BRT mismatch', send_qa_mismatch_email)):
+                try:
+                    result = job()
+                    if not result[0]:
+                        logger.info('%s e-mail not sent: %s', name, result[1])
+                except Exception:
+                    logger.exception('%s e-mail failed', name)
+    import threading
+    threading.Thread(target=work, daemon=True).start()
+
+
+@app.route('/settings/qa-mismatch-preview')
+def settings_qa_mismatch_preview():
+    """The QA BRT mismatch e-mail as it would look now (nothing is sent)."""
+    lines = qa_brt_mismatches()
+    if request.args.get('format') == 'xlsx':
+        return send_file(io.BytesIO(qa_mismatch_email(lines)[3]), as_attachment=True,
+                         download_name=f'QA BRT mismatch {china_today().isoformat()}.xlsx')
+    note = (f'<div style="font-family:Arial,sans-serif;font-size:13px;background:#fffbeb;border:1px solid #fcd34d;'
+            f'padding:8px 12px;margin-bottom:14px;">预览，未发送 / Preview only — nothing was sent. '
+            f'收件人 Recipients: {_escape(", ".join(qa_mismatch_recipients()) or "—")} · '
+            f'共 {len(lines)} 行 / {len(lines)} line(s) · <a href="?format=xlsx">Excel</a> · '
+            f'<a href="{url_for("settings")}#email">返回设置 / Back</a></div>')
+    if not lines:
+        return note + f'<p style="font-family:Arial,sans-serif;">{tr("目前没有 QA BRT 不符的行。", "No QA BRT mismatches right now.")}</p>'
+    subject, _text, html, _xlsx = qa_mismatch_email(lines)
+    return note + f'<p style="font-family:Arial,sans-serif;font-size:13px;"><b>{_escape(subject)}</b></p>' + html
+
+
+@app.route('/settings/qa-mismatch-send', methods=['POST'])
+def settings_qa_mismatch_send():
+    count, msg = send_qa_mismatch_email()
     flash(msg, 'success' if count else 'error')
     return redirect(url_for('settings') + '#email')
 
