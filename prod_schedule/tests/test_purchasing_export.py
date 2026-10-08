@@ -84,8 +84,9 @@ class PurchasingExportTests(unittest.TestCase):
                          [('DFC30PF', 'MELBOURNE 36', 'FIJI 36')])
 
     def test_workbook_is_readable_and_has_no_prices(self):
-        data, filename, _ch, upload = app.purchasing_export()
-        self.assertEqual(filename, 'schedule-changes-for-purchasing-2026-10-08.xlsx')
+        with mock.patch.object(app, 'china_today', return_value=__import__('datetime').date(2026, 10, 9)):
+            data, filename, _ch, upload = app.purchasing_export()
+        self.assertEqual(filename, 'Comparison Sheet 2026-10-09.xlsx')            # export day, not upload day
         s = self.sheets(data)
         self.assertEqual(list(s), ['Summary', 'Shipped', 'Date Changes', 'New Lines', 'Region Moves'])
         flat = str(s)
@@ -117,10 +118,10 @@ class PurchasingExportTests(unittest.TestCase):
         app.save_json(app.CURRENT_FILE, AFTER)                                   # nothing changed on 15.10
         uploads = app.schedule_upload_history()
         self.assertEqual([u['id'] for u in uploads], ['20261015-080000-000000', '20261008-080000-000000'])
-        _data, name, latest, _u = app.purchasing_export()
-        self.assertEqual((name[-15:], latest['shipped'], latest['date_changes']), ('2026-10-15.xlsx', [], []))
-        _data, name, earlier, upload = app.purchasing_export('20261008-080000-000000')
-        self.assertEqual(name[-15:], '2026-10-08.xlsx')
+        _data, _name, latest, upload = app.purchasing_export()
+        self.assertEqual((upload['id'], latest['shipped'], latest['date_changes']), ('20261015-080000-000000', [], []))
+        _data, _name, earlier, upload = app.purchasing_export('20261008-080000-000000')
+        self.assertEqual(upload['id'], '20261008-080000-000000')
         self.assertEqual(len(earlier['shipped']), 2)
         self.assertEqual(upload['previous']['filename'], 'Production Schedule 01.10.xlsx')
 
@@ -138,7 +139,7 @@ class PurchasingExportTests(unittest.TestCase):
     def test_download_permissions_and_e_mail(self):
         r = self.client('boss').get('/export/purchasing.xlsx')
         self.assertEqual(r.status_code, 200)
-        self.assertIn('schedule-changes-for-purchasing', r.headers['Content-Disposition'])
+        self.assertRegex(r.headers['Content-Disposition'], r'filename="Comparison Sheet \d{4}-\d{2}-\d{2}\.xlsx"')
         for other in ('hq1', 'yu'):                                  # admin only
             self.assertEqual(self.client(other).get('/export/purchasing.xlsx').status_code, 403)
             self.assertNotIn('/export/purchasing.xlsx', self.client(other).get('/').get_data(as_text=True))

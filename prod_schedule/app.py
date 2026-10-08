@@ -1818,8 +1818,8 @@ def purchasing_export(upload_id=None):
         return None
     changes = purchasing_changes(load_schedule(upload['before']), load_schedule(upload['after']))
     data = purchasing_workbook(changes, _upload_label(upload['previous']), _upload_label(upload))
-    day = (upload['applied_at'] or upload['id'])[:10]
-    return data, f'schedule-changes-for-purchasing-{day}.xlsx', changes, upload
+    # named by the day it is exported (China date, like other business dates)
+    return data, f'Comparison Sheet {china_today().isoformat()}.xlsx', changes, upload
 
 
 @app.route('/export/purchasing.xlsx')
