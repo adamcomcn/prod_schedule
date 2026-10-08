@@ -118,6 +118,16 @@
           </div>
 
           <div class="form-group">
+            <label>&#128666; {{ tr('采购邮箱（排期变化）', 'Purchasing e-mails (schedule changes)') }}</label>
+            <input type="text" name="purchasing_emails" value="{{ config.get('purchasing_emails', '') }}"
+                   placeholder="purchasing@example.com">
+            <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
+              {{ tr('每次确认上传新排期后，自动把“与上一次排期相比”的 Excel（已发货、日期变化、新增、地区转移，不含价格）发到这些邮箱。基准重新同步时不发送。留空则不发送。',
+                    'After each confirmed schedule upload, the "compared with the previous schedule" Excel (shipped, date changes, new lines, region moves; no prices) is e-mailed here. Not sent for a baseline re-sync. Leave empty to turn off.') }}
+            </div>
+          </div>
+
+          <div class="form-group">
             <label>&#128276; {{ tr('V-Trust 预约提醒邮箱', 'V-Trust booking reminder e-mails') }}</label>
             <div style="display:flex; gap:8px; align-items:center;">
               <input type="text" name="vtrust_notify_emails" value="{{ config.get('vtrust_notify_emails', '') }}"
@@ -158,6 +168,10 @@
       </form>
       <form method="POST" action="{{ url_for('settings_weekly_summary') }}" style="margin-top:8px;">
         <button type="submit" class="btn btn-outline btn-sm">&#128197; {{ tr('立即发送每周汇总', 'Send the weekly summary now') }}</button>
+      </form>
+      <form method="POST" action="{{ url_for('settings_purchasing_send') }}" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <a class="btn btn-outline btn-sm" href="{{ url_for('export_purchasing_excel') }}">&#11015; {{ tr('下载采购用排期变化 Excel', 'Download schedule changes for purchasing') }}</a>
+        <button type="submit" class="btn btn-outline btn-sm">&#128666; {{ tr('立即发给采购（最近一次上传）', 'E-mail purchasing now (latest upload)') }}</button>
       </form>
       <form method="POST" action="{{ url_for('settings_vtrust_send') }}" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
             onsubmit="return confirm({{ tr('把当前所有需要预约 V-Trust 的阀门发一封邮件？', 'E-mail the full current V-Trust list now?')|tojson }});">

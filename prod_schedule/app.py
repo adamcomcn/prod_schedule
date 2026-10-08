@@ -80,6 +80,7 @@ ADMIN_ENDPOINTS = {
     'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
+    'settings_purchasing_send',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -1526,6 +1527,358 @@ def _format_export_sheet(worksheet):
             45, max(12, max(len(str(cell.value or '')) for cell in column) + 2))
         worksheet.column_dimensions[column[0].column_letter].width = width
 
+# ── Schedule changes for purchasing ──────────────────────────────────────────
+# One upload compared with the one before it: what shipped (fully / partly),
+# which dates moved, new lines and region moves. Same rules as the upload
+# preview (compute_changes); laid out for the purchasing team, no prices.
+
+def _schedule_lines(data):
+    """{job_key: line} for a saved schedule; split lots of one PO + item are
+    added up and keep the first lot's dates."""
+    lines = {}
+    for sheet, rows in (data or {}).items():
+        if not rows or len(rows) < 2:
+            continue
+        headers = rows[0]
+        low = [str(h).strip().lower() for h in headers]
+        qi = _qty_index(headers)
+        for row in rows[1:]:
+            key = make_job_key(sheet, row, headers)
+            if not key.split('|')[1]:
+                continue
+
+            def col(*names):
+                for name in names:
+                    if name in low and low.index(name) < len(row) and row[low.index(name)] is not None:
+                        return str(row[low.index(name)]).strip()
+                return ''
+
+            qty = _parse_qty(row[qi]) if qi is not None and qi < len(row) else None
+            line = lines.get(key)
+            if line:
+                line['qty'] = None if line['qty'] is None or qty is None else line['qty'] + qty
+                continue
+            lines[key] = {'key': key, 'region': sheet, 'dpl': col('order number'),
+                          'po': col('daemco purchase order', 'purchase order'),
+                          'supplier': col('supplier', 'foundry'), 'item_code': col('item code'),
+                          'description': col('item description'), 'qty': qty,
+                          'est': col('estimated completion date'), 'must_ship': col('must ship date')}
+    return lines
+
+
+def _date_shift(old, new):
+    """(days, note) for a changed schedule date cell."""
+    (d1, n1), (d2, n2) = split_est(old), split_est(new)
+    if d1 and d2 and d1 != d2:
+        days = (d2 - d1).days
+        return days, (f'Delayed {days} d' if days > 0 else f'Earlier {-days} d')
+    if d1 and not d2:
+        return None, 'Date removed'
+    if d2 and not d1:
+        return None, 'Date added'
+    return None, 'Remark changed'
+
+
+def purchasing_changes(before, after):
+    """Changes between two saved schedules, as lists of rows for the export."""
+    moves_info = {}
+    statuses, typo_flags, _ = compute_changes(before, after, moves_out=moves_info)
+    moves = moves_info.get('moves', [])
+    old, new = _schedule_lines(before), _schedule_lines(after)
+    region_order = {s: i for i, s in enumerate(list(after) + [s for s in before if s not in after])}
+
+    def order(line):
+        return (region_order.get(line['region'], 99), line['dpl'], line['po'], line['item_code'])
+
+    moved_out = {k for m in moves if not m['also_shipped'] for k in m['gone_keys']}
+    shipped = [dict(line, type='Fully shipped', before=line['qty'], after=0, shipped=line['qty'])
+               for key, line in old.items() if key not in new and key not in moved_out]
+    for key, status in statuses.items():
+        if status == 'partially_shipped' and key in old and key in new:
+            b, a = old[key]['qty'], new[key]['qty']
+            shipped.append(dict(new[key], type='Partially shipped', before=b, after=a,
+                                shipped=(b - a) if b is not None and a is not None else None))
+    typo_of = {t['curr_key']: t for t in typo_flags}
+    new_lines = []
+    for key, status in statuses.items():
+        if status in ('new', 'typo') and key in new:
+            t = typo_of.get(key)
+            note = (f"Possible typo of {t['prev_order']} / {t['prev_item']} (that line left the schedule)"
+                    if t else '')
+            new_lines.append(dict(new[key], note=note))
+    date_changes = []
+    for key, n in new.items():
+        o = old.get(key)
+        if not o:
+            continue
+        est_moved, ship_moved = est_changed(o['est'], n['est']), est_changed(o['must_ship'], n['must_ship'])
+        if not est_moved and not ship_moved:
+            continue
+        est_days, est_note = _date_shift(o['est'], n['est']) if est_moved else (None, '')
+        ship_days, ship_note = _date_shift(o['must_ship'], n['must_ship']) if ship_moved else (None, '')
+        date_changes.append(dict(n, prev_est=o['est'], est_days=est_days, est_note=est_note,
+                                 prev_must_ship=o['must_ship'], ship_days=ship_days, ship_note=ship_note))
+    region_moves = []
+    for m in moves:
+        line = new.get(m['to_keys'][0]) or old.get((m['gone_keys'] or m['reduced_keys'] or [''])[0]) or {}
+        src = ', '.join(f"{f['sheet']} {_qty_text(f['before'])}" for f in m['from'])
+        dst = ', '.join(f"{t['sheet']} {_qty_text(t['qty'])}" for t in m['to'])
+        kept = ', '.join(f"{f['sheet']} {_qty_text(f['after'])}" for f in m['from'] if f['after'] is not None)
+        region_moves.append({'dpl': line.get('dpl', ''), 'po': m['po'], 'item_code': m['item'],
+                             'supplier': line.get('supplier', ''), 'description': line.get('description', ''),
+                             'from': src, 'to': dst, 'kept': kept,
+                             'note': 'Total went down: part of it also shipped' if m['also_shipped'] else ''})
+    return {'shipped': sorted(shipped, key=lambda l: (l['type'] != 'Fully shipped', order(l))),
+            'date_changes': sorted(date_changes, key=lambda l: (-(l['est_days'] if l['est_days'] is not None
+                                                                  else l['ship_days'] or -10 ** 6), order(l))),
+            'new': sorted(new_lines, key=order),
+            'moves': sorted(region_moves, key=lambda m: (m['po'], m['item_code'])),
+            'regions': list(region_order)}
+
+
+def schedule_upload_history():
+    """Applied uploads, newest first, each with the schedule before it
+    ('before') and the schedule it produced ('after': the next upload's
+    replaced schedule, or the current one for the latest upload)."""
+    if not os.path.isdir(HISTORY_DIR):
+        return []
+    folders = sorted(f for f in os.listdir(HISTORY_DIR)
+                     if os.path.isdir(os.path.join(HISTORY_DIR, f)) and re.fullmatch(r'[\d-]+', f))
+    uploads = []
+    for i, name in enumerate(folders):
+        folder = os.path.join(HISTORY_DIR, name)
+        meta = load_json(os.path.join(folder, 'meta.json'), {})
+        after = (os.path.join(HISTORY_DIR, folders[i + 1], 'replaced_schedule.json')
+                 if i + 1 < len(folders) else CURRENT_FILE)
+        uploads.append({'id': name, 'filename': meta.get('filename') or name,
+                        'applied_at': meta.get('applied_at', ''),
+                        'before': os.path.join(folder, 'replaced_schedule.json'), 'after': after})
+    for i, u in enumerate(uploads):
+        u['previous'] = uploads[i - 1] if i else None
+    return [u for u in reversed(uploads) if os.path.exists(u['before']) and os.path.exists(u['after'])]
+
+
+def _upload_label(upload):
+    if not upload:
+        return 'previous schedule'
+    return f"{upload['filename']} (applied {upload['applied_at']} UTC)" if upload['applied_at'] else upload['filename']
+
+
+def purchasing_workbook(changes, before_label, after_label):
+    """Readable workbook: Summary, Shipped, Date Changes, New Lines, Region Moves."""
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+    navy, white = PatternFill('solid', fgColor='1A3A5C'), Font(color='FFFFFF', bold=True)
+    thin = Side(style='thin', color='D0D5DD')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    wrap = Alignment(wrap_text=True, vertical='top')
+    center = Alignment(horizontal='center', vertical='top')
+    fills = {'Fully shipped': PatternFill('solid', fgColor='E5E7EB'),
+             'Partially shipped': PatternFill('solid', fgColor='FEF3C7')}
+    wb = openpyxl.Workbook()
+    summary = wb.active
+    summary.title = 'Summary'
+
+    def qty(v):
+        return '' if v is None else (int(v) if v == int(v) else v)
+
+    def day(v):                       # '2026/6/15 ready to ship' -> '2026-06-15 (ready to ship)'
+        return _est_label(v) if v else ''
+
+    def table(title, columns, rows, empty='No changes'):
+        ws = wb.create_sheet(title)
+        ws.append([c[0] for c in columns])
+        for c in ws[1]:
+            c.fill, c.font, c.border = navy, white, border
+            c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        ws.row_dimensions[1].height = 30
+        for row in rows:
+            ws.append([_xl_safe(v) for v in row])
+        if not rows:
+            ws.append([empty])
+        for i, (_name, width, kind) in enumerate(columns, 1):
+            ws.column_dimensions[get_column_letter(i)].width = width
+            for (cell,) in ws.iter_rows(min_row=2, min_col=i, max_col=i):
+                cell.border = border
+                cell.alignment = center if kind == 'c' else wrap
+        ws.freeze_panes = 'A2'
+        if rows:
+            ws.auto_filter.ref = ws.dimensions
+        ws.page_setup.orientation = 'landscape'
+        ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.print_title_rows = '1:1'
+        return ws
+
+    def delta(ws, col_idx):
+        for (cell,) in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
+            if isinstance(cell.value, int):
+                cell.font = Font(bold=True, color='B91C1C' if cell.value > 0 else '047857')
+                cell.value = f'+{cell.value}' if cell.value > 0 else str(cell.value)
+
+    ws = table('Shipped', [('Type', 17, 'c'), ('Region', 13, 'c'), ('DPL', 10, 'c'), ('PO', 11, 'c'),
+                           ('Supplier', 10, 'c'), ('Item Code', 18, 'l'), ('Description', 46, 'l'),
+                           ('Previous Qty', 11, 'c'), ('Current Qty', 11, 'c'), ('Shipped Qty', 11, 'c'),
+                           ('Est. Completion (previous)', 22, 'c')],
+               [(l['type'], l['region'], l['dpl'], l['po'], l['supplier'], l['item_code'], l['description'],
+                 qty(l['before']), qty(l['after']), qty(l['shipped']), day(l['est'])) for l in changes['shipped']])
+    for (cell,) in ws.iter_rows(min_row=2, max_col=1):
+        if cell.value in fills:
+            cell.fill = fills[cell.value]
+    for (cell,) in ws.iter_rows(min_row=2, min_col=10, max_col=10):
+        cell.font = Font(bold=True)
+
+    ws = table('Date Changes', [('Region', 13, 'c'), ('DPL', 10, 'c'), ('PO', 11, 'c'), ('Supplier', 10, 'c'),
+                                ('Item Code', 18, 'l'), ('Description', 40, 'l'), ('Qty', 8, 'c'),
+                                ('Est. Completion (previous)', 22, 'c'), ('Est. Completion (new)', 22, 'c'),
+                                ('Days', 8, 'c'), ('Change', 15, 'c'),
+                                ('Must Ship (previous)', 16, 'c'), ('Must Ship (new)', 16, 'c'),
+                                ('Must Ship Days', 10, 'c')],
+               [(l['region'], l['dpl'], l['po'], l['supplier'], l['item_code'], l['description'], qty(l['qty']),
+                 day(l['prev_est']), day(l['est']), l['est_days'], l['est_note'],
+                 day(l['prev_must_ship']) if l['ship_note'] else '', day(l['must_ship']) if l['ship_note'] else '',
+                 l['ship_days'] if l['ship_days'] is not None else l['ship_note']) for l in changes['date_changes']])
+    delta(ws, 10)
+    delta(ws, 14)
+
+    table('New Lines', [('Region', 13, 'c'), ('DPL', 10, 'c'), ('PO', 11, 'c'), ('Supplier', 10, 'c'),
+                        ('Item Code', 18, 'l'), ('Description', 46, 'l'), ('Qty', 8, 'c'),
+                        ('Est. Completion', 22, 'c'), ('Must Ship', 14, 'c'), ('Note', 36, 'l')],
+          [(l['region'], l['dpl'], l['po'], l['supplier'], l['item_code'], l['description'], qty(l['qty']),
+            day(l['est']), day(l['must_ship']), l['note']) for l in changes['new']])
+
+    table('Region Moves', [('DPL', 10, 'c'), ('PO', 11, 'c'), ('Supplier', 10, 'c'), ('Item Code', 18, 'l'),
+                           ('Description', 40, 'l'), ('From (qty before)', 24, 'l'), ('To (qty)', 22, 'l'),
+                           ('Kept on the old region', 22, 'l'), ('Note', 30, 'l')],
+          [(m['dpl'], m['po'], m['supplier'], m['item_code'], m['description'], m['from'], m['to'],
+            m['kept'], m['note']) for m in changes['moves']])
+
+    # Summary
+    delayed = sum(1 for l in changes['date_changes'] if (l['est_days'] or 0) > 0)
+    earlier = sum(1 for l in changes['date_changes'] if (l['est_days'] or 0) < 0)
+    fully = [l for l in changes['shipped'] if l['type'] == 'Fully shipped']
+    partly = [l for l in changes['shipped'] if l['type'] != 'Fully shipped']
+    summary.column_dimensions['A'].width = 34
+    for letter in 'BCDEFG':
+        summary.column_dimensions[letter].width = 16
+    summary.append(['Production Schedule Changes — for Purchasing'])
+    summary['A1'].font = Font(bold=True, size=16, color='1A3A5C')
+    summary.append(['生产排期变化 — 采购用'])
+    summary.append([])
+    summary.append(['Previous schedule', before_label])
+    summary.append(['New schedule', after_label])
+    summary.append(['Generated', dual_zone_time()])
+    for r in range(4, 7):
+        summary.cell(r, 1).font = Font(bold=True)
+    summary.append([])
+    summary.append(['Change', 'Lines', 'Sheet'])
+    head_row = summary.max_row
+    for row in (('Fully shipped (line left the schedule)', len(fully), 'Shipped'),
+                ('Partially shipped (quantity went down)', len(partly), 'Shipped'),
+                ('Est. completion delayed', delayed, 'Date Changes'),
+                ('Est. completion earlier', earlier, 'Date Changes'),
+                ('Other date / remark changes', len(changes['date_changes']) - delayed - earlier, 'Date Changes'),
+                ('New lines', len(changes['new']), 'New Lines'),
+                ('Moved to another region', len(changes['moves']), 'Region Moves')):
+        summary.append(list(row))
+    summary.append([])
+    summary.append(['By region', 'Fully shipped', 'Partially shipped', 'Date changes', 'New lines'])
+    region_head = summary.max_row
+    for region in changes['regions']:
+        counts = (sum(1 for l in fully if l['region'] == region), sum(1 for l in partly if l['region'] == region),
+                  sum(1 for l in changes['date_changes'] if l['region'] == region),
+                  sum(1 for l in changes['new'] if l['region'] == region))
+        if any(counts):
+            summary.append([region, *counts])
+    for r in (head_row, region_head):
+        for cell in summary[r]:
+            if cell.value is not None:
+                cell.fill, cell.font = navy, white
+    for row in summary.iter_rows(min_row=head_row + 1, max_row=summary.max_row):
+        for cell in row[1:]:
+            cell.alignment = Alignment(horizontal='center')
+    summary.append([])
+    for note in ('How to read · 说明',
+                 '• A line that is no longer in the new schedule has fully shipped. 新排期里消失的行 = 全部出货。',
+                 '• A lower quantity means part of the line has shipped. 数量减少 = 部分出货。',
+                 '• Days: + = later than before (delayed, red), − = earlier (green). 天数：+ 延后（红），− 提前（绿）。',
+                 '• A PO + item that moved to another region is listed under Region Moves, not as shipped. '
+                 '同一 PO + 产品转到其他地区的，列在 Region Moves，不算出货。'):
+        summary.append([note])
+    summary.cell(summary.max_row - 4, 1).font = Font(bold=True)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def purchasing_export(upload_id=None):
+    """(xlsx bytes, filename, changes, upload) for one upload (default: latest), or None."""
+    uploads = schedule_upload_history()
+    upload = next((u for u in uploads if u['id'] == upload_id), None) if upload_id else (uploads[0] if uploads else None)
+    if not upload:
+        return None
+    changes = purchasing_changes(load_schedule(upload['before']), load_schedule(upload['after']))
+    data = purchasing_workbook(changes, _upload_label(upload['previous']), _upload_label(upload))
+    day = (upload['applied_at'] or upload['id'])[:10]
+    return data, f'schedule-changes-for-purchasing-{day}.xlsx', changes, upload
+
+
+@app.route('/export/purchasing.xlsx')
+def export_purchasing_excel():
+    if not g.can_review:
+        abort(403)
+    result = purchasing_export(request.args.get('upload') or None)
+    if not result:
+        flash(tr('至少要有两次排期上传才能对比', 'At least two schedule uploads are needed for a comparison'), 'warning')
+        return redirect(url_for('index'))
+    data, filename, _changes, _upload = result
+    return send_file(io.BytesIO(data), as_attachment=True, download_name=filename,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+def send_purchasing_email(upload_id=None):
+    """E-mail the purchasing comparison to the purchasing addresses. Returns (ok, message)."""
+    recipients = _email_list(load_config().get('purchasing_emails', ''))
+    if not recipients:
+        return False, tr('未设置采购邮箱', 'No purchasing e-mail configured')
+    result = purchasing_export(upload_id)
+    if not result:
+        return False, tr('至少要有两次排期上传才能对比', 'At least two schedule uploads are needed for a comparison')
+    data, filename, changes, upload = result
+    fully = sum(1 for l in changes['shipped'] if l['type'] == 'Fully shipped')
+    partly = len(changes['shipped']) - fully
+    delayed = sum(1 for l in changes['date_changes'] if (l['est_days'] or 0) > 0)
+    lines = ['Production schedule changes for purchasing / 生产排期变化（采购用）', '',
+             f"New schedule: {_upload_label(upload)}", f"Previous schedule: {_upload_label(upload['previous'])}", '',
+             f'Fully shipped 全部出货: {fully}', f'Partially shipped 部分出货: {partly}',
+             f"Date changes 日期变化: {len(changes['date_changes'])} (delayed 延后 {delayed})",
+             f"New lines 新增: {len(changes['new'])}", f"Region moves 地区转移: {len(changes['moves'])}", '',
+             'Details in the attached Excel. 详见附件 Excel。']
+    subject = (f"Schedule changes {(upload['applied_at'] or '')[:10]}: {fully + partly} shipped, "
+               f"{len(changes['date_changes'])} date changes / 排期变化")
+    return _smtp_send(subject, '\n'.join(lines), recipients, attachments=[
+        (filename, data, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')])
+
+
+def _send_purchasing_email_in_background():
+    def work():
+        try:
+            ok, msg = send_purchasing_email()
+            if not ok:
+                logger.info('Purchasing e-mail not sent: %s', msg)
+        except Exception:
+            logger.exception('Purchasing e-mail failed')
+    import threading
+    threading.Thread(target=work, daemon=True).start()
+
+
+@app.route('/settings/purchasing-send', methods=['POST'])
+def settings_purchasing_send():
+    ok, msg = send_purchasing_email()
+    flash(msg, 'success' if ok else 'error')
+    return redirect(url_for('settings') + '#email')
+
+
 ONTIME_MIN_SAMPLE = 5   # below this the on-time rate is shown as indicative only
 KPI_EXCLUDED_ROLES = ('admin', 'hq')   # they do not inspect: keep them out of the inspector KPIs
 
@@ -2119,6 +2472,9 @@ def upload_confirm():
         return redirect(url_for('index'))
     if os.path.exists(PENDING_UPLOAD_FILE):
         os.remove(PENDING_UPLOAD_FILE)
+    # a baseline re-sync compares with stale data: no purchasing e-mail then
+    if not baseline and not app.config.get('TESTING') and load_config().get('purchasing_emails'):
+        _send_purchasing_email_in_background()
     return redirect(url_for('index'))
 
 
@@ -3521,6 +3877,7 @@ def settings():
         config['backup_emails'] = ', '.join(_email_list(request.form.get('backup_emails', '')))
         config['weekly_summary'] = request.form.get('weekly_summary') == '1'
         config['vtrust_notify_emails'] = ', '.join(_email_list(request.form.get('vtrust_notify_emails', '')))
+        config['purchasing_emails'] = ', '.join(_email_list(request.form.get('purchasing_emails', '')))
         lead = request.form.get('vtrust_lead_days', type=int)
         config['vtrust_lead_days'] = lead if lead and 1 <= lead <= 90 else VTRUST_LEAD_DAYS
         if 'schedule_hidden_columns' in request.form:

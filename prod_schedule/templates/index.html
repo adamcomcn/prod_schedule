@@ -132,6 +132,12 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     <a href="{{ url_for('export_comparison_excel') }}" class="btn btn-outline btn-sm">
       {{ tr('导出对比 Excel', 'Export comparison Excel') }}
     </a>
+    {% if g.can_review %}
+    <a href="{{ url_for('export_purchasing_excel') }}" class="btn btn-outline btn-sm"
+       title="{{ tr('最近一次上传与上一次相比：已发货、日期变化、新增、地区转移（不含价格）', 'Latest upload vs the one before: shipped, date changes, new lines, region moves (no prices)') }}">
+      &#128666; {{ tr('导出给采购', 'Changes for purchasing') }}
+    </a>
+    {% endif %}
     <form method="GET" action="{{ url_for('index') }}" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
       <input type="hidden" name="sheet" value="{{ selected_sheet }}">
       <input type="hidden" name="status" value="{{ status_filter }}">
