@@ -657,7 +657,7 @@ input[name=result] { display:none; }
         <div class="section-title">&#128269; V-Trust {{ tr('第三方检验已预约', 'third-party inspection booked') }}</div>
         <div style="font-size:.85rem;">
           Job <strong>{{ vtrust_booking.job_number }}</strong>
-          · {{ tr('预约检验日', 'Planned') }}: <strong>{{ vtrust_booking.planned_date or '—' }}</strong>
+          · {{ tr('检验时间', 'Inspection') }}: <strong>{{ vtrust_booking.window_start or '—' }}{% if vtrust_booking.window_end and vtrust_booking.window_end != vtrust_booking.window_start %} ~ {{ vtrust_booking.window_end }}{% endif %}</strong>
           {% if vtrust_booking.note %}· {{ vtrust_booking.note }}{% endif %}
         </div>
       </div>

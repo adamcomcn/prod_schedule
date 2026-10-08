@@ -955,6 +955,14 @@ def init_db():
             booked_at        TEXT DEFAULT (datetime('now')),
             reschedule_alert TEXT DEFAULT ''
         )''')
+        # V-Trust gives an inspection window (start - end). Bookings made before
+        # that had one date, which was the inspection day: it becomes the window.
+        booking_cols = {c[1] for c in conn.execute('PRAGMA table_info(vtrust_bookings)')}
+        if 'window_start' not in booking_cols:
+            conn.execute("ALTER TABLE vtrust_bookings ADD COLUMN window_start TEXT DEFAULT ''")
+            conn.execute("ALTER TABLE vtrust_bookings ADD COLUMN window_end TEXT DEFAULT ''")
+            conn.execute("UPDATE vtrust_bookings SET window_start=planned_date, window_end=planned_date, "
+                         "reschedule_alert=''")
 
         # Sign-in history shown to admins: login / failed / blocked / logout
         conn.execute('''CREATE TABLE IF NOT EXISTS login_events (

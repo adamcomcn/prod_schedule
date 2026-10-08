@@ -21,8 +21,8 @@
   <div class="card">
     <div class="card-title">&#128269; V-Trust {{ tr('第三方检验预约', 'third-party inspection bookings') }}</div>
     <div class="vt-note">
-      {{ tr('阀门在预计完成日前 %d 天进入“待预约”。预约后勾选对应的行，填入 V-Trust 给的 job number 和预约检验日。之后如果预计完成日推迟到预约日之后，这里会标为“需改期”，并发邮件提醒。V-Trust 检验合格的报告提交后自动变为“已完成”。' % lead,
-            'Valves become "To book" %d days before their estimated completion. After booking, tick the lines and enter the V-Trust job number and the planned inspection date. If the completion date later moves past that date, the line shows "Reschedule" and an e-mail is sent. A report with a passed V-Trust result marks it "Done".' % lead) }}
+      {{ tr('阀门在预计完成日前 %d 天进入“待预约”。预约后勾选对应的行，填入 V-Trust 给的 job number 和检验开始日、结束日。还没到检验时间时，如果预计完成日推迟到比检验结束日晚 %d 天以上（V-Trust 会来得太早），这里标为“需改期”并发邮件提醒。检验结束日过后显示“已检验”（报告和视频由第三方提供）。' % (lead, lead),
+            'Valves become "To book" %d days before their estimated completion. After booking, tick the lines and enter the V-Trust job number and the inspection start and end dates. Before the inspection, if the completion date moves more than %d days past the end date (V-Trust would come too early), the line shows "Reschedule" and an e-mail is sent. After the end date it shows "Inspected" (the third party provides the report and video).' % (lead, lead)) }}
     </div>
   </div>
 
@@ -40,7 +40,8 @@
       <div class="vt-bar">
         <div class="vt-form">
           <div><label>V-Trust job number *</label><input type="text" name="job_number" maxlength="60"></div>
-          <div><label>{{ tr('预约检验日', 'Planned inspection date') }}</label><input type="date" name="planned_date"></div>
+          <div><label>{{ tr('检验开始日', 'Inspection start') }} *</label><input type="date" name="window_start"></div>
+          <div><label>{{ tr('检验结束日', 'Inspection end') }} *</label><input type="date" name="window_end"></div>
           <div><label>{{ tr('备注', 'Note') }}</label><input type="text" name="note" maxlength="300"></div>
           <div style="display:flex;gap:6px;">
             <button class="btn btn-primary btn-sm" type="submit" formaction="{{ url_for('vtrust_book') }}">{{ tr('保存到勾选的行', 'Save to selected lines') }}</button>
@@ -57,7 +58,7 @@
           <th><input type="checkbox" onclick="document.querySelectorAll('.vt-pick').forEach(c => c.checked = this.checked); vtCount();"></th>
           <th>{{ tr('状态', 'Status') }}</th><th>DPL / PO</th><th>{{ tr('编码 / 描述', 'Item / description') }}</th>
           <th>QTY</th><th>{{ tr('供应商', 'Supplier') }}</th><th>{{ tr('预计完成', 'Est. completion') }}</th>
-          <th>V-Trust job</th><th>{{ tr('预约检验日', 'Planned') }}</th>
+          <th>V-Trust job</th><th>{{ tr('检验时间', 'Inspection') }}</th>
         </tr></thead>
         <tbody>
         {% for l in lines %}
@@ -65,14 +66,14 @@
           <tr>
             <td>{% if l.status != 'done' %}<input type="checkbox" class="vt-pick" name="job_key" value="{{ l.job_key }}" onchange="vtCount()">{% endif %}</td>
             <td><span class="vt-st vt-{{ l.status }}">{{ tr(statuses[l.status][0], statuses[l.status][1]) }}</span>
-              {% if l.late_by %}<div style="color:#b91c1c;font-size:.72rem;margin-top:2px;">{{ tr('晚 %d 天' % l.late_by, '%d d late' % l.late_by) }}</div>{% endif %}</td>
+              {% if l.late_by %}<div style="color:#b91c1c;font-size:.72rem;margin-top:2px;">{{ tr('完成日比检验结束日晚 %d 天' % l.late_by, 'ready %d d after the inspection' % l.late_by) }}</div>{% endif %}</td>
             <td>{{ l.dpl }}<br><span style="color:#6b7280;">{{ l.po }} · {{ l.region }}</span></td>
             <td><a href="{{ url_for('inspect_form', job_key=l.job_key) }}">{{ l.code }}</a><br><span style="color:#6b7280;">{{ l.description }}</span></td>
             <td>{{ l.qty }}</td>
             <td>{{ l.supplier or '—' }}</td>
             <td style="white-space:nowrap;">{{ l.est_text or '—' }}{% if l.days is not none %}<br><span style="color:{{ '#b91c1c' if l.days < 0 else '#6b7280' }};font-size:.75rem;">{{ tr('还有 %d 天' % l.days, 'in %d d' % l.days) if l.days >= 0 else tr('已过 %d 天' % -l.days, '%d d past' % -l.days) }}</span>{% endif %}</td>
             <td style="white-space:nowrap;font-weight:600;">{{ b.job_number if b else '' }}{% if b and b.note %}<div style="font-weight:400;color:#6b7280;font-size:.75rem;white-space:normal;">{{ b.note }}</div>{% endif %}</td>
-            <td style="white-space:nowrap;">{{ (b.planned_date or '—') if b else '' }}{% if b %}<div style="color:#9ca3af;font-size:.72rem;">{{ b.booked_by }}</div>{% endif %}</td>
+            <td style="white-space:nowrap;">{{ window_text(b) if b else '' }}{% if b %}<div style="color:#9ca3af;font-size:.72rem;">{{ tr('预约于', 'Booked') }} {{ b.booked_at[:10] }} · {{ b.booked_by }}</div>{% endif %}</td>
           </tr>
         {% else %}
           <tr><td colspan="9" style="color:#6b7280;">{{ tr('没有阀门。', 'No valves.') }}</td></tr>
