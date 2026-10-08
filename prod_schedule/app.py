@@ -81,6 +81,7 @@ ADMIN_ENDPOINTS = {
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
     'settings_purchasing_send', 'export_purchasing_excel', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
+    'vtrust_page', 'vtrust_book', 'vtrust_unbook',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -2418,6 +2419,10 @@ def schedule_est_edit():
     change.update(old_est=old_est, new_est=new_est,
                   old_ship=row_info['must_ship'], new_ship=row_info['must_ship'])
     ok, msg = _send_date_change_email([change], edited_by=by)
+    try:
+        send_vtrust_reschedule_alerts()
+    except Exception:
+        logger.exception('V-Trust reschedule check failed')
     flash(tr(f'预计完成日已更新为 {new_est}。邮件通知：{msg}',
              f'Completion date updated to {new_est}. E-mail: {msg}'), 'success' if ok else 'warning')
     return redirect(back)
@@ -3020,6 +3025,7 @@ def inspect_form(job_key):
                            inspect_block_message=inspect_permission(job_key)[1],
                            task=job_task(job_key),
                            assignees=_assignable() if g.can_assign else [],
+                           vtrust_booking=vtrust_bookings().get(job_key),
                            ev_files={ref[len(EV_REF_PREFIX):]: files for ref, files in (draft or {}).get('files', {}).items()
                                      if ref.startswith(EV_REF_PREFIX)},
                            draft_file_max_bytes=DRAFT_FILE_MAX_BYTES,
@@ -3112,6 +3118,9 @@ def submit_inspection(job_key):
         'submitted_by':      g.get('username', ''),
         'submitted_at':      datetime.now().isoformat(),
     }
+    booking = vtrust_bookings().get(job_key)
+    if booking:
+        inspection_data['vtrust_job'] = booking['job_number']
 
     # ── Evidence uploads: one file-input per evidence type ───────────────
     evidence_results = {}
@@ -3367,6 +3376,10 @@ def build_report_pdf(job_key, index, generated_by=''):
 
     from pdf_report import build_inspection_pdf
     report_no = report_number(job_key, record, index)
+    booking = vtrust_bookings().get(job_key)
+    vtrust_job = record.get('vtrust_job') or (booking['job_number'] if booking else '')
+    if vtrust_job:
+        job = dict(job, **{'V-Trust Job': vtrust_job})
     pdf = build_inspection_pdf(
         job, record, report_no,
         attachments=attachments,
@@ -4737,7 +4750,8 @@ def send_review_reminders():
 
 
 def run_daily_reminders():
-    return send_due_reminders(), send_review_reminders(), send_vtrust_reminders()[0]
+    return (send_due_reminders(), send_review_reminders(), send_vtrust_reminders()[0],
+            send_vtrust_reschedule_alerts()[0])
 
 
 def _est_label(value):
@@ -4797,6 +4811,7 @@ def _send_date_change_email(changes, edited_by=''):
         with db_conn() as conn:
             names = {r['id']: r['display_name'] or r['username'] for r in conn.execute(
                 f"SELECT id, username, display_name FROM users WHERE id IN ({','.join('?' * len(ids))})", tuple(ids))}
+    bookings = vtrust_bookings()
     items = []
     for c in changes:
         est = date_change_kind(c['old_est'], c['new_est']) if est_changed(c['old_est'], c['new_est']) else None
@@ -4837,6 +4852,15 @@ def _send_date_change_email(changes, edited_by=''):
             if ship:
                 lines.append(f"    最迟出货 Must ship: {_est_label(c.get('old_ship'))}  →  "
                              f"{_est_label(c.get('new_ship'))}   [{ship[2]}]")
+            booking = bookings.get(c['job_key'])
+            if booking:
+                check, new_d = booking_check_date(booking), split_est(c['new_est'])[0]
+                when = booking.get('planned_date') or '—'
+                if check and new_d and new_d > check:
+                    lines.append(f"    ⚠ V-Trust 已预约 Job {booking['job_number']}（检验日 {when}），新完成日晚于预约，需要改期"
+                                 f" / V-Trust job booked for {when}: reschedule")
+                else:
+                    lines.append(f"    V-Trust 已预约 Job {booking['job_number']}（检验日 {when}）/ V-Trust job booked for {when}")
             if c.get('assigned_to'):
                 lines.append(f"    已分配 Assigned: {names.get(c['assigned_to'], '')}")
             lines.append('    ' + url_for('inspect_form', job_key=c['job_key'], _external=True))
@@ -4927,16 +4951,37 @@ def _qty_sum(a, b):
         return ' + '.join(x for x in (a, b) if x)
 
 
-def vtrust_due_lines(lead_days=None):
-    """Valve lines in the current schedule due within `lead_days` (or up to
-    VTRUST_PAST_DAYS past their date) that have no passed V-Trust inspection
-    yet, sorted by supplier then date. Split lots of one PO + item are added
-    together."""
+VTRUST_STATUS = {
+    'reschedule': ('需改期', 'Reschedule'), 'to_book': ('待预约', 'To book'), 'booked': ('已预约', 'Booked'),
+    'later': ('以后再约', 'Later'), 'overdue': ('已过完成日', 'Past due'), 'no_date': ('无完成日', 'No date'),
+    'done': ('已完成', 'Done'),
+}
+
+
+def vtrust_bookings():
+    """{job_key: booking row} — V-Trust job numbers entered by admins."""
+    with db_conn() as conn:
+        return {r['job_key']: dict(r) for r in conn.execute('SELECT * FROM vtrust_bookings')}
+
+
+def booking_check_date(booking):
+    """The date a booking was made for: the planned inspection date, else the
+    estimated completion date when it was booked."""
+    return _parse_date(booking.get('planned_date')) or split_est(booking.get('est_at_booking'))[0]
+
+
+def vtrust_lines(lead_days=None):
+    """Every valve line in the current schedule with its V-Trust status:
+    done (V-Trust passed), reschedule (booked, but completion now later than
+    the booked date), booked, to_book (within the lead time or up to
+    VTRUST_PAST_DAYS past), later, overdue (further past), no_date.
+    Split lots of one PO + item are added together."""
     import copy
     config = load_config()
     lead = int(lead_days if lead_days is not None else config.get('vtrust_lead_days') or VTRUST_LEAD_DAYS)
     schedule, _ = _apply_est_overrides(copy.deepcopy(load_schedule(CURRENT_FILE)), commit=False)
     inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
+    bookings = vtrust_bookings()
     today = china_today()
     lines = {}
     for sheet, rows in schedule.items():
@@ -4961,14 +5006,10 @@ def vtrust_due_lines(lead_days=None):
                 continue
             est_text = col(row, 'estimated completion date')
             est, _ = split_est(est_text)
-            if not est or not -VTRUST_PAST_DAYS <= (est - today).days <= lead:
-                continue
-            if get_vtrust_status(inspections.get(job_key, [])).lower() == 'pass':
-                continue
             line = lines.get(job_key)
             if line:                                   # another lot of the same line
                 line['qty'] = _qty_sum(line['qty'], col(row, 'quantity'))
-                if est < line['est']:
+                if est and (not line['est'] or est < line['est']):
                     line.update(est=est, est_text=est_text)
                 continue
             lines[job_key] = {'job_key': job_key, 'region': sheet, 'dpl': col(row, 'order number'),
@@ -4976,8 +5017,29 @@ def vtrust_due_lines(lead_days=None):
                               'description': desc, 'qty': col(row, 'quantity'),
                               'supplier': col(row, 'supplier', 'foundry'), 'est': est, 'est_text': est_text}
     for line in lines.values():
-        line['days'] = (line['est'] - today).days
-    return sorted(lines.values(), key=lambda l: (l['supplier'] or '~', l['est'], l['dpl'], l['code']))
+        line['days'] = (line['est'] - today).days if line['est'] else None
+        line['booking'] = booking = bookings.get(line['job_key'])
+        check = booking_check_date(booking) if booking else None
+        line['late_by'] = (line['est'] - check).days if booking and check and line['est'] and line['est'] > check else 0
+        if get_vtrust_status(inspections.get(line['job_key'], [])).lower() == 'pass':
+            line['status'] = 'done'
+        elif booking:
+            line['status'] = 'reschedule' if line['late_by'] else 'booked'
+        elif line['days'] is None:
+            line['status'] = 'no_date'
+        elif line['days'] > lead:
+            line['status'] = 'later'
+        elif line['days'] < -VTRUST_PAST_DAYS:
+            line['status'] = 'overdue'
+        else:
+            line['status'] = 'to_book'
+    return sorted(lines.values(), key=lambda l: (l['supplier'] or '~', l['est'] or date.max, l['dpl'], l['code']))
+
+
+def vtrust_due_lines(lead_days=None):
+    """Valve lines to book now: within the lead time (or up to VTRUST_PAST_DAYS
+    past), no V-Trust job number yet and no passed V-Trust inspection."""
+    return [l for l in vtrust_lines(lead_days) if l['status'] == 'to_book']
 
 
 def vtrust_recipients():
@@ -4991,6 +5053,8 @@ def vtrust_recipients():
 
 
 def _vtrust_days_text(days):
+    if days is None:
+        return '—'
     if days > 0:
         return f'还有 {days} 天 / in {days} d'
     if days == 0:
@@ -5002,18 +5066,24 @@ VTRUST_COLUMNS = ('DPL', 'Daemco purchase order number', 'PRODUCT CODE', 'DESCRI
                   'ESTIMATED COMPLETION TIME', 'SUPPLIER', 'REGION')
 
 
-def vtrust_email(lines, lead):
-    """(subject, plain text, html, xlsx bytes) for a list of due valve lines."""
+def vtrust_email(lines, lead, booked=()):
+    """(subject, plain text, html, xlsx bytes) for valve lines to book; `booked`
+    lines in the same window are listed after them for reference."""
     today = china_today().isoformat()
     subject = (f'【V-Trust 预约提醒】{len(lines)} 个阀门订单行将在 {lead} 天内完工 / '
                f'{len(lines)} valve line(s) ready within {lead} days — book V-Trust')
     intro_zh = f'以下阀门预计在 {lead} 天内完工（或刚过预计完成日不超过 {VTRUST_PAST_DAYS} 天），尚无 V-Trust 合格记录，请安排第三方来厂检验。'
     intro_en = (f'These valves are due within {lead} days (or at most {VTRUST_PAST_DAYS} days past their date) and have no passed V-Trust '
                 f'inspection yet. Please book the third-party inspection at the factory.')
-    text = [f'V-Trust 预约提醒 V-Trust booking reminder — {today}', intro_zh, intro_en, '']
+    text = [f'V-Trust 预约提醒 V-Trust booking reminder — {today}', intro_zh, intro_en,
+            '预约后请在系统的 V-Trust 页面录入 job number。 After booking, enter the job number on the V-Trust page.', '']
     for i, l in enumerate(lines, 1):
         text.append(f"{i}. {l['dpl']}  {l['po']}  {l['code']}  {l['description']}  QTY {l['qty']}")
         text.append(f"    {l['est_text']}  ({_vtrust_days_text(l['days'])})  · {l['supplier'] or '—'} · {l['region']}")
+    if booked:
+        text += ['', f'已预约（供参考）Already booked ({len(booked)})']
+        text += [f"  {b['dpl']}  {b['po']}  {b['code']}  · Job {b['booking']['job_number']}"
+                 f"  · {b['booking']['planned_date'] or '—'}" for b in booked]
     text += ['', '附件为同样内容的 Excel，可直接转发给 V-Trust。', 'The attached Excel has the same list, ready to forward to V-Trust.']
 
     cell = 'border:1px solid #d0d5dd;padding:6px 10px;font-size:13px;'
@@ -5024,7 +5094,7 @@ def vtrust_email(lines, lead):
             supplier = l['supplier']
             rows_html.append(f'<tr><td colspan="8" style="{cell}background:#eef2f7;font-weight:700;">'
                              f'{_escape(supplier or "—")}</td></tr>')
-        late = l['days'] < 0
+        late = (l['days'] or 0) < 0
         rows_html.append(
             '<tr>' + ''.join(f'<td style="{cell}{extra}">{_escape(v)}</td>' for v, extra in (
                 (l['dpl'], 'text-align:center;'), (l['po'], 'text-align:center;'), (l['code'], ''),
@@ -5034,14 +5104,25 @@ def vtrust_email(lines, lead):
     headers = ('DPL', 'Daemco PO', 'PRODUCT CODE', 'DESCRIPTION', 'QTY', 'ESTIMATED COMPLETION TIME',
                '距完成 / Days', 'REGION')
     head_row = ''.join(f'<th style="{head}">{_escape(h)}</th>' for h in headers)
+    booked_html = ''
+    if booked:
+        bhead = ''.join(f'<th style="{head}">{_escape(h)}</th>' for h in (
+            'DPL', 'Daemco PO', 'PRODUCT CODE', 'ESTIMATED COMPLETION TIME', 'V-Trust Job', '预约检验日 / Planned'))
+        brows = ''.join('<tr>' + ''.join(f'<td style="{cell}text-align:center;">{_escape(v)}</td>' for v in (
+            b['dpl'], b['po'], b['code'], b['est_text'], b['booking']['job_number'], b['booking']['planned_date'] or '—'))
+            + '</tr>' for b in booked)
+        booked_html = (f'<p style="font-size:14px;margin:16px 0 6px;"><b>已预约（供参考）/ Already booked ({len(booked)})</b></p>'
+                       f'<table style="border-collapse:collapse;"><tr>{bhead}</tr>{brows}</table>')
     font = "Arial,'Microsoft YaHei',sans-serif"
     html = (f'<div style="font-family:{font};color:#1a1a2e;">'
             f'<p style="font-size:14px;margin:0 0 4px;"><b>V-Trust 预约提醒 / V-Trust booking reminder — {today}</b></p>'
             f'<p style="font-size:13px;margin:0 0 2px;">{_escape(intro_zh)}</p>'
-            f'<p style="font-size:13px;margin:0 0 12px;color:#4b5563;">{_escape(intro_en)}</p>'
+            f'<p style="font-size:13px;margin:0 0 2px;color:#4b5563;">{_escape(intro_en)}</p>'
+            f'<p style="font-size:13px;margin:0 0 12px;">预约后请在系统的 <a href="{url_for("vtrust_page", _external=True)}">'
+            f'V-Trust 页面</a>录入 job number。 After booking, enter the job number on the V-Trust page.</p>'
             f'<table style="border-collapse:collapse;">'
             f'<tr>{head_row}</tr>'
-            + ''.join(rows_html) + '</table>'
+            + ''.join(rows_html) + '</table>' + booked_html +
             f'<p style="font-size:12px;color:#6b7280;margin-top:12px;">附件为同样内容的 Excel，可直接转发给 V-Trust。'
             f' The attached Excel has the same list, ready to forward to V-Trust.<br>'
             f'<a href="{url_for("index", _external=True)}">{_escape(url_for("index", _external=True))}</a></p></div>')
@@ -5066,13 +5147,20 @@ def vtrust_email(lines, lead):
     return subject, '\n'.join(text), html, buf.getvalue()
 
 
+def _vtrust_booked_in_window(all_lines, lead):
+    return [l for l in all_lines if l['status'] in ('booked', 'reschedule')
+            and l['days'] is not None and -VTRUST_PAST_DAYS <= l['days'] <= lead]
+
+
 def send_vtrust_reminders(force=False):
-    """E-mail admins about valve lines entering the V-Trust booking window.
-    Each line is sent once per estimated completion date (a changed date sends
-    it again); force=True sends the whole current list. Returns (count, message)."""
+    """E-mail admins about valve lines entering the V-Trust booking window
+    (lines with a job number are not "to book"). Each line is sent once per
+    estimated completion date (a changed date sends it again); force=True
+    sends the whole current list. Returns (count, message)."""
     config = load_config()
     lead = int(config.get('vtrust_lead_days') or VTRUST_LEAD_DAYS)
-    lines = vtrust_due_lines(lead)
+    all_lines = vtrust_lines(lead)
+    lines = [l for l in all_lines if l['status'] == 'to_book']
     claimed = []
     if not force:
         with db_conn() as conn:
@@ -5094,7 +5182,7 @@ def send_vtrust_reminders(force=False):
     if not recipients:
         release()
         return 0, tr('未设置 V-Trust 提醒邮箱，管理员账号也没有邮箱', 'No V-Trust reminder e-mail and no admin e-mail')
-    subject, text, html, xlsx = vtrust_email(lines, lead)
+    subject, text, html, xlsx = vtrust_email(lines, lead, _vtrust_booked_in_window(all_lines, lead))
     ok, msg = _smtp_send(subject, text, recipients, html=html, attachments=[
         (f'V-Trust_{china_today().isoformat()}.xlsx', xlsx,
          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')])
@@ -5104,13 +5192,120 @@ def send_vtrust_reminders(force=False):
     return len(lines), msg
 
 
+def send_vtrust_reschedule_alerts():
+    """Booked valve lines whose completion date is now later than the booked
+    date: tell the V-Trust recipients to reschedule. Once per line and new
+    completion date. Returns (count, message)."""
+    lines = [l for l in vtrust_lines() if l['status'] == 'reschedule']
+    claimed = []
+    with db_conn() as conn:
+        for l in lines:
+            marker = l['est'].isoformat()
+            if conn.execute("UPDATE vtrust_bookings SET reschedule_alert=? WHERE job_key=? "
+                            "AND IFNULL(reschedule_alert, '') != ?", (marker, l['job_key'], marker)).rowcount:
+                claimed.append(l)
+    if not claimed:
+        return 0, tr('没有需要改期的 V-Trust 预约', 'No V-Trust booking needs rescheduling')
+
+    def release():
+        with db_conn() as conn:
+            for l in claimed:
+                conn.execute("UPDATE vtrust_bookings SET reschedule_alert='' WHERE job_key=?", (l['job_key'],))
+
+    recipients = vtrust_recipients()
+    if not recipients:
+        release()
+        return 0, tr('未设置 V-Trust 提醒邮箱，管理员账号也没有邮箱', 'No V-Trust reminder e-mail and no admin e-mail')
+    today = china_today().isoformat()
+    lines_txt = [f'V-Trust 需改期 V-Trust reschedule — {today}',
+                 f'以下 {len(claimed)} 个已预约 V-Trust 的阀门，预计完成日已推迟到预约日之后，请联系 V-Trust 改期，并在系统 V-Trust 页面更新预约日。',
+                 f'{len(claimed)} booked valve line(s) will now be ready after the booked V-Trust date. '
+                 f'Please reschedule with V-Trust and update the date on the V-Trust page.', '']
+    for i, l in enumerate(sorted(claimed, key=lambda l: -l['late_by']), 1):
+        b = l['booking']
+        lines_txt.append(f"{i}. Job {b['job_number']}  ·  {l['dpl']}  {l['po']}  {l['code']}  {l['description']}  QTY {l['qty']}")
+        lines_txt.append(f"    预约日 Booked for: {booking_check_date(b).isoformat()}"
+                         f"{'' if b.get('planned_date') else '（预约时的完成日 / est. when booked）'}"
+                         f"   →   新完成日 New est. completion: {_est_label(l['est_text'])}"
+                         f"   [⬆ 晚 {l['late_by']} 天 / {l['late_by']} d later]")
+        lines_txt.append('')
+    lines_txt.append(url_for('vtrust_page', _external=True))
+    ok, msg = _smtp_send(f'【V-Trust 需改期】{len(claimed)} 个阀门完工推迟到预约日之后 / '
+                         f'{len(claimed)} V-Trust booking(s) need rescheduling', '\n'.join(lines_txt), recipients)
+    if not ok:
+        release()
+        return 0, msg
+    return len(claimed), msg
+
+
+@app.route('/vtrust')
+def vtrust_page():
+    """Admin: valve lines and their V-Trust job numbers."""
+    lead = int(load_config().get('vtrust_lead_days') or VTRUST_LEAD_DAYS)
+    lines = vtrust_lines(lead)
+    show = request.args.get('show', 'open')
+    counts = Counter(l['status'] for l in lines)
+    order = list(VTRUST_STATUS)
+    if show == 'open':
+        shown = [l for l in lines if l['status'] in ('reschedule', 'to_book', 'booked', 'overdue')]
+    elif show in VTRUST_STATUS:
+        shown = [l for l in lines if l['status'] == show]
+    else:
+        shown = lines
+    shown.sort(key=lambda l: (order.index(l['status']), l['est'] or date.max, l['dpl'], l['code']))
+    return render_template('vtrust.html', lines=shown, counts=counts, show=show, lead=lead,
+                           statuses=VTRUST_STATUS, past_days=VTRUST_PAST_DAYS, today=china_today().isoformat())
+
+
+@app.route('/vtrust/book', methods=['POST'])
+def vtrust_book():
+    keys = request.form.getlist('job_key')
+    job_number = ' '.join(request.form.get('job_number', '').split())[:60]
+    planned_raw = request.form.get('planned_date', '').strip()
+    planned = _parse_date(planned_raw) if planned_raw else None
+    note = ' '.join(request.form.get('note', '').split())[:300]
+    if not keys:
+        flash(tr('请先勾选阀门', 'Select at least one valve line'), 'error')
+    elif not job_number:
+        flash(tr('请填写 V-Trust job number', 'Enter the V-Trust job number'), 'error')
+    elif planned_raw and not planned:
+        flash(tr('预约检验日格式不对', 'The planned inspection date is not a valid date'), 'error')
+    else:
+        est = {l['job_key']: l['est_text'] for l in vtrust_lines()}
+        with db_conn() as conn:
+            for key in keys:
+                conn.execute(
+                    'INSERT INTO vtrust_bookings (job_key, job_number, planned_date, est_at_booking, note, booked_by, '
+                    "booked_at, reschedule_alert) VALUES (?,?,?,?,?,?,datetime('now'),'') ON CONFLICT(job_key) DO UPDATE SET "
+                    'job_number=excluded.job_number, planned_date=excluded.planned_date, '
+                    'est_at_booking=excluded.est_at_booking, note=excluded.note, booked_by=excluded.booked_by, '
+                    "booked_at=excluded.booked_at, reschedule_alert=''",
+                    (key, job_number, planned.isoformat() if planned else '', est.get(key, ''), note,
+                     g.get('username', '')))
+        flash(tr(f'已为 {len(keys)} 行录入 V-Trust job {job_number}', f'V-Trust job {job_number} saved for {len(keys)} line(s)'),
+              'success')
+    return redirect(url_for('vtrust_page', show=request.form.get('show', 'open')))
+
+
+@app.route('/vtrust/unbook', methods=['POST'])
+def vtrust_unbook():
+    keys = request.form.getlist('job_key')
+    with db_conn() as conn:
+        for key in keys:
+            conn.execute('DELETE FROM vtrust_bookings WHERE job_key=?', (key,))
+    flash(tr(f'已删除 {len(keys)} 行的 V-Trust 预约', f'V-Trust booking removed from {len(keys)} line(s)'), 'success')
+    return redirect(url_for('vtrust_page', show=request.form.get('show', 'open')))
+
+
 @app.route('/settings/vtrust-preview')
 def settings_vtrust_preview():
     """The V-Trust reminder as it would look today (nothing is sent)."""
     lead = int(load_config().get('vtrust_lead_days') or VTRUST_LEAD_DAYS)
-    lines = vtrust_due_lines(lead)
+    all_lines = vtrust_lines(lead)
+    lines = [l for l in all_lines if l['status'] == 'to_book']
+    booked = _vtrust_booked_in_window(all_lines, lead)
     if request.args.get('format') == 'xlsx':
-        return send_file(io.BytesIO(vtrust_email(lines, lead)[3]), as_attachment=True,
+        return send_file(io.BytesIO(vtrust_email(lines, lead, booked)[3]), as_attachment=True,
                          download_name=f'V-Trust_{china_today().isoformat()}.xlsx')
     with db_conn() as conn:
         sent = {(r['job_key'], r['est_date']) for r in conn.execute('SELECT job_key, est_date FROM vtrust_reminders')}
@@ -5122,7 +5317,7 @@ def settings_vtrust_preview():
             f'<a href="?format=xlsx">Excel</a> · <a href="{url_for("settings")}#email">返回设置 / Back</a></div>')
     if not lines:
         return note + f'<p style="font-family:Arial,sans-serif;">{tr("目前没有需要提醒的阀门。", "No valves to remind about right now.")}</p>'
-    subject, _text, html, _xlsx = vtrust_email(lines, lead)
+    subject, _text, html, _xlsx = vtrust_email(lines, lead, booked)
     return note + f'<p style="font-family:Arial,sans-serif;font-size:13px;"><b>{_escape(subject)}</b></p>' + html
 
 
@@ -7551,6 +7746,7 @@ def cron_reminders():
         abort(404)
     return {'reminders_sent': send_due_reminders(), 'review_reminders_sent': send_review_reminders(),
             'vtrust_reminders_sent': send_vtrust_reminders()[0],
+            'vtrust_reschedule_alerts': send_vtrust_reschedule_alerts()[0],
             'backup': send_backup_email()[1], 'weekly_summary': send_weekly_summary()[1]}
 
 

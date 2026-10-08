@@ -153,6 +153,7 @@ textarea { resize: vertical; min-height: 80px; }
   {{ navlink('training', '培训', 'Training', ep in ['training', 'training_plan', 'exam_take']) }}
   {% endif %}
   {% if g.is_admin %}
+  {{ navlink('vtrust_page', 'V-Trust', 'V-Trust', ep.startswith('vtrust')) }}
   {{ navlink('settings', '设置', 'Settings', ep == 'settings') }}
   {{ navlink('users_admin', '账号', 'Users', ep.startswith('user')) }}
   {% endif %}

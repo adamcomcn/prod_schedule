@@ -652,6 +652,17 @@ input[name=result] { display:none; }
         {% endif %}
       </div>
 
+      {% if vtrust_booking %}
+      <div class="card" style="border:1px solid #bfdbfe; background:#eff6ff;">
+        <div class="section-title">&#128269; V-Trust {{ tr('第三方检验已预约', 'third-party inspection booked') }}</div>
+        <div style="font-size:.85rem;">
+          Job <strong>{{ vtrust_booking.job_number }}</strong>
+          · {{ tr('预约检验日', 'Planned') }}: <strong>{{ vtrust_booking.planned_date or '—' }}</strong>
+          {% if vtrust_booking.note %}· {{ vtrust_booking.note }}{% endif %}
+        </div>
+      </div>
+      {% endif %}
+
       {% if related_reports %}
       <div class="card" style="border:1px solid #c7d2fe; background:#eef2ff;">
         <div class="section-title">&#8644; {{ tr('同 PO + 产品在其他地区的检验报告', 'Reports for the same PO + item in other regions') }} ({{ related_reports|length }})</div>

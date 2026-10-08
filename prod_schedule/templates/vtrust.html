@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}V-Trust{% endblock %}
+{% block extra_style %}
+.vt-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+.vt-tab { padding:5px 12px; border:1px solid #d0d5dd; border-radius:16px; font-size:.8rem; color:#374151; background:#fff; }
+.vt-tab.on { background:#1a3a5c; color:#fff; border-color:#1a3a5c; text-decoration:none; }
+.vt-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+.vt-table th { text-align:left; padding:7px 8px; background:#f8fafc; border-bottom:1px solid #e2e8f0; white-space:nowrap; }
+.vt-table td { padding:7px 8px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+.vt-st { display:inline-block; padding:2px 8px; border-radius:12px; font-size:.72rem; font-weight:700; white-space:nowrap; }
+.vt-reschedule { background:#fee2e2; color:#991b1b; } .vt-to_book { background:#fef3c7; color:#92400e; }
+.vt-booked { background:#dbeafe; color:#1e40af; } .vt-done { background:#d1fae5; color:#065f46; }
+.vt-later, .vt-no_date, .vt-overdue { background:#f3f4f6; color:#4b5563; }
+.vt-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; align-items:end; }
+.vt-bar { background:#fff; padding:10px 0; border-bottom:1px solid #e2e8f0; margin-bottom:8px; }
+@media (min-width: 900px) { .vt-bar { position:sticky; top:0; z-index:5; } }
+.vt-note { font-size:.78rem; color:#6b7280; line-height:1.6; }
+{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="card">
+    <div class="card-title">&#128269; V-Trust {{ tr('第三方检验预约', 'third-party inspection bookings') }}</div>
+    <div class="vt-note">
+      {{ tr('阀门在预计完成日前 %d 天进入“待预约”。预约后勾选对应的行，填入 V-Trust 给的 job number 和预约检验日。之后如果预计完成日推迟到预约日之后，这里会标为“需改期”，并发邮件提醒。V-Trust 检验合格的报告提交后自动变为“已完成”。' % lead,
+            'Valves become "To book" %d days before their estimated completion. After booking, tick the lines and enter the V-Trust job number and the planned inspection date. If the completion date later moves past that date, the line shows "Reschedule" and an e-mail is sent. A report with a passed V-Trust result marks it "Done".' % lead) }}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="vt-tabs">
+      <a class="vt-tab {{ 'on' if show == 'open' }}" href="{{ url_for('vtrust_page', show='open') }}">{{ tr('需处理', 'Open') }}</a>
+      {% for key, label in statuses.items() %}
+      <a class="vt-tab {{ 'on' if show == key }}" href="{{ url_for('vtrust_page', show=key) }}">{{ tr(label[0], label[1]) }} ({{ counts.get(key, 0) }})</a>
+      {% endfor %}
+      <a class="vt-tab {{ 'on' if show == 'all' }}" href="{{ url_for('vtrust_page', show='all') }}">{{ tr('全部', 'All') }}</a>
+    </div>
+
+    <form method="POST" id="vt-form">
+      <input type="hidden" name="show" value="{{ show }}">
+      <div class="vt-bar">
+        <div class="vt-form">
+          <div><label>V-Trust job number *</label><input type="text" name="job_number" maxlength="60"></div>
+          <div><label>{{ tr('预约检验日', 'Planned inspection date') }}</label><input type="date" name="planned_date"></div>
+          <div><label>{{ tr('备注', 'Note') }}</label><input type="text" name="note" maxlength="300"></div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-primary btn-sm" type="submit" formaction="{{ url_for('vtrust_book') }}">{{ tr('保存到勾选的行', 'Save to selected lines') }}</button>
+            <button class="btn btn-outline btn-sm" type="submit" formaction="{{ url_for('vtrust_unbook') }}"
+                    onclick="return confirm({{ tr('删除勾选行的 V-Trust 预约？', 'Remove the V-Trust booking from the selected lines?')|tojson }});">{{ tr('删除预约', 'Remove booking') }}</button>
+          </div>
+        </div>
+        <div class="vt-note" style="margin-top:6px;"><span id="vt-count">0</span> {{ tr('行已勾选', 'line(s) selected') }}</div>
+      </div>
+
+      <div style="overflow-x:auto;">
+      <table class="vt-table">
+        <thead><tr>
+          <th><input type="checkbox" onclick="document.querySelectorAll('.vt-pick').forEach(c => c.checked = this.checked); vtCount();"></th>
+          <th>{{ tr('状态', 'Status') }}</th><th>DPL / PO</th><th>{{ tr('编码 / 描述', 'Item / description') }}</th>
+          <th>QTY</th><th>{{ tr('供应商', 'Supplier') }}</th><th>{{ tr('预计完成', 'Est. completion') }}</th>
+          <th>V-Trust job</th><th>{{ tr('预约检验日', 'Planned') }}</th>
+        </tr></thead>
+        <tbody>
+        {% for l in lines %}
+          {% set b = l.booking %}
+          <tr>
+            <td>{% if l.status != 'done' %}<input type="checkbox" class="vt-pick" name="job_key" value="{{ l.job_key }}" onchange="vtCount()">{% endif %}</td>
+            <td><span class="vt-st vt-{{ l.status }}">{{ tr(statuses[l.status][0], statuses[l.status][1]) }}</span>
+              {% if l.late_by %}<div style="color:#b91c1c;font-size:.72rem;margin-top:2px;">{{ tr('晚 %d 天' % l.late_by, '%d d late' % l.late_by) }}</div>{% endif %}</td>
+            <td>{{ l.dpl }}<br><span style="color:#6b7280;">{{ l.po }} · {{ l.region }}</span></td>
+            <td><a href="{{ url_for('inspect_form', job_key=l.job_key) }}">{{ l.code }}</a><br><span style="color:#6b7280;">{{ l.description }}</span></td>
+            <td>{{ l.qty }}</td>
+            <td>{{ l.supplier or '—' }}</td>
+            <td style="white-space:nowrap;">{{ l.est_text or '—' }}{% if l.days is not none %}<br><span style="color:{{ '#b91c1c' if l.days < 0 else '#6b7280' }};font-size:.75rem;">{{ tr('还有 %d 天' % l.days, 'in %d d' % l.days) if l.days >= 0 else tr('已过 %d 天' % -l.days, '%d d past' % -l.days) }}</span>{% endif %}</td>
+            <td style="white-space:nowrap;font-weight:600;">{{ b.job_number if b else '' }}{% if b and b.note %}<div style="font-weight:400;color:#6b7280;font-size:.75rem;white-space:normal;">{{ b.note }}</div>{% endif %}</td>
+            <td style="white-space:nowrap;">{{ (b.planned_date or '—') if b else '' }}{% if b %}<div style="color:#9ca3af;font-size:.72rem;">{{ b.booked_by }}</div>{% endif %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" style="color:#6b7280;">{{ tr('没有阀门。', 'No valves.') }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </form>
+    <div class="vt-note" style="margin-top:10px;">
+      {{ tr('“已过完成日”= 预计完成日已过 %d 天以上且没有预约，不会再自动提醒；如仍需 V-Trust，可直接录入 job number。' % past_days,
+            '"Past due" = more than %d days past the estimated completion with no booking; no more automatic reminders. Enter a job number if V-Trust is still needed.' % past_days) }}
+    </div>
+  </div>
+</div>
+<script>
+function vtCount() { document.getElementById('vt-count').textContent = document.querySelectorAll('.vt-pick:checked').length; }
+</script>
+{% endblock %}

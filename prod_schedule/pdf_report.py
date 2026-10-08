@@ -355,7 +355,7 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
         (_bi('预计完成', 'Est. completion'), job.get('Estimated Completion Date')),
         (_bi('最迟出货', 'Must ship'), job.get('Must Ship Date')),
         (_bi('当前状态', 'Status'), job.get('Current Status')),
-    ], st, widths))
+    ] + ([(_bi('V-Trust 检验号', 'V-Trust job'), job['V-Trust Job'])] if job.get('V-Trust Job') else []), st, widths))
 
     # ── Inspection summary ──────────────────────────────────────────────────
     story.append(_p(_bi('检验结果', 'Inspection'), st['h']))

@@ -934,6 +934,18 @@ def init_db():
             PRIMARY KEY (job_key, est_date)
         )''')
 
+        # V-Trust job numbers entered by admins (one per order line; one job may cover many lines)
+        conn.execute('''CREATE TABLE IF NOT EXISTS vtrust_bookings (
+            job_key          TEXT PRIMARY KEY,
+            job_number       TEXT NOT NULL,
+            planned_date     TEXT DEFAULT '',
+            est_at_booking   TEXT DEFAULT '',
+            note             TEXT DEFAULT '',
+            booked_by        TEXT DEFAULT '',
+            booked_at        TEXT DEFAULT (datetime('now')),
+            reschedule_alert TEXT DEFAULT ''
+        )''')
+
         # Sign-in history shown to admins: login / failed / blocked / logout
         conn.execute('''CREATE TABLE IF NOT EXISTS login_events (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
