@@ -12,10 +12,10 @@
 
 /* ── task table ── */
 .task-table { width:100%; border-collapse:collapse; font-size:.85rem; }
-.task-table th { background:#f8fafc; font-weight:600; text-align:left; padding:10px 12px;
+.task-table th { background:#f8fafc; font-weight:600; text-align:left; padding:10px 10px;
                  border-bottom:2px solid #e2e8f0; font-size:.73rem;
                  text-transform:uppercase; letter-spacing:.04em; color:#6b7280; }
-.task-table td { padding:9px 12px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.task-table td { padding:9px 10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
 .task-table tr.overdue td { background:#fff5f5; }
 .task-table tr.urgent  td { background:#fff8f0; }
 .task-table tbody tr:hover td { filter:brightness(.97); }
@@ -591,7 +591,7 @@ tr.mine td { background:#f0fdf4; }
             <td class="c-desc" style="max-width:200px; font-size:.8rem; color:#374151;">
               {{ t.description or '—' }}</td>
             <td class="c-meta" data-label="{{ tr('数量', 'Qty') }}" style="text-align:center;">{{ t.quantity or '—' }}</td>
-            <td class="c-est" style="font-size:.8rem; color:#6b7280; white-space:nowrap;">
+            <td class="c-est" style="font-size:.8rem; color:#6b7280; min-width:90px; max-width:150px;">
               {{ t.est_completion or '—' }}</td>
             <td class="c-days">
               <span class="days-badge {{ days_cls }}"{% if est %} title="{{ tr('预计完工', 'Est. completion') }}: {{ est }}"{% endif %}>{{ days_label }}</span>
