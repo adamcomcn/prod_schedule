@@ -181,20 +181,58 @@ def device_label(user_agent):
 app.jinja_env.filters['device_label'] = device_label
 
 
-def factory_names():
-    """{code: name} from Settings ("XM=鑫淼", one per line). The schedule's
-    Supplier / Foundry column holds these factory codes."""
-    names = {}
+def _factory_map():
+    """({code: name}, {alias: code}) from Settings ("XM=鑫淼", one per line).
+    The schedule's Supplier / Foundry column holds these factory codes. A line
+    whose right side is another listed code ("RAINBOW=RB") makes the left one
+    an alias: it is shown and counted as that code. Cached per request."""
+    try:
+        cached = g.get('_factory_map')
+    except RuntimeError:                       # outside a request (scripts, e-mail jobs)
+        cached = None
+    if cached is not None:
+        return cached
+    pairs = []
     for line in str(load_config().get('factory_names', '')).splitlines():
-        code, sep, name = line.partition('=')
-        if sep and code.strip() and name.strip():
-            names[code.strip().upper()] = name.strip()
-    return names
+        code, sep, value = line.partition('=')
+        if sep and code.strip() and value.strip():
+            pairs.append((code.strip().upper(), value.strip()))
+    codes = {code for code, _ in pairs}
+    names, aliases = {}, {}
+    for code, value in pairs:
+        if value.upper() in codes and value.upper() != code:
+            aliases[code] = value.upper()
+        else:
+            names[code] = value
+    result = (names, aliases)
+    try:
+        g._factory_map = result
+    except RuntimeError:
+        pass
+    return result
+
+
+def factory_names():
+    return _factory_map()[0]
+
+
+def canonical_factory(code):
+    """The factory code a schedule value stands for: 'Rainbow' -> 'RB' when
+    "RAINBOW=RB" is listed; anything else is returned as written (trimmed)."""
+    code = (code or '').strip()
+    if not code:
+        return ''
+    aliases = _factory_map()[1]
+    key, seen = code.upper(), set()
+    while key in aliases and key not in seen:
+        seen.add(key)
+        key = aliases[key]
+    return key if key != code.upper() else code
 
 
 def factory_label(code):
-    """'JS 瑞来宝金属' for a known factory code, else the code as written."""
-    code = (code or '').strip()
+    """'JS 瑞来宝金属' for a known factory code (aliases resolved), else the code."""
+    code = canonical_factory(code)
     name = factory_names().get(code.upper()) if code else None
     return f'{code} {name}' if name and name != code else code
 
@@ -1583,7 +1621,7 @@ def _schedule_lines(data):
                 continue
             lines[key] = {'key': key, 'region': sheet, 'dpl': col('order number'),
                           'po': col('daemco purchase order', 'purchase order'),
-                          'supplier': col('supplier', 'foundry'), 'item_code': col('item code'),
+                          'supplier': canonical_factory(col('supplier', 'foundry')), 'item_code': col('item code'),
                           'description': col('item description'), 'qty': qty,
                           'est': col('estimated completion date'), 'must_ship': col('must ship date')}
     return lines
@@ -3869,7 +3907,7 @@ def inspection_report_rows():
                 'order_number': rec.get('order_number') or '',
                 'item_code': rec.get('item_code') or '',
                 'item_description': rec.get('item_description') or '',
-                'supplier': (rec.get('supplier') or suppliers.get(job_key) or '').strip(),
+                'supplier': canonical_factory(rec.get('supplier') or suppliers.get(job_key) or ''),
                 'product_type': product_type_name(rec.get('product_type')) if rec.get('product_type') else '',
                 'inspector': rec.get('inspector_name') or rec.get('submitted_by') or '',
                 'quantity_inspected': rec.get('quantity_inspected') or '',
@@ -5204,7 +5242,8 @@ def vtrust_lines(lead_days=None):
             lines[job_key] = {'job_key': job_key, 'region': sheet, 'dpl': col(row, 'order number'),
                               'po': col(row, 'daemco purchase order', 'purchase order'), 'code': code,
                               'description': desc, 'qty': col(row, 'quantity'),
-                              'supplier': col(row, 'supplier', 'foundry'), 'est': est, 'est_text': est_text}
+                              'supplier': canonical_factory(col(row, 'supplier', 'foundry')), 'est': est,
+                              'est_text': est_text}
     for line in lines.values():
         line['days'] = (line['est'] - today).days if line['est'] else None
         line['booking'] = booking = bookings.get(line['job_key'])
@@ -6151,6 +6190,8 @@ def task_listing(args):
             'FROM inspection_tasks t LEFT JOIN users u ON u.id = t.assigned_to '
             'ORDER BY t.est_completion ASC, t.created_at ASC'
         ).fetchall()]
+    for t in every_task:
+        t['supplier'] = canonical_factory(t['supplier'])
     # Open tasks whose order is no longer in the current schedule (shipped or removed)
     in_schedule = set()
     for sheet, sheet_rows in load_schedule(CURRENT_FILE).items():

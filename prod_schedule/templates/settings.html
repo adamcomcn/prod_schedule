@@ -99,10 +99,10 @@
 
           <div class="form-group">
             <label>&#127981; {{ tr('工厂代码对照', 'Factory codes') }}</label>
-            <textarea name="factory_names" rows="4" placeholder="XM=鑫淼">{{ config.get('factory_names', '') }}</textarea>
+            <textarea name="factory_names" rows="6" placeholder="XM=鑫淼&#10;RAINBOW=RB">{{ config.get('factory_names', '') }}</textarea>
             <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
-              {{ tr('每行一个“代码=名称”。排期 Excel 的 Supplier / Foundry 列填的是工厂代码；填好后任务、报告、V-Trust 页面和邮件里显示为“JS 瑞来宝金属”。不填的代码照原样显示。',
-                    'One "code=name" per line. The Supplier / Foundry column of the schedule holds factory codes; tasks, reports, the V-Trust page and e-mails then show e.g. "JS 瑞来宝金属". Codes not listed are shown as they are.') }}
+              {{ tr('每行一个“代码=名称”。排期 Excel 的 Supplier / Foundry 列填的是工厂代码；填好后任务、报告、V-Trust 页面和邮件里显示为“JS 瑞来宝金属”。不填的代码照原样显示。同一家工厂有不同写法时，写“别名=代码”（如 RAINBOW=RB），显示和统计都会合并到这个代码。',
+                    'One "code=name" per line. The Supplier / Foundry column of the schedule holds factory codes; tasks, reports, the V-Trust page and e-mails then show e.g. "JS 瑞来宝金属". Codes not listed are shown as they are. For another spelling of the same factory write "alias=code" (e.g. RAINBOW=RB): it is shown and counted as that code.') }}
             </div>
           </div>
 
