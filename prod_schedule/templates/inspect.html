@@ -662,8 +662,13 @@ input[name=result] { display:none; }
         </div>
         {% if vtrust_booking.result %}
         <div style="font-size:.85rem; margin-top:4px;">{{ tr('第三方结果', 'Third-party result') }}:
-          <strong style="color:{{ '#059669' if vtrust_booking.result == 'Pass' else '#dc2626' }};">{{ vtrust_booking.result|status_label }}</strong>
+          <strong style="color:{{ '#059669' if vtrust_booking.result == 'Pass' else ('#c2410c' if vtrust_booking.result == 'Conditional Pass' else '#dc2626') }};">{{ vtrust_booking.result|vtrust_result_label }}</strong>
           {% if vtrust_booking.result_note %}— {{ vtrust_booking.result_note }}{% endif %}</div>
+        {% if vtrust_booking.problem_units %}<div style="font-size:.8rem; color:#92400e;">{{ tr('问题阀杆号', 'Stem codes with issues') }}: {{ vtrust_booking.problem_units }}</div>{% endif %}
+        {% if vtrust_booking.release %}<div style="font-size:.8rem;">{{ tr('放行决定', 'Release') }}:
+          <strong style="color:{{ '#059669' if vtrust_booking.release == 'approved' else '#dc2626' }};">{{ tr('放行', 'Released') if vtrust_booking.release == 'approved' else tr('不放行', 'Not released') }}</strong>
+          {% if vtrust_booking.release_note %}— {{ vtrust_booking.release_note }}{% endif %}</div>
+        {% elif vtrust_booking.result in ('Conditional Pass', 'Partial Pass') %}<div style="font-size:.8rem; color:#9a3412;">{{ tr('待放行决定', 'Waiting for the release decision') }}</div>{% endif %}
         {% endif %}
         {% for f in vtrust_booking.files %}
         <div style="font-size:.8rem;"><a href="{{ url_for('vtrust_file', fid=f.id) }}" target="_blank">&#128206; {{ f.original_name }}</a></div>

@@ -12,6 +12,7 @@
 .vt-booked { background:#dbeafe; color:#1e40af; } .vt-done { background:#d1fae5; color:#065f46; }
 .vt-later, .vt-no_date, .vt-overdue { background:#f3f4f6; color:#4b5563; }
 .vt-inspected { background:#ede9fe; color:#5b21b6; } .vt-failed { background:#fee2e2; color:#991b1b; }
+.vt-release { background:#ffedd5; color:#9a3412; }
 .vt-result { margin-top:4px; font-size:.75rem; }
 .vt-file { display:inline-flex; gap:4px; align-items:center; margin:2px 6px 0 0; font-size:.75rem; }
 .vt-file button { border:none; background:none; color:#dc2626; cursor:pointer; padding:0; }
@@ -65,9 +66,20 @@
               {% for key, label in results.items() %}<option value="{{ key }}">{{ tr(label[0], label[1]) }}</option>{% endfor %}
             </select></div>
           <div><label>{{ tr('发现的问题 / 说明', 'Findings / note') }}</label><input type="text" name="result_note" maxlength="500"></div>
+          <div><label>{{ tr('有问题的阀杆号（逗号分隔）', 'Stem codes with issues (comma-separated)') }}</label>
+            <input type="text" name="problem_units" maxlength="1000" placeholder="2627M013, 2627M055"></div>
           <div><label>{{ tr('报告 / 视频（可多选）', 'Report / video (several allowed)') }}</label>
             <input type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.mp4,.mov,.avi,.mkv"></div>
           <div><button class="btn btn-primary btn-sm" type="submit" formaction="{{ url_for('vtrust_result') }}">{{ tr('保存结果到勾选的行', 'Save result to selected lines') }}</button></div>
+        </div>
+        <div class="vt-section" style="margin-top:12px;">③ {{ tr('放行决定（有条件合格 / 部分合格时，相当于在 V-Trust 点 Approve / Reject）', 'Release decision (for a conditional / partial result: the Approve / Reject in V-Trust)') }}</div>
+        <div class="vt-form">
+          <div><label>{{ tr('决定', 'Decision') }}</label>
+            <select name="decision"><option value="">—</option>
+              {% for key, label in releases.items() %}<option value="{{ key }}">{{ tr(label[0], label[1]) }}</option>{% endfor %}
+            </select></div>
+          <div><label>{{ tr('说明', 'Note') }}</label><input type="text" name="release_note" maxlength="500"></div>
+          <div><button class="btn btn-primary btn-sm" type="submit" formaction="{{ url_for('vtrust_release') }}">{{ tr('保存放行决定', 'Save release decision') }}</button></div>
         </div>
         <div class="vt-note" style="margin-top:6px;"><span id="vt-count">0</span> {{ tr('行已勾选', 'line(s) selected') }} ·
           {{ tr('文件按 job number 保存，同一个 job 的所有行都能看到。', 'Files are kept per job number and shown on all its lines.') }}</div>
@@ -92,12 +104,17 @@
             <td>{{ l.dpl }}<br><span style="color:#6b7280;">{{ l.po }} · {{ l.region }}</span></td>
             <td><a href="{{ url_for('inspect_form', job_key=l.job_key) }}">{{ l.code }}</a><br><span style="color:#6b7280;">{{ l.description }}</span></td>
             <td>{{ l.qty }}</td>
-            <td>{{ l.supplier or '—' }}</td>
+            <td>{{ l.supplier|factory or '—' }}</td>
             <td style="white-space:nowrap;">{{ l.est_text or '—' }}{% if l.days is not none %}<br><span style="color:{{ '#b91c1c' if l.days < 0 else '#6b7280' }};font-size:.75rem;">{{ tr('还有 %d 天' % l.days, 'in %d d' % l.days) if l.days >= 0 else tr('已过 %d 天' % -l.days, '%d d past' % -l.days) }}</span>{% endif %}</td>
             <td style="font-weight:600;">{{ b.job_number if b else '' }}{% if b and b.note %}<div style="font-weight:400;color:#6b7280;font-size:.75rem;">{{ b.note }}</div>{% endif %}
-              {% if b and b.result %}<div class="vt-result" style="font-weight:600;color:{{ '#059669' if b.result == 'Pass' else '#dc2626' }};">
-                {{ tr(results[b.result][0], results[b.result][1]) }}{% if b.result_note %} <span style="font-weight:400;color:#374151;">— {{ b.result_note }}</span>{% endif %}
-                <span style="font-weight:400;color:#9ca3af;">· {{ b.result_by }} · {{ b.result_at[:10] }}</span></div>{% endif %}
+              {% if b and b.result %}<div class="vt-result" style="font-weight:600;color:{{ '#059669' if b.result == 'Pass' else ('#c2410c' if b.result == 'Conditional Pass' else '#dc2626') }};">
+                {{ tr(results[b.result][0], results[b.result][1]) if b.result in results else b.result }}{% if b.result_note %} <span style="font-weight:400;color:#374151;">— {{ b.result_note }}</span>{% endif %}
+                <span style="font-weight:400;color:#9ca3af;">· {{ b.result_by }} · {{ b.result_at[:10] }}</span></div>
+                {% if b.problem_units %}<div class="vt-result" style="color:#92400e;">{{ tr('问题阀杆号', 'Stem codes with issues') }}: {{ b.problem_units }}</div>{% endif %}
+                {% if b.release %}<div class="vt-result" style="color:{{ '#059669' if b.release == 'approved' else '#dc2626' }};font-weight:600;">
+                  {{ tr(releases[b.release][0], releases[b.release][1]) }}{% if b.release_note %} <span style="font-weight:400;color:#374151;">— {{ b.release_note }}</span>{% endif %}
+                  <span style="font-weight:400;color:#9ca3af;">· {{ b.release_by }} · {{ b.release_at[:10] }}</span></div>{% endif %}
+              {% endif %}
               {% if b %}{% for f in b.files %}<div class="vt-file"><a href="{{ url_for('vtrust_file', fid=f.id) }}" target="_blank">&#128206; {{ f.original_name }}</a>
                 <button type="submit" formaction="{{ url_for('vtrust_file_delete', fid=f.id) }}" title="{{ tr('删除文件', 'Delete file') }}"
                         onclick="return confirm({{ tr('删除这个文件？', 'Delete this file?')|tojson }});">&#10005;</button></div>{% endfor %}{% endif %}</td>

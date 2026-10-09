@@ -340,7 +340,7 @@ tr.mine td { background:#f0fdf4; }
         {% if sv['outstanding'] > 0 %}
         {% set pct = (sv['outstanding'] / stats.max_sup * 100) | round(1) %}
         <div class="hbar-row{% if loop.index > 8 %} sup-extra{% endif %}"{% if loop.index > 8 %} style="display:none"{% endif %}>
-          <div class="hbar-label" title="{{ sup }}">{{ sup }}</div>
+          <div class="hbar-label" title="{{ sup|factory }}">{{ sup|factory }}</div>
           <div class="hbar-wrap">
             <div class="hbar-fill" style="width:{{ pct }}%; background:#f97316;"></div>
             <span class="hbar-text">{{ sv['outstanding'] }}</span>
@@ -482,7 +482,7 @@ tr.mine td { background:#f0fdf4; }
     <select id="supplierFilter" class="supplier-filter" onchange="filterSupplier(this.value)"
             title="{{ tr('按供应商筛选（只影响当前列表）', 'Filter by supplier (this list only)') }}">
       <option value="*">{{ tr('全部供应商', 'All suppliers') }}</option>
-      {% for name in supplier_names %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+      {% for name in supplier_names %}<option value="{{ name }}">{{ name|factory }}</option>{% endfor %}
       <option value="">{{ tr('（无供应商）', '(no supplier)') }}</option>
     </select>
     {% endif %}
@@ -578,7 +578,7 @@ tr.mine td { background:#f0fdf4; }
             {% endif %}
             <td class="c-dot"><span class="urgency-dot urg-{{ urg_cls }}"></span></td>
             <td class="c-meta" data-label="{{ tr('区域', 'Region') }}"><strong>{{ t.region }}</strong></td>
-            <td class="c-meta" data-label="{{ tr('供应商', 'Supplier') }}" style="font-size:.82rem; white-space:nowrap;">{{ (t.supplier or '')|trim or '—' }}</td>
+            <td class="c-meta" data-label="{{ tr('供应商', 'Supplier') }}" style="font-size:.82rem; white-space:nowrap;">{{ (t.supplier or '')|trim|factory or '—' }}</td>
             <td class="c-order">
               <a href="{{ url_for('inspect_form', job_key=t.job_key) }}"
                  style="font-weight:600;">{{ t.order_number }}</a>

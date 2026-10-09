@@ -81,7 +81,7 @@ ADMIN_ENDPOINTS = {
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
     'settings_purchasing_send', 'export_purchasing_excel', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
-    'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'vtrust_keep', 'report_kpi_exclusion', 'schedule_est_edit',
+    'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'vtrust_keep', 'vtrust_release', 'report_kpi_exclusion', 'schedule_est_edit',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -179,6 +179,27 @@ def device_label(user_agent):
     return ' · '.join(p for p in (system, browser) if p) or (ua[:40] if ua else '—')
 
 app.jinja_env.filters['device_label'] = device_label
+
+
+def factory_names():
+    """{code: name} from Settings ("XM=鑫淼", one per line). The schedule's
+    Supplier / Foundry column holds these factory codes."""
+    names = {}
+    for line in str(load_config().get('factory_names', '')).splitlines():
+        code, sep, name = line.partition('=')
+        if sep and code.strip() and name.strip():
+            names[code.strip().upper()] = name.strip()
+    return names
+
+
+def factory_label(code):
+    """'JS 瑞来宝金属' for a known factory code, else the code as written."""
+    code = (code or '').strip()
+    name = factory_names().get(code.upper()) if code else None
+    return f'{code} {name}' if name and name != code else code
+
+
+app.jinja_env.filters['factory'] = factory_label
 
 def ip_country(ip):
     """'CN 中国' / 'CN China' for an IP address (offline DB-IP Lite database)."""
@@ -4001,6 +4022,10 @@ def settings():
         config['weekly_summary'] = request.form.get('weekly_summary') == '1'
         config['vtrust_notify_emails'] = ', '.join(_email_list(request.form.get('vtrust_notify_emails', '')))
         config['purchasing_emails'] = ', '.join(_email_list(request.form.get('purchasing_emails', '')))
+        if 'factory_names' in request.form:
+            config['factory_names'] = '\n'.join(
+                f'{c.strip().upper()}={n.strip()}' for c, s, n in
+                (l.partition('=') for l in request.form['factory_names'].splitlines()) if s and c.strip() and n.strip())
         grace = request.form.get('kpi_grace_workdays', type=int)
         config['kpi_grace_workdays'] = grace if grace is not None and 0 <= grace <= 15 else KPI_GRACE_WORKDAYS
         config['qa_mismatch_emails'] = ', '.join(_email_list(request.form.get('qa_mismatch_emails', '')))
@@ -5074,10 +5099,23 @@ def _qty_sum(a, b):
 VTRUST_STATUS = {
     'reschedule': ('待确认改期', 'Check reschedule'), 'to_book': ('待预约', 'To book'), 'booked': ('已预约', 'Booked'),
     'later': ('以后再约', 'Later'), 'overdue': ('已过完成日', 'Past due'), 'no_date': ('无完成日', 'No date'),
-    'inspected': ('已检验 · 待录结果', 'Inspected · result to enter'), 'failed': ('不合格', 'Failed'),
+    'inspected': ('已检验 · 待录结果', 'Inspected · result to enter'),
+    'release': ('待放行决定', 'Release decision'), 'failed': ('不合格 / 不放行', 'Failed / not released'),
     'done': ('已完成', 'Done'),
 }
-VTRUST_RESULTS = {'Pass': ('合格', 'Pass'), 'Fail': ('不合格', 'Fail'), 'Partial Pass': ('部分合格', 'Partial pass')}
+VTRUST_RESULTS = {'Pass': ('合格', 'Pass'), 'Conditional Pass': ('有条件合格', 'Passed (conditional)'),
+                  'Partial Pass': ('部分合格', 'Partial pass'), 'Fail': ('不合格', 'Fail')}
+# results V-Trust only passes once the client approves the release (their Approve / Reject)
+VTRUST_NEEDS_RELEASE = ('Conditional Pass', 'Partial Pass')
+VTRUST_RELEASE = {'approved': ('放行', 'Released'), 'rejected': ('不放行', 'Not released')}
+
+
+def vtrust_result_label(value):
+    label = VTRUST_RESULTS.get(value)
+    return tr(*label) if label else (value or '')
+
+
+app.jinja_env.filters['vtrust_result_label'] = vtrust_result_label
 VTRUST_FILE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.xls', '.mp4', '.mov', '.avi', '.mkv'}
 
 
@@ -5180,7 +5218,11 @@ def vtrust_lines(lead_days=None):
         if get_vtrust_status(inspections.get(line['job_key'], [])).lower() == 'pass':
             line['status'] = 'done'
         elif booking and booking.get('result'):
-            line['status'] = 'done' if booking['result'] == 'Pass' else 'failed'
+            result, release = booking['result'], booking.get('release') or ''
+            if result in VTRUST_NEEDS_RELEASE:
+                line['status'] = {'approved': 'done', 'rejected': 'failed'}.get(release, 'release')
+            else:
+                line['status'] = 'done' if result == 'Pass' else 'failed'
         elif booking and end and end < today:
             line['status'] = 'inspected'
         elif booking:
@@ -5253,7 +5295,7 @@ def vtrust_email(lines, lead, booked=()):
         if l['supplier'] != supplier:
             supplier = l['supplier']
             rows_html.append(f'<tr><td colspan="8" style="{cell}background:#eef2f7;font-weight:700;">'
-                             f'{_escape(supplier or "—")}</td></tr>')
+                             f'{_escape(factory_label(supplier) or "—")}</td></tr>')
         late = (l['days'] or 0) < 0
         rows_html.append(
             '<tr>' + ''.join(f'<td style="{cell}{extra}">{_escape(v)}</td>' for v, extra in (
@@ -5412,15 +5454,15 @@ def vtrust_page():
     counts = Counter(l['status'] for l in lines)
     order = list(VTRUST_STATUS)
     if show == 'open':
-        shown = [l for l in lines if l['status'] in ('reschedule', 'failed', 'to_book', 'inspected', 'booked',
-                                                    'overdue')]
+        shown = [l for l in lines if l['status'] in ('reschedule', 'release', 'failed', 'to_book', 'inspected',
+                                                    'booked', 'overdue')]
     elif show in VTRUST_STATUS:
         shown = [l for l in lines if l['status'] == show]
     else:
         shown = lines
     shown.sort(key=lambda l: (order.index(l['status']), l['est'] or date.max, l['dpl'], l['code']))
     return render_template('vtrust.html', lines=shown, counts=counts, show=show, lead=lead,
-                           window_text=booking_window_text, results=VTRUST_RESULTS,
+                           window_text=booking_window_text, results=VTRUST_RESULTS, releases=VTRUST_RELEASE,
                            statuses=VTRUST_STATUS, past_days=VTRUST_PAST_DAYS, today=china_today().isoformat())
 
 
@@ -5484,6 +5526,7 @@ def vtrust_result():
     keys = request.form.getlist('job_key')
     result = request.form.get('result', '')
     note = ' '.join(request.form.get('result_note', '').split())[:500]
+    units = ', '.join(dict.fromkeys(u for u in re.split(r'[\s,，;；、]+', request.form.get('problem_units', '')) if u))[:1000]
     uploads = [f for f in request.files.getlist('files') if f and f.filename]
     back = redirect(url_for('vtrust_page', show=request.form.get('show', 'open')))
     bookings = vtrust_bookings()
@@ -5505,8 +5548,9 @@ def vtrust_result():
     with db_conn() as conn:
         if result in VTRUST_RESULTS:
             for key in booked:
-                conn.execute("UPDATE vtrust_bookings SET result=?, result_note=?, result_by=?, result_at=datetime('now') "
-                             'WHERE job_key=?', (result, note, g.get('username', ''), key))
+                conn.execute("UPDATE vtrust_bookings SET result=?, result_note=?, problem_units=?, result_by=?, "
+                             "result_at=datetime('now'), release='', release_note='', release_by='', release_at='' "
+                             'WHERE job_key=?', (result, note, units, g.get('username', ''), key))
         for upload in uploads:
             first = None
             for number in job_numbers:
@@ -5522,6 +5566,30 @@ def vtrust_result():
              f'V-Trust result saved for {len(booked)} line(s)' + (f', {len(uploads)} file(s) uploaded' if uploads else '')
              + (f' ({skipped} line(s) without a job number skipped)' if skipped else '')), 'success')
     return back
+
+
+@app.route('/vtrust/release', methods=['POST'])
+def vtrust_release():
+    """Admin's decision on a conditional / partial V-Trust result: release the
+    shipment or not (what the client's Approve / Reject is in V-Trust)."""
+    keys = request.form.getlist('job_key')
+    decision = request.form.get('decision', '')
+    note = ' '.join(request.form.get('release_note', '').split())[:500]
+    bookings = vtrust_bookings()
+    targets = [k for k in keys if (bookings.get(k) or {}).get('result') in VTRUST_NEEDS_RELEASE]
+    if decision not in VTRUST_RELEASE:
+        flash(tr('请选择放行或不放行', 'Choose release or not'), 'error')
+    elif not targets:
+        flash(tr('勾选的行里没有“有条件合格 / 部分合格”的结果', 'None of the selected lines has a conditional / partial result'),
+              'error')
+    else:
+        with db_conn() as conn:
+            for key in targets:
+                conn.execute("UPDATE vtrust_bookings SET release=?, release_note=?, release_by=?, release_at=datetime('now') "
+                             'WHERE job_key=?', (decision, note, g.get('username', ''), key))
+        label = VTRUST_RELEASE[decision]
+        flash(tr(f'已为 {len(targets)} 行记录：{label[0]}', f'{label[1]} recorded for {len(targets)} line(s)'), 'success')
+    return redirect(url_for('vtrust_page', show=request.form.get('show', 'open')))
 
 
 @app.route('/vtrust/files/<int:fid>')
@@ -5614,7 +5682,7 @@ def _qa_line(sheet, row, headers, key, **extra):
     supplier = next((str(row[low.index(n)]).strip() for n in ('supplier', 'foundry')
                      if n in low and low.index(n) < len(row) and row[low.index(n)] is not None), '')
     cell = _qa_cell(row, headers)
-    return dict(_row_details(sheet, row, headers), key=key, supplier=supplier,
+    return dict(_row_details(sheet, row, headers), key=key, supplier=factory_label(supplier),
                 excel_qa='' if cell is None else (cell or '空 / blank'), **extra)
 
 

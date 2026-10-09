@@ -80,7 +80,7 @@
     <div class="sum-grid">
       {% for s in summary[:12] %}
       <div class="sum-card">
-        <div style="font-weight:600; margin-bottom:2px;">{{ s.supplier }}</div>
+        <div style="font-weight:600; margin-bottom:2px;">{{ s.supplier|factory }}</div>
         <strong>{{ s.pass_rate }}%</strong> {{ tr('合格率', 'pass rate') }}
         <div style="color:#6b7280;">{{ s.total }} {{ tr('份', 'reports') }} · {{ tr('不合格', 'Fail') }} {{ s.Fail }} · {{ tr('部分', 'Partial') }} {{ s['Partial Pass'] }}</div>
       </div>
@@ -106,7 +106,7 @@
           <td style="white-space:nowrap;">{{ r.date }}</td>
           <td><strong>{{ r.order_number }}</strong> {{ r.item_code }}
             <div style="color:#6b7280; font-size:.74rem;">{{ r.item_description[:60] }}</div></td>
-          <td>{{ r.supplier or '—' }}</td>
+          <td>{{ r.supplier|factory or '—' }}</td>
           <td>{{ r.inspector }}</td>
           <td><span class="res res-{{ r.result.split(' ')[0] }}">{{ {'Pass': tr('合格', 'Pass'), 'Fail': tr('不合格', 'Fail'), 'Partial Pass': tr('部分合格', 'Partial Pass')}.get(r.result, r.result or '—') }}</span></td>
           <td style="color:#b45309; font-size:.74rem;">{{ r.missing_evidence }}</td>

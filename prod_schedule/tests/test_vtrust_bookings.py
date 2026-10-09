@@ -271,6 +271,52 @@ class VtrustResultTests(VtrustBase):
         self.assertEqual([f['original_name'] for f in app.vtrust_bookings()[A]['files']], ['test.mp4'])
         self.assertEqual(self.client().get(f'/vtrust/files/{fid}').status_code, 404)
 
+    def test_conditional_pass_needs_a_release_decision(self):
+        self.book([A, B], start='2026-10-07', end='2026-10-07')
+        import io
+        r = self.client().post('/vtrust/result', content_type='multipart/form-data', data={
+            '_csrf_token': 'tok', 'job_key': [A, B], 'result': 'Conditional Pass', 'result_note': 'leak after relief',
+            'problem_units': '2627M013，2627M055 2627M046;2627M013', 'files': []})
+        self.assertEqual(r.status_code, 302)
+        b = app.vtrust_bookings()[A]
+        self.assertEqual(b['problem_units'], '2627M013, 2627M055, 2627M046')       # cleaned, no duplicates
+        self.assertEqual(self.line(A)['status'], 'release')
+        page = self.client().get('/vtrust').get_data(as_text=True)
+        self.assertIn('待放行决定', page)
+        self.assertIn('有条件合格', page)
+        self.assertIn('2627M055', page)
+        release = lambda keys, decision, who='boss': self.client(who).post('/vtrust/release', data={
+            '_csrf_token': 'tok', 'job_key': keys, 'decision': decision, 'release_note': 'retested OK'})
+        self.assertEqual(release([A], 'approved', 'murphy').status_code, 403)
+        release([A], '')                                                      # decision required
+        self.assertEqual(app.vtrust_bookings()[A]['release'], '')
+        release([A], 'approved')
+        release([B], 'rejected')
+        self.assertEqual((self.line(A)['status'], self.line(B)['status']), ('done', 'failed'))
+        self.assertEqual(app.vtrust_bookings()[A]['release_by'], 'boss')
+        with mock.patch.object(app, 'find_job', return_value={'job_key': A, 'Item Code': 'RSV020016FLFL',
+                                                             'Item Description': 'DN200 Gate Valve'}):
+            insp = self.client('murphy').get(f'/inspect/{A}').get_data(as_text=True)
+        self.assertIn('有条件合格', insp)
+        self.assertIn('2627M055', insp)
+        self.assertIn('放行', insp)
+        self.result([A], 'Pass')                                              # a new result resets the decision
+        self.assertEqual(app.vtrust_bookings()[A]['release'], '')
+        self.client().post('/vtrust/release', data={'_csrf_token': 'tok', 'job_key': [A], 'decision': 'approved'})
+        self.assertEqual(app.vtrust_bookings()[A]['release'], '')             # only for conditional / partial
+
+    def test_factory_names(self):
+        config = app.load_config()
+        config.pop('factory_names', None)
+        app.save_json(app.CONFIG_FILE, config)
+        self.client().post('/settings', data={'_csrf_token': 'tok',
+                                              'factory_names': 'js = 瑞来宝金属\nXM=鑫淼\nbad line\n=x\n'})
+        self.assertEqual(app.load_config()['factory_names'], 'JS=瑞来宝金属\nXM=鑫淼')
+        self.assertEqual((app.factory_label('JS'), app.factory_label('ZZ'), app.factory_label('')),
+                         ('JS 瑞来宝金属', 'ZZ', ''))
+        self.assertIn('JS 瑞来宝金属', self.client().get('/vtrust').get_data(as_text=True))
+        self.assertIn('JS=瑞来宝金属', self.client().get('/settings').get_data(as_text=True))
+
     def test_checks(self):
         self.result([A], 'Pass')                                            # no booking yet
         self.assertEqual(app.vtrust_bookings(), {})
