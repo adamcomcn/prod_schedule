@@ -2397,6 +2397,28 @@ def _discard_pending_upload():
         os.remove(PENDING_UPLOAD_FILE)
 
 
+def _stage_pending_upload(file_bytes, filename, uploaded_by):
+    """Parse a weekly schedule and keep it as the upload waiting for admin confirmation.
+    Returns the reason it was refused, or None. Raises ExcelUploadError for unreadable files."""
+    data = parse_excel(file_bytes, EXCEL_PASSWORD)
+    blocked = _upload_block_reason(data)
+    if blocked:
+        return blocked
+    _discard_pending_upload()
+    os.makedirs(HISTORY_DIR, exist_ok=True)
+    raw_name = f"pending-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.xlsx"
+    with open(os.path.join(HISTORY_DIR, raw_name), 'wb') as out:
+        out.write(file_bytes)
+    save_json(PENDING_UPLOAD_FILE, {
+        'data': data,
+        'filename': _display_filename(filename),
+        'raw_file': raw_name,
+        'uploaded_by': uploaded_by,
+        'uploaded_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+    })
+    return None
+
+
 @app.route('/upload', methods=['POST'])
 def upload_excel():
     if 'file' not in request.files:
@@ -2409,25 +2431,10 @@ def upload_excel():
         return redirect(url_for('index'))
 
     try:
-        file_bytes = f.read()
-        data = parse_excel(file_bytes, EXCEL_PASSWORD)
-        blocked = _upload_block_reason(data)
+        blocked = _stage_pending_upload(f.read(), f.filename, g.get('username', ''))
         if blocked:
             flash(blocked, 'error')
             return redirect(url_for('index'))
-
-        _discard_pending_upload()
-        os.makedirs(HISTORY_DIR, exist_ok=True)
-        raw_name = f"pending-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.xlsx"
-        with open(os.path.join(HISTORY_DIR, raw_name), 'wb') as out:
-            out.write(file_bytes)
-        save_json(PENDING_UPLOAD_FILE, {
-            'data': data,
-            'filename': _display_filename(f.filename),
-            'raw_file': raw_name,
-            'uploaded_by': g.get('username', ''),
-            'uploaded_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
-        })
     except ExcelUploadError as exc:
         logger.warning('Schedule upload rejected: %s', exc)
         flash(str(exc), 'error')
@@ -8035,14 +8042,14 @@ def user_update(uid):
 def _auth_check():
     if request.endpoint in ('inspection_draft_upload', 'vtrust_result') and session.get('user_id'):
         request.max_content_length = DRAFT_FILE_MAX_BYTES   # signed-in users only; set before the body is read
-    if request.method == 'POST' and request.endpoint != 'cron_reminders':
+    if request.method == 'POST' and request.endpoint not in ('cron_reminders', *INTEGRATION_ENDPOINTS):
         submitted = request.headers.get('X-CSRF-Token') or request.form.get('_csrf_token')
         expected = session.get('_csrf_token', '')
         if not submitted or not expected or not hmac.compare_digest(submitted, expected):
             return 'Invalid CSRF token', 400
 
     g.lang = _lang_from_cookie()
-    public = {'healthz', 'login', 'static', 'set_language', 'cron_reminders'}
+    public = {'healthz', 'login', 'static', 'set_language', 'cron_reminders', *INTEGRATION_ENDPOINTS}
     if request.endpoint in public or request.endpoint is None:
         return None
 
@@ -8106,6 +8113,70 @@ def _run_reminders_in_background(base_url):
             logger.exception('Weekly summary e-mail failed')
     import threading
     threading.Thread(target=work, daemon=True).start()
+
+
+# --- Production Desk integration -------------------------------------------------------
+# The Production Desk (separate app) forwards the weekly schedule Wang uploads there and reads
+# inspection status to warn before a shipment is recorded without a passed inspection.
+# Both calls need the shared DESK_INTEGRATION_TOKEN (X-Integration-Token); unset = disabled.
+INTEGRATION_ENDPOINTS = ('integration_schedule', 'integration_inspections')
+
+
+def _integration_authorized():
+    token = os.environ.get('DESK_INTEGRATION_TOKEN', '')
+    supplied = request.headers.get('X-Integration-Token', '')
+    return bool(token) and hmac.compare_digest(supplied, token)
+
+
+@app.route('/api/integration/schedule', methods=['POST'])
+def integration_schedule():
+    """Stage a forwarded weekly schedule as the pending upload; an admin still confirms it."""
+    if not _integration_authorized():
+        abort(404)
+    f = request.files.get('file')
+    if not f or _upload_extension(f.filename) != '.xlsx':
+        return {'ok': False, 'error': 'An .xlsx schedule file is required.'}, 400
+    uploaded_by = (request.form.get('uploaded_by') or 'Production Desk').strip()[:60]
+    try:
+        blocked = _stage_pending_upload(f.read(), f.filename, f'{uploaded_by} (Production Desk)')
+    except ExcelUploadError as exc:
+        return {'ok': False, 'error': str(exc)}, 422
+    if blocked:
+        return {'ok': False, 'error': blocked}, 409
+    logger.info('Schedule forwarded from the Production Desk by %s is waiting for confirmation', uploaded_by)
+    return {'ok': True, 'pending': True}
+
+
+def inspection_status_rows(cache=None):
+    """Latest inspection per job: result, review status and whether it counts as passed
+    (result Pass and review approved)."""
+    cache = load_json(INSPECTIONS_CACHE, {}) if cache is None else cache
+    with db_conn() as conn:
+        reviews = {(r['job_key'], r['insp_index']): r['status']
+                   for r in conn.execute('SELECT job_key, insp_index, status FROM inspection_reviews')}
+    rows = []
+    for job_key, records in cache.items():
+        if not records:
+            continue
+        index = len(records) - 1
+        record = records[index]
+        region, po, item = (job_key.split('|') + ['', '', ''])[:3]
+        result = record.get('result', '')
+        review = reviews.get((job_key, index), 'pending')
+        rows.append({
+            'job_key': job_key, 'region': region, 'purchase_order': po, 'item_code': item,
+            'result': result, 'review_status': review,
+            'passed': result == 'Pass' and review == 'approved',
+            'submitted_at': record.get('submitted_at', ''), 'inspection_count': len(records),
+        })
+    return rows
+
+
+@app.route('/api/integration/inspections')
+def integration_inspections():
+    if not _integration_authorized():
+        abort(404)
+    return {'items': inspection_status_rows()}
 
 
 @app.route('/cron/reminders', methods=['GET', 'POST'])

@@ -65,5 +65,7 @@ Never push `main` without that explicit per-change "merge". `git pull` main firs
 
 ## Environment variables
 `SECRET_KEY`, `APP_DATA_DIR`, `SMTP_*`, `SMTP_FROM_NAME`, `CRON_SECRET`, `EXCEL_PASSWORD`,
-`BOOTSTRAP_ADMIN_*`, `MAX_UPLOAD_BYTES`, `PDF_FONT_PATH`, `SESSION_HOURS`, `TRUSTED_PROXY_HOPS`.
+`BOOTSTRAP_ADMIN_*`, `MAX_UPLOAD_BYTES`, `PDF_FONT_PATH`, `SESSION_HOURS`, `TRUSTED_PROXY_HOPS`,
+`DESK_INTEGRATION_TOKEN` (shared with the Production Desk: `/api/integration/schedule` stages Wang's forwarded
+schedule as the pending upload, `/api/integration/inspections` reports latest result + review per job).
 Secrets are set by the owner in Railway — never ask for or handle their values.
