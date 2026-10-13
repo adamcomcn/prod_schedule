@@ -1,4 +1,5 @@
 import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time, base64, uuid, zipfile, re, unicodedata, shutil
+import threading
 from collections import Counter, defaultdict, deque
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
@@ -112,6 +113,22 @@ def save_json(path, data):
                 os.remove(tmp_path)
                 raise
             time.sleep(0.05)
+
+
+# One lock for read-modify-write of the JSON data files. gunicorn serves 8 threads at once;
+# a write based on a copy read before another request's write would silently drop that
+# change (e.g. a report submitted at the same moment). Hold it only around load -> save.
+DATA_LOCK = threading.RLock()
+
+
+def update_config(**changes):
+    """Set config keys on a fresh copy under DATA_LOCK, so concurrent writers
+    (Settings, background e-mails) don't undo each other."""
+    with DATA_LOCK:
+        config = load_config()
+        config.update(changes)
+        save_json(CONFIG_FILE, config)
+    return config
 
 def schedule_fingerprint(data):
     canonical = json.dumps(
@@ -999,23 +1016,24 @@ def migrate_job_key(conn, old, new):
     """Move a job — task, reports, attachments, reviews, e-mails, date
     corrections — to its new key after the whole order line moved region.
     Refused (False) when the new key already has reports of its own."""
-    cache = load_json(INSPECTIONS_CACHE, {})
-    if cache.get(new):
-        return False
-    sheet = new.split('|', 1)[0]
-    tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
-    for table in tables:
-        cols = [c[1] for c in conn.execute(f'PRAGMA table_info("{table}")')]
-        if 'job_key' in cols:
-            conn.execute(f'UPDATE OR IGNORE "{table}" SET job_key=? WHERE job_key=?', (new, old))
-    conn.execute('UPDATE inspection_tasks SET region=? WHERE job_key=?', (sheet, new))
-    if old in cache:
-        records = cache.pop(old)
-        for record in records:
-            record['job_key'] = new
-            record['region'] = sheet
-        cache[new] = records
-        save_json(INSPECTIONS_CACHE, cache)
+    with DATA_LOCK:
+        cache = load_json(INSPECTIONS_CACHE, {})
+        if cache.get(new):
+            return False
+        sheet = new.split('|', 1)[0]
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        for table in tables:
+            cols = [c[1] for c in conn.execute(f'PRAGMA table_info("{table}")')]
+            if 'job_key' in cols:
+                conn.execute(f'UPDATE OR IGNORE "{table}" SET job_key=? WHERE job_key=?', (new, old))
+        conn.execute('UPDATE inspection_tasks SET region=? WHERE job_key=?', (sheet, new))
+        if old in cache:
+            records = cache.pop(old)
+            for record in records:
+                record['job_key'] = new
+                record['region'] = sheet
+            cache[new] = records
+            save_json(INSPECTIONS_CACHE, cache)
     return True
 
 
@@ -2531,7 +2549,8 @@ def schedule_est_edit():
     if old_est == new_est:
         return redirect(back)
 
-    save_json(CURRENT_FILE, data)
+    with DATA_LOCK:
+        save_json(CURRENT_FILE, data)
     config = load_config()
     by = g.get('display_name') or g.get('username', '')
     with db_conn() as conn:
@@ -2652,7 +2671,8 @@ def _apply_schedule(data, baseline=False):
         flash(tr(f'{kept_corrections} 个预计完成日沿用了主管的手动修正（供应商表格里仍是原值）',
                  f'{kept_corrections} completion date(s) kept the lead\'s manual correction (supplier file unchanged)'),
               'info')
-    save_json(CURRENT_FILE, data)
+    with DATA_LOCK:
+        save_json(CURRENT_FILE, data)
     remember_schedule_upload(data, datetime.now().strftime('%d %b %Y %H:%M'))
 
     # ── Detect header changes vs previous week (poka-yoke) ───────────
@@ -2678,10 +2698,7 @@ def _apply_schedule(data, baseline=False):
                  '⚠ Columns changed since the last upload — please check: ')
               + ' | '.join(header_warnings), 'warning')
 
-    config = load_config()
-    config['upload_date'] = datetime.now().strftime('%d %b %Y %H:%M')
-    config['last_upload_baseline'] = bool(baseline)
-    save_json(CONFIG_FILE, config)
+    config = update_config(upload_date=datetime.now().strftime('%d %b %Y %H:%M'), last_upload_baseline=bool(baseline))
 
     # ── Save weekly snapshot for trend chart ─────────────────────────
     _snap_label = config['upload_date']
@@ -3283,8 +3300,9 @@ def submit_inspection(job_key):
     evidence_results = {}
     all_file_links   = []
     all_file_names   = []
+    attachment_ids   = []     # renumbered if another report for this job is saved first
 
-    # Determine which insp_index this will be
+    # Provisional insp_index; checked again under DATA_LOCK when the report is saved
     cache = load_json(INSPECTIONS_CACHE, {})
     insp_index = len(cache.get(job_key, []))
     inspection_data['report_no'] = readable_report_number(inspection_data, insp_index)
@@ -3313,12 +3331,12 @@ def submit_inspection(job_key):
                 all_file_names.append(f['original_name'])
                 all_file_links.append(f"[local] {f['saved_name']}")
                 evidence_results[etype]['files'].append(f['original_name'])
-                conn.execute(
+                attachment_ids.append(conn.execute(
                     'INSERT INTO inspection_attachments '
                     '(job_key, insp_index, evidence_type, original_name, saved_name, '
                     ' file_path, drive_link, result, notes) VALUES (?,?,?,?,?,?,?,?,?)',
                     (job_key, insp_index, etype, f['original_name'], f['saved_name'],
-                     f['file_path'], '', ev_result, ev_notes))
+                     f['file_path'], '', ev_result, ev_notes)).lastrowid)
 
             for uploaded_file in ev_files:
                 if not uploaded_file.filename:
@@ -3331,12 +3349,12 @@ def submit_inspection(job_key):
                 all_file_links.append(f'[local] {saved_name}')
                 evidence_results[etype]['files'].append(orig_name)
 
-                conn.execute(
+                attachment_ids.append(conn.execute(
                     'INSERT INTO inspection_attachments '
                     '(job_key, insp_index, evidence_type, original_name, saved_name, '
                     ' file_path, drive_link, result, notes) VALUES (?,?,?,?,?,?,?,?,?)',
                     (job_key, insp_index, etype, orig_name, saved_name,
-                     file_path, '', ev_result, ev_notes))
+                     file_path, '', ev_result, ev_notes)).lastrowid)
 
     # Check items, DAQ readings and missing evidence against the rule matrix
     item_code = form.get('item_code', '')
@@ -3385,6 +3403,7 @@ def submit_inspection(job_key):
                     (job_key, insp_index, kind, f['original_name'], f['saved_name'], f['file_path'], f['ref'])
                 ).lastrowid
                 photos[f['ref']].append(aid)
+                attachment_ids.append(aid)
             if draft:
                 conn.execute('DELETE FROM draft_files WHERE draft_id=?', (draft['id'],))
                 conn.execute('DELETE FROM inspection_drafts WHERE id=?', (draft['id'],))
@@ -3408,36 +3427,49 @@ def submit_inspection(job_key):
                 conn.execute('DELETE FROM draft_files WHERE draft_id=?', (draft['id'],))
                 conn.execute('DELETE FROM inspection_drafts WHERE id=?', (draft['id'],))
 
-    # Save to local cache
-    if job_key not in cache:
-        cache[job_key] = []
-    cache[job_key].append(inspection_data)
-    save_json(INSPECTIONS_CACHE, cache)
+    # Save: re-read under the lock so a report saved by someone else while this one was
+    # uploading is kept; if one was added for this job, this report takes the next number.
+    with DATA_LOCK:
+        cache = load_json(INSPECTIONS_CACHE, {})
+        records = cache.setdefault(job_key, [])
+        renumbered = len(records) != insp_index
+        if renumbered:
+            insp_index = len(records)
+            inspection_data['report_no'] = readable_report_number(inspection_data, insp_index)
+        records.append(inspection_data)
+        save_json(INSPECTIONS_CACHE, cache)
+    if renumbered and attachment_ids:
+        with db_conn() as conn:
+            conn.executemany('UPDATE inspection_attachments SET insp_index=? WHERE id=?',
+                             [(insp_index, aid) for aid in attachment_ids])
+        logger.warning('Report for %s saved as #%s: another report was saved at the same time',
+                       job_key, insp_index + 1)
 
     # Auto-update QA BRTs Sent? → YES in current schedule
-    current_sched = load_schedule(CURRENT_FILE)
-    qa_updated = False
-    for sheet, rows in current_sched.items():
-        if not rows or len(rows) < 2:
-            continue
-        headers = rows[0]
-        qa_idx = next((i for i, h in enumerate(headers)
-                       if 'qa brt' in str(h).lower()), None)
-        if qa_idx is None:
-            continue
-        for row in rows[1:]:
-            if make_job_key(sheet, row, headers) == job_key:
-                row[qa_idx] = 'YES'
-                qa_updated = True
+    with DATA_LOCK:
+        current_sched = load_schedule(CURRENT_FILE)
+        qa_updated = False
+        for sheet, rows in current_sched.items():
+            if not rows or len(rows) < 2:
+                continue
+            headers = rows[0]
+            qa_idx = next((i for i, h in enumerate(headers)
+                           if 'qa brt' in str(h).lower()), None)
+            if qa_idx is None:
+                continue
+            for row in rows[1:]:
+                if make_job_key(sheet, row, headers) == job_key:
+                    row[qa_idx] = 'YES'
+                    qa_updated = True
+                    break
+            if qa_updated:
                 break
         if qa_updated:
-            break
-    if qa_updated:
-        save_json(CURRENT_FILE, current_sched)
+            save_json(CURRENT_FILE, current_sched)
 
     _update_task_after_inspection(job_key, inspection_data['result'])
     # HQ only receives the report once a reviewer has approved it.
-    _send_review_request_email(job_key, len(cache[job_key]) - 1, inspection_data)
+    _send_review_request_email(job_key, insp_index, inspection_data)
 
     # Mark outstanding_jobs entry as completed
     with db_conn() as conn:
@@ -3850,21 +3882,22 @@ def change_report_inspector(job_key, index):
     if not user:
         flash(tr('请选择检验员', 'Please choose an inspector'), 'error')
         return redirect(url_for('inspect_form', job_key=job_key))
-    cache = load_json(INSPECTIONS_CACHE, {})
-    records = cache.get(job_key, [])
-    if not 0 <= index < len(records):
-        abort(404)
-    record = records[index]
-    old = record.get('inspector_name', '')
-    new = user['display_name'] or user['username']
-    if old == new:
-        flash(tr('检验员没有变化', 'The inspector is unchanged'), 'info')
-        return redirect(url_for('inspect_form', job_key=job_key))
-    record['inspector_name'] = new
-    record.setdefault('inspector_changes', []).append({
-        'from': old, 'to': new, 'by': g.get('username', ''),
-        'at': datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M')})
-    save_json(INSPECTIONS_CACHE, cache)
+    with DATA_LOCK:
+        cache = load_json(INSPECTIONS_CACHE, {})
+        records = cache.get(job_key, [])
+        if not 0 <= index < len(records):
+            abort(404)
+        record = records[index]
+        old = record.get('inspector_name', '')
+        new = user['display_name'] or user['username']
+        if old == new:
+            flash(tr('检验员没有变化', 'The inspector is unchanged'), 'info')
+            return redirect(url_for('inspect_form', job_key=job_key))
+        record['inspector_name'] = new
+        record.setdefault('inspector_changes', []).append({
+            'from': old, 'to': new, 'by': g.get('username', ''),
+            'at': datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M')})
+        save_json(INSPECTIONS_CACHE, cache)
     logger.info('Report %s #%s inspector changed from %r to %r by %s', job_key, index, old, new, g.get('username'))
     flash(tr(f'检验员已从 {old} 改为 {new}', f'Inspector changed from {old} to {new}'), 'success')
     return redirect(url_for('inspect_form', job_key=job_key))
@@ -4197,11 +4230,8 @@ def send_backup_email(force=False):
         ok, msg = _smtp_send(f'【数据备份】QC data backup {day}', '\n'.join(lines), recipients, attachments)
     finally:
         _remove_quietly(path)
-    config = load_config()
-    config['backup_last_day'] = day
-    config['backup_last_at'] = datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M')
-    config['backup_last_status'] = 'ok' if ok else msg
-    save_json(CONFIG_FILE, config)
+    update_config(backup_last_day=day, backup_last_at=datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M'),
+                  backup_last_status='ok' if ok else msg)
     return ok, msg
 
 
@@ -4302,9 +4332,7 @@ def evidence_rule_coverage():
 
 @app.route('/settings/modules', methods=['POST'])
 def settings_modules():
-    config = load_config()
-    config['modules'] = {name: request.form.get(f'module_{name}') == '1' for name in MODULES}
-    save_json(CONFIG_FILE, config)
+    update_config(modules={name: request.form.get(f'module_{name}') == '1' for name in MODULES})
     flash(tr('功能模块设置已保存', 'Module settings saved'), 'success')
     return redirect(url_for('settings'))
 
@@ -6353,9 +6381,7 @@ def send_weekly_summary(force=False):
     lines.append(url_for('tasks', _external=True))
     ok, msg = _smtp_send(f'【每周汇总】检验任务 {week} / Weekly inspection summary', '\n'.join(lines), recipients)
     if ok and not force:
-        config = load_config()
-        config['weekly_summary_last'] = week
-        save_json(CONFIG_FILE, config)
+        update_config(weekly_summary_last=week)
     return ok, msg
 
 
@@ -7742,16 +7768,17 @@ def assign_unscheduled_tasks_to_lead():
 def reclassify_l_type_heads():
     """L-Type hydrant heads used to share the cover's product type; give
     reports saved before the split the head type. Idempotent."""
-    cache = load_json(INSPECTIONS_CACHE, {})
-    changed = 0
-    for records in cache.values():
-        for rec in records or []:
-            if rec.get('product_type') == 'l_type' and \
-                    product_type_for(rec.get('item_code', ''), rec.get('item_description', '')) == 'l_type_head':
-                rec['product_type'] = 'l_type_head'
-                changed += 1
-    if changed:
-        save_json(INSPECTIONS_CACHE, cache)
+    with DATA_LOCK:
+        cache = load_json(INSPECTIONS_CACHE, {})
+        changed = 0
+        for records in cache.values():
+            for rec in records or []:
+                if rec.get('product_type') == 'l_type' and \
+                        product_type_for(rec.get('item_code', ''), rec.get('item_description', '')) == 'l_type_head':
+                    rec['product_type'] = 'l_type_head'
+                    changed += 1
+        if changed:
+            save_json(INSPECTIONS_CACHE, cache)
         logger.info('Re-labelled %d L-Type hydrant head report(s)', changed)
     return changed
 
@@ -7787,9 +7814,7 @@ def _assign_old_shipped_reports_to_lead():
                 (lead['id'], 'system', datetime.now().strftime('%Y-%m-%d %H:%M'),
                  '历史检验记录，统一归属 Murphy（一次性整理） / Historical report, assigned to Murphy',
                  task_id))
-    config = load_config()
-    config[OLD_REPORTS_FIX_FLAG] = datetime.now().strftime('%Y-%m-%d %H:%M')
-    save_json(CONFIG_FILE, config)
+    update_config(**{OLD_REPORTS_FIX_FLAG: datetime.now().strftime('%Y-%m-%d %H:%M')})
     logger.info('Assigned %s old shipped report task(s) to Murphy', len(ids))
     return len(ids)
 
