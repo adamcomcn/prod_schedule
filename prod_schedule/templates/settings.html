@@ -231,6 +231,32 @@
         {{ tr('所有数据都保存在 Railway 的同一个磁盘上。建议每周下载一次完整备份，保存到公司电脑或 OneDrive。备份含账号信息（密码已加密），请妥善保管。',
               'All data lives on one Railway disk. Download a full backup weekly and keep it on a company PC or OneDrive. Backups contain account data (passwords are hashed); keep them safe.') }}
       </p>
+      {% set gb = 1024 ** 3 %}
+      {% set disk_color = '#dc2626' if storage.percent >= disk_alert_percent else ('#f59e0b' if storage.percent >= 60 else '#10b981') %}
+      <div style="margin-bottom:14px; font-size:.84rem;" id="storage">
+        <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; margin-bottom:4px;">
+          <strong>{{ tr('数据磁盘', 'Data disk') }}: {{ '%.0f'|format(storage.percent) }}% {{ tr('已用', 'used') }}</strong>
+          <span style="color:#6b7280;">{{ tr('剩余', 'Free') }} {{ '%.1f'|format(storage.free / gb) }} GB / {{ tr('共', 'of') }} {{ '%.1f'|format(storage.total / gb) }} GB</span>
+        </div>
+        <div style="background:#f3f4f6; border-radius:4px; height:10px; overflow:hidden;">
+          <div style="width:{{ [storage.percent, 100]|min }}%; height:10px; background:{{ disk_color }};"></div>
+        </div>
+        <div style="color:#6b7280; margin-top:4px;">
+          {{ tr('照片和附件', 'Photos & attachments') }} {{ '%.2f'|format(storage.uploads / gb) }} GB ·
+          {{ tr('数据', 'Data') }} {{ '%.2f'|format(storage.data / gb) }} GB ·
+          {{ tr('超过 %d%% 时每天邮件提醒备份邮箱' % disk_alert_percent, 'Backup e-mails are warned daily above %d%%' % disk_alert_percent) }}
+        </div>
+        <div style="margin-top:8px;">
+          {% if full_backup_age is none %}
+            <span class="status-dot dot-red"></span>{{ tr('还没有下载过完整备份（含照片附件）', 'No full backup (with photos) downloaded yet') }}
+          {% else %}
+            <span class="status-dot {{ 'dot-green' if full_backup_age < full_backup_days else 'dot-red' }}"></span>
+            {{ tr('上次下载完整备份', 'Last full backup') }}: {{ config.full_backup_last_at|localtime }}
+            ({{ tr('%d 天前' % full_backup_age, '%d day(s) ago' % full_backup_age) }}{% if config.get('full_backup_last_by') %} · {{ config.full_backup_last_by }}{% endif %})
+          {% endif %}
+          <span style="color:#6b7280;">— {{ tr('超过 %d 天未下载时，每周邮件提醒一次' % full_backup_days, 'reminder e-mailed weekly after %d days without one' % full_backup_days) }}</span>
+        </div>
+      </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
         <form method="POST" action="{{ url_for('settings_backup') }}">
           <input type="hidden" name="scope" value="data">

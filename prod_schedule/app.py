@@ -4129,7 +4129,9 @@ def settings():
                            smtp_configured=smtp_configured(),
                            pdf_font_embedded=_pdf_font_embedded(),
                            excel_password_configured=bool(EXCEL_PASSWORD),
-                           my_email=_current_user_email())
+                           my_email=_current_user_email(),
+                           storage=storage_usage(), full_backup_age=full_backup_age_days(config),
+                           disk_alert_percent=DISK_ALERT_PERCENT, full_backup_days=FULL_BACKUP_DAYS)
 
 
 def _current_user_email():
@@ -4240,10 +4242,97 @@ def settings_backup():
     full = request.form.get('scope') == 'full'
     path = build_backup_zip(include_files=full)
     stamp = datetime.now(_tz.utc).strftime('%Y%m%d-%H%M')
+    if full:
+        update_config(full_backup_last_at=datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M'),
+                      full_backup_last_by=g.get('username', ''))
     response = send_file(path, mimetype='application/zip', as_attachment=True,
                          download_name=f"qc-backup-{'full' if full else 'data'}-{stamp}.zip")
     response.call_on_close(lambda: _remove_quietly(path))
     return response
+
+
+DISK_ALERT_PERCENT = 80          # e-mail the backup addresses when the data disk is this full
+FULL_BACKUP_DAYS = 30            # ... and when no full backup (with photos) was downloaded for this long
+
+
+def _folder_bytes(path):
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+def storage_usage():
+    """Disk holding APP_DATA_DIR (the Railway volume) and what takes the space."""
+    disk = shutil.disk_usage(APP_DATA_DIR)
+    return {'total': disk.total, 'used': disk.used, 'free': disk.free,
+            'percent': round(disk.used * 100 / disk.total, 1) if disk.total else 0,
+            'uploads': _folder_bytes(UPLOAD_DIR) + _folder_bytes(PRODUCT_IMG_DIR),
+            'data': _folder_bytes(DATA_DIR)}
+
+
+def full_backup_age_days(config=None):
+    """Days since the last full backup download, or None if there never was one."""
+    last = (config or load_config()).get('full_backup_last_at', '')
+    try:
+        return (datetime.now(_tz.utc).date() - datetime.strptime(last[:10], '%Y-%m-%d').date()).days
+    except ValueError:
+        return None
+
+
+def send_storage_alert():
+    """Daily check: warn the backup addresses when the disk is nearly full (once a
+    day) or no full backup was downloaded for FULL_BACKUP_DAYS (once a week).
+    Returns (sent, message)."""
+    config = load_config()
+    recipients = _email_list(config.get('backup_emails', ''))
+    if not recipients:
+        return False, tr('未设置备份邮箱', 'No backup e-mail configured')
+    usage = storage_usage()
+    day = china_today()
+    disk_due = usage['percent'] >= DISK_ALERT_PERCENT and config.get('disk_alert_last_day') != day.isoformat()
+    age = full_backup_age_days(config)
+    try:
+        last_reminder = date.fromisoformat(config.get('full_backup_reminder_last', ''))
+    except ValueError:
+        last_reminder = None
+    backup_due = (age is None or age >= FULL_BACKUP_DAYS) and (
+        last_reminder is None or (day - last_reminder).days >= 7)
+    if not disk_due and not backup_due:
+        return False, tr('无需提醒', 'Nothing to report')
+    gb = 1024 ** 3
+    lines, subject = [], []
+    if disk_due:
+        subject.append(f"磁盘已用 {usage['percent']:.0f}% / Disk {usage['percent']:.0f}% full")
+        lines += [f"■ 数据磁盘已用 {usage['percent']:.0f}%（剩余 {usage['free'] / gb:.1f} GB / 共 {usage['total'] / gb:.1f} GB）。",
+                  f"  Data disk {usage['percent']:.0f}% full ({usage['free'] / gb:.1f} GB free of {usage['total'] / gb:.1f} GB).",
+                  f"  照片和附件 Photos & attachments: {usage['uploads'] / gb:.2f} GB · 数据 Data: {usage['data'] / gb:.2f} GB",
+                  '  磁盘满了以后将无法上传照片和提交报告。请在 Railway 扩大磁盘（Volume），或下载完整备份后清理旧视频。',
+                  '  When the disk is full, photos and reports cannot be saved. Grow the Railway volume, or download a '
+                  'full backup and remove old videos.', '']
+    if backup_due:
+        subject.append('请下载完整备份 / Full backup due')
+        when = (f'{age} 天前 / {age} days ago' if age is not None else '从未下载 / never')
+        lines += [f'■ 上次下载完整备份（含照片附件）：{when}',
+                  f'  Last full backup (with photos): {when}',
+                  '  每日备份邮件不含照片和附件，它们只在 Railway 磁盘上保存一份。请在“设置 → 数据备份”下载完整备份，'
+                  '保存到公司电脑或 OneDrive。',
+                  '  The daily backup e-mail does not include photos and attachments; their only copy is on the Railway '
+                  'disk. Download a full backup in Settings → Backups and keep it on a company PC or OneDrive.', '']
+    lines.append(url_for('settings', _external=True) + '#backup')
+    ok, msg = _smtp_send('【系统提醒】' + ' · '.join(subject), '\n'.join(lines), recipients)
+    if ok:
+        changes = {}
+        if disk_due:
+            changes['disk_alert_last_day'] = day.isoformat()
+        if backup_due:
+            changes['full_backup_reminder_last'] = day.isoformat()
+        update_config(**changes)
+    return ok, msg
 
 
 @app.route('/settings/backup/email', methods=['POST'])
@@ -8136,6 +8225,11 @@ def _run_reminders_in_background(base_url):
                 send_weekly_summary()
         except Exception:
             logger.exception('Weekly summary e-mail failed')
+        try:
+            with app.test_request_context(base_url=base_url):
+                send_storage_alert()
+        except Exception:
+            logger.exception('Storage alert e-mail failed')
     import threading
     threading.Thread(target=work, daemon=True).start()
 
@@ -8214,7 +8308,8 @@ def cron_reminders():
     return {'reminders_sent': send_due_reminders(), 'review_reminders_sent': send_review_reminders(),
             'vtrust_reminders_sent': send_vtrust_reminders()[0],
             'vtrust_reschedule_alerts': send_vtrust_reschedule_alerts()[0],
-            'backup': send_backup_email()[1], 'weekly_summary': send_weekly_summary()[1]}
+            'backup': send_backup_email()[1], 'weekly_summary': send_weekly_summary()[1],
+            'storage_alert': send_storage_alert()[1]}
 
 
 @app.route('/lang/<code>')
