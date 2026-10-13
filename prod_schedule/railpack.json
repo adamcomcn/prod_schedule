@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "python",
+  "packages": {
+    "python": "3.11"
+  },
+  "deploy": {
+    "aptPackages": ["fonts-wqy-microhei"]
+  }
+}
