@@ -1,7 +1,0 @@
-# Build: Railpack (the service default) with prod_schedule/railpack.json (Python 3.11, Chinese
-# PDF font). Start command and health check below move to the Railway service settings next.
-
-[deploy]
-startCommand = "gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --worker-class gthread --threads 8 --timeout 600"
-healthcheckPath = "/healthz"
-healthcheckTimeout = 300

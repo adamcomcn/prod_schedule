@@ -5,6 +5,9 @@
     "python": "3.11"
   },
   "deploy": {
-    "aptPackages": ["fonts-wqy-microhei"]
+    "aptPackages": [
+      "...",
+      "fonts-wqy-microhei"
+    ]
   }
 }

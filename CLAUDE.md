@@ -2,7 +2,8 @@
 
 Flask app used by a China-based QC team to inspect supplier production against a weekly
 production-schedule workbook, and by HQ (Australia) to review the reports.
-Production: Railway (Nixpacks, `railway.toml`), auto-deploys on every push to `main`.
+Production: Railway (Railpack via `prod_schedule/railpack.json`; start command and health check are
+Railway service settings, see `RAILWAY_DEPLOYMENT.md`), auto-deploys on every push to `main`.
 
 ## Layout
 - Git root is this folder; the app lives in `prod_schedule/`. Only the paths whitelisted in

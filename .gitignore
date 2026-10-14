@@ -3,7 +3,6 @@
 !/.gitignore
 !/prod_schedule/
 !/render.yaml
-!/railway.toml
 !/requirements.txt
 !/.python-version
 !/RAILWAY_DEPLOYMENT.md

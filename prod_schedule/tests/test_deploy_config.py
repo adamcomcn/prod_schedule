@@ -13,7 +13,9 @@ class RailpackConfigTests(unittest.TestCase):
             self.config = json.load(handle)
 
     def test_chinese_pdf_font_is_installed(self):
-        self.assertIn('fonts-wqy-microhei', self.config['deploy']['aptPackages'])
+        packages = self.config['deploy']['aptPackages']
+        self.assertIn('fonts-wqy-microhei', packages)
+        self.assertIn('...', packages, "keep Railpack's default runtime packages")
 
     def test_python_version_matches_python_version_file(self):
         with open(os.path.join(APP_DIR, '.python-version'), encoding='utf-8') as handle:

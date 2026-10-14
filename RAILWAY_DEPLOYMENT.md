@@ -7,8 +7,25 @@
 3. Configure the variables below. Never place their real values in Git.
 4. Deploy the branch and verify `/healthz`, login, role permissions, and data persistence.
 
-The Railway service Root Directory must remain `prod_schedule`. The root
-`railway.toml` start command assumes Railway starts inside that directory.
+The Railway service Root Directory must remain `prod_schedule`; the start command assumes Railway
+starts inside that directory.
+
+## Build and service settings
+
+Railway stops reading `railway.toml` / `railway.json` on 2026-12-01, so the repo no longer has them
+and nothing about the deploy depends on them:
+
+- **Build:** Railpack, configured by `prod_schedule/railpack.json` (Python 3.11 as in
+  `.python-version`; runtime apt packages `...` = Railpack's defaults plus `fonts-wqy-microhei`,
+  the Chinese font embedded in the PDF reports).
+- **Stored on the Railway service** (Settings, or `railway config apply`):
+  - Start command: `gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --worker-class gthread --threads 8 --timeout 600`
+  - Health check path `/healthz`, timeout 300 s
+  - Build command `pip install -r requirements.txt`, Root Directory `prod_schedule`, Volume at `/data`
+
+If these service settings are ever changed with Railway Infrastructure as Code, start from
+`railway config pull` (it keeps every variable as `preserve()`): a file listing only some settings
+plans to delete the variables, the GitHub source and the volume attachment.
 
 ## Environment variables
 
