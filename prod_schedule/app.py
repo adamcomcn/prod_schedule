@@ -8404,9 +8404,79 @@ def upload_too_large(_error):
         return jsonify(ok=False, message=message), 413
     return message, 413
 
+ERROR_ALERT_EVERY = 3600          # the same error is e-mailed at most once an hour
+ERROR_ALERT_MAX_PER_HOUR = 10     # and no more than this many alert e-mails an hour in all
+_error_alerts = {'sent': {}, 'repeats': {}, 'recent': deque()}
+_error_alerts_lock = threading.Lock()
+
+
+def _error_alert_recipients():
+    """Admin accounts with an e-mail; the backup addresses if none has one."""
+    with db_conn() as conn:
+        mails = [r['email'] for r in conn.execute(
+            "SELECT email FROM users WHERE role='admin' AND active=1 AND IFNULL(email,'') != ''")]
+    return _email_list(', '.join(mails)) or _email_list(load_config().get('backup_emails', ''))
+
+
+def _error_alert_due(key, now):
+    """(send?, repeats since the last e-mail) for an error key; rate limited."""
+    with _error_alerts_lock:
+        recent = _error_alerts['recent']
+        while recent and now - recent[0] > 3600:
+            recent.popleft()
+        last = _error_alerts['sent'].get(key)
+        if (last is not None and now - last < ERROR_ALERT_EVERY) or len(recent) >= ERROR_ALERT_MAX_PER_HOUR:
+            _error_alerts['repeats'][key] = _error_alerts['repeats'].get(key, 0) + 1
+            return False, 0
+        _error_alerts['sent'][key] = now
+        recent.append(now)
+        return True, _error_alerts['repeats'].pop(key, 0)
+
+
+def notify_error(exc):
+    """E-mail the admins about an unhandled error on a page (rate limited).
+    Only the page, user and traceback are sent - never form contents."""
+    try:
+        frames = traceback.extract_tb(exc.__traceback__)
+        where = f'{os.path.basename(frames[-1].filename)}:{frames[-1].lineno}' if frames else ''
+        key = (type(exc).__name__, request.endpoint or '', where)
+        send, repeats = _error_alert_due(key, time.time())
+        if not send or not smtp_configured():
+            return
+        details = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))[-6000:]
+        lines = [f'系统错误 / Server error — {dual_zone_time()}', '',
+                 f"页面 Page: {request.method} {request.path}",
+                 f"用户 User: {g.get('username') or '—'} ({g.get('role') or '—'})",
+                 f'错误 Error: {type(exc).__name__}: {str(exc)[:300]}',
+                 f'位置 Where: {where}']
+        if repeats:
+            lines.append(f'自上次提醒以来又发生 {repeats} 次 / happened {repeats} more time(s) since the last e-mail')
+        lines += ['', '用户看到的是 “Internal server error”。同一个错误每小时最多提醒一次。',
+                  'The user saw "Internal server error". The same error is e-mailed at most once an hour.',
+                  '', details]
+        subject = f'【系统错误】{type(exc).__name__} · {request.path}'[:150]
+        base_url = request.host_url
+
+        def work():
+            try:
+                with app.test_request_context(base_url=base_url):
+                    recipients = _error_alert_recipients()
+                    if recipients:
+                        _smtp_send(subject, '\n'.join(lines), recipients)
+            except Exception:
+                logger.exception('Error alert e-mail failed')
+        if app.config.get('TESTING'):
+            work()
+        else:
+            threading.Thread(target=work, daemon=True).start()
+    except Exception:
+        logger.exception('Could not prepare the error alert')
+
+
 @app.errorhandler(500)
-def internal_error(_error):
+def internal_error(error):
     logger.exception('Unhandled application error')
+    notify_error(getattr(error, 'original_exception', None) or error)
     return 'Internal server error', 500
 
 if __name__ == '__main__':
