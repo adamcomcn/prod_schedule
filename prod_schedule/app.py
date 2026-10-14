@@ -121,6 +121,26 @@ def save_json(path, data):
 DATA_LOCK = threading.RLock()
 
 
+_inspections_memo = {'key': None, 'data': {}}
+_inspections_memo_lock = threading.Lock()
+
+
+def load_inspections():
+    """inspections_cache.json parsed once and shared by the list pages; re-read
+    only when the file changes (every save replaces it). READ-ONLY: code that
+    changes reports must use load_json + save_json under DATA_LOCK."""
+    try:
+        st = os.stat(INSPECTIONS_CACHE)
+    except FileNotFoundError:
+        return {}
+    key = (st.st_mtime_ns, st.st_size, st.st_ino)
+    with _inspections_memo_lock:
+        if _inspections_memo['key'] != key:
+            _inspections_memo['data'] = load_json(INSPECTIONS_CACHE, {})
+            _inspections_memo['key'] = key
+        return _inspections_memo['data']
+
+
 def update_config(**changes):
     """Set config keys on a fresh copy under DATA_LOCK, so concurrent writers
     (Settings, background e-mails) don't undo each other."""
@@ -1357,7 +1377,7 @@ def index():
         # Prices never reach inspectors (not even via search).
         current, shipped_rows = strip_admin_only_columns(current, shipped_rows)
     config = load_config()
-    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
+    inspections = SharedReports(load_inspections())
 
     sheet_names = list(current.keys())
     selected_sheet = request.args.get('sheet', '')
@@ -1505,7 +1525,7 @@ def index():
 def export_comparison_excel():
     current = load_schedule(CURRENT_FILE)
     previous = load_schedule(PREVIOUS_FILE)
-    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
+    inspections = SharedReports(load_inspections())
     statuses, _, shipped_rows = (
         compute_changes(previous, current)
         if current and previous else ({}, [], {}))
@@ -1662,7 +1682,7 @@ def purchasing_changes(before, after, inspections=None):
     """Changes between two saved schedules, as lists of rows for the export.
     Shipped lines carry has_report: is there an inspection report (QA BRT) now."""
     if inspections is None:
-        inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
+        inspections = SharedReports(load_inspections())
     moves_info = {}
     statuses, typo_flags, _ = compute_changes(before, after, moves_out=moves_info)
     moves = moves_info.get('moves', [])
@@ -2090,7 +2110,7 @@ def dashboard():
     current     = load_schedule(CURRENT_FILE)
     previous    = load_schedule(PREVIOUS_FILE)
     config      = load_config()
-    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
+    inspections = SharedReports(load_inspections())
 
     if current and previous:
         statuses, typo_flags, shipped_rows = compute_changes(previous, current)
@@ -3926,7 +3946,7 @@ REPORT_FILTERS = ('date_from', 'date_to', 'supplier', 'inspector', 'result', 're
 
 def inspection_report_rows():
     """Every submitted inspection report as a flat row, newest first."""
-    cache = load_json(INSPECTIONS_CACHE, {})
+    cache = load_inspections()
     with db_conn() as conn:
         reviews = {(r['job_key'], r['insp_index']): dict(r)
                    for r in conn.execute('SELECT * FROM inspection_reviews')}
@@ -4712,7 +4732,7 @@ def orders():
                                 (status_filter,)).fetchall()
         else:
             rows = conn.execute(q + ' ORDER BY o.created_at DESC').fetchall()
-    inspections = load_json(INSPECTIONS_CACHE, {})
+    inspections = load_inspections()
     return render_template('orders.html', orders=rows, inspections=inspections,
                            status_filter=status_filter)
 
@@ -4996,7 +5016,7 @@ def pending_reviews():
         done = {(r['job_key'], r['insp_index']) for r in conn.execute(
             'SELECT job_key, insp_index FROM inspection_reviews')}
     out = []
-    for job_key, records in load_json(INSPECTIONS_CACHE, {}).items():
+    for job_key, records in load_inspections().items():
         for index, rec in enumerate(records):
             if (job_key, index) in done:
                 continue
@@ -5331,7 +5351,7 @@ def vtrust_lines(lead_days=None):
     config = load_config()
     lead = int(lead_days if lead_days is not None else config.get('vtrust_lead_days') or VTRUST_LEAD_DAYS)
     schedule, _ = _apply_est_overrides(copy.deepcopy(load_schedule(CURRENT_FILE)), commit=False)
-    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
+    inspections = SharedReports(load_inspections())
     bookings = vtrust_bookings()
     today = china_today()
     lines = {}
@@ -5858,7 +5878,7 @@ def qa_brt_check():
     """{'yes_no_report', 'report_not_yes', 'shipped_no_report'}: lists of lines
     for the current schedule compared with the previous one."""
     current, previous = load_schedule(CURRENT_FILE), load_schedule(PREVIOUS_FILE)
-    inspections = SharedReports(load_json(INSPECTIONS_CACHE, {}))
+    inspections = SharedReports(load_inspections())
     statuses, _, shipped_rows = compute_changes(previous, current) if current and previous else ({}, [], {})
     old_qty = {k: l['qty'] for k, l in _schedule_lines(previous).items()}
     new_qty = {k: l['qty'] for k, l in _schedule_lines(current).items()}
@@ -6213,7 +6233,7 @@ def tasks():
                           and t['status'] not in DONE_STATUSES),
         'all': len(every_task),
     }
-    inspections = load_json(INSPECTIONS_CACHE, {})
+    inspections = load_inspections()
     orphan_count = sum(1 for t in all_tasks if t['orphan'])
 
     # ── Stats (always over ALL tasks) ─────────────────────────────────────
@@ -6347,7 +6367,7 @@ def task_listing(args):
 def tasks_export():
     reconcile_tasks_with_inspections()
     _every, _scope_tasks, rows, scope, _status, _orphan = task_listing(request.args)
-    inspections = load_json(INSPECTIONS_CACHE, {})
+    inspections = load_inspections()
     today = china_today()
     columns = [
         ('区域 Region', 12), ('供应商 Supplier', 14), ('订单号 Order', 12), ('采购单号 PO', 12),
@@ -6610,7 +6630,7 @@ def reconcile_tasks_with_inspections():
     with db_conn() as conn:
         existing = {r['job_key']: r['status'] for r in conn.execute(
             'SELECT job_key, status FROM inspection_tasks')}
-        for job_key, records in load_json(INSPECTIONS_CACHE, {}).items():
+        for job_key, records in load_inspections().items():
             if not records:
                 continue
             rec = records[-1]
@@ -7887,7 +7907,7 @@ def _assign_old_shipped_reports_to_lead():
     reconcile_tasks_with_inspections()  # make sure every report has its task
     in_schedule = {make_job_key(sheet, r, rows[0])
                    for sheet, rows in current.items() for r in (rows or [])[1:]}
-    reported = {k for k, recs in load_json(INSPECTIONS_CACHE, {}).items() if recs}
+    reported = {k for k, recs in load_inspections().items() if recs}
     with db_conn() as conn:
         lead = _lead_account(conn)
         if not lead:
@@ -7914,7 +7934,7 @@ def _purge_ignored_sheet_records():
     Tasks that already have an inspection are kept."""
     names = sorted(IGNORED_SHEETS)
     marks = ','.join('?' * len(names))
-    inspected = set(load_json(INSPECTIONS_CACHE, {}).keys())
+    inspected = set(load_inspections().keys())
     with db_conn() as conn:
         jobs = conn.execute(
             f'DELETE FROM outstanding_jobs WHERE UPPER(TRIM(sheet)) IN ({marks})', names).rowcount
@@ -8269,7 +8289,7 @@ def integration_schedule():
 def inspection_status_rows(cache=None):
     """Latest inspection per job: result, review status and whether it counts as passed
     (result Pass and review approved)."""
-    cache = load_json(INSPECTIONS_CACHE, {}) if cache is None else cache
+    cache = load_inspections() if cache is None else cache
     with db_conn() as conn:
         reviews = {(r['job_key'], r['insp_index']): r['status']
                    for r in conn.execute('SELECT job_key, insp_index, status FROM inspection_reviews')}
