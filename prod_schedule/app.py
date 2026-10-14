@@ -4152,6 +4152,7 @@ def _sqlite_snapshot(dest):
     src, dst = sqlite3.connect(DB_PATH), sqlite3.connect(dest)
     try:
         src.backup(dst)
+        dst.execute('PRAGMA journal_mode=DELETE')    # a single self-contained file in the backup zip
     finally:
         dst.close()
         src.close()

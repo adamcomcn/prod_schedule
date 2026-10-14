@@ -372,7 +372,8 @@ _DEFECT_SEEDS = [
 
 @contextmanager
 def db_conn():
-    conn = sqlite3.connect(DB_PATH)
+    # wait up to 15 s for another thread's write instead of failing with "database is locked"
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     try:
@@ -725,6 +726,8 @@ _DAEMCO_PRODUCT_QUESTIONS = [
 
 def init_db():
     with db_conn() as conn:
+        # WAL: pages keep reading while another request writes (setting is stored in the file)
+        conn.execute('PRAGMA journal_mode=WAL')
         conn.executescript(_SCHEMA)
 
         # ── Column migrations ──────────────────────────────────────────────
