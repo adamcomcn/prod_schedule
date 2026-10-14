@@ -16,7 +16,8 @@ Railway service settings, see `RAILWAY_DEPLOYMENT.md`), auto-deploys on every pu
 - `pdf_report.py` — inspection report PDF (reportlab, CJK font).
 - `static/checklist.js` — checklist UI on the inspection page (drafts autosave, uploads via XHR).
 - `templates/` — Jinja; `tests/` — pytest (run all of them, they are fast).
-- Root-level `*.py` helpers in `prod_schedule/` (load_6_4, fix_previous, …) are old one-off scripts.
+- The old one-off helper scripts (load_6_4, fix_previous, seed_data, …) were removed in Oct 2026;
+  they are in the git history if ever needed.
 
 ## Run / test (Windows)
 ```
