@@ -83,6 +83,7 @@ ADMIN_ENDPOINTS = {
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
     'settings_purchasing_send', 'export_purchasing_excel', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
     'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'vtrust_keep', 'vtrust_release', 'report_kpi_exclusion', 'schedule_est_edit',
+    'outstanding_close', 'outstanding_reopen',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -1360,6 +1361,59 @@ def healthz():
         return jsonify(status='unhealthy'), 503
 
 
+# Why an admin closed a fully shipped line that has no QA BRT report
+OUTSTANDING_CLOSE_REASONS = {
+    'pre_launch': ('系统上线前已出货', 'Shipped before the system went live'),
+    'third_party': ('第三方（V-Trust）已检验', 'Inspected by a third party (V-Trust)'),
+    'not_required': ('无需检验', 'No inspection needed'),
+    'other': ('其他', 'Other'),
+}
+
+
+def _back_to_outstanding():
+    return redirect(url_for('index', sheet=request.form.get('sheet') or None) + '#outstanding')
+
+
+@app.route('/outstanding/close', methods=['POST'])
+def outstanding_close():
+    """Admin: close selected fully shipped lines that have no QA BRT report. They
+    leave the open list (and the completion rate) and show in the history as closed."""
+    keys = list(dict.fromkeys(k for k in request.form.getlist('job_key') if k))
+    reason = request.form.get('reason', '')
+    note = ' '.join(request.form.get('note', '').split())[:300]
+    if not keys:
+        flash(tr('请先勾选要关闭的行', 'Select the lines to close first'), 'error')
+    elif reason not in OUTSTANDING_CLOSE_REASONS:
+        flash(tr('请选择关闭原因', 'Choose a reason'), 'error')
+    elif reason == 'other' and not note:
+        flash(tr('选择“其他”时请填写说明', 'Add a note when the reason is "Other"'), 'error')
+    else:
+        now = datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M')
+        with db_conn() as conn:
+            closed = sum(conn.execute(
+                'UPDATE outstanding_jobs SET closed=1, closed_at=?, closed_by=?, close_reason=?, close_note=? '
+                'WHERE job_key=? AND completed=0 AND IFNULL(closed, 0)=0',
+                (now, g.get('username', ''), reason, note, key)).rowcount for key in keys)
+        logger.info('%s closed %s shipped line(s) without a QA BRT report (%s)', g.get('username'), closed, reason)
+        flash(tr(f'已关闭 {closed} 行（原因：{OUTSTANDING_CLOSE_REASONS[reason][0]}），可在下方历史中重新打开',
+                 f'Closed {closed} line(s) ({OUTSTANDING_CLOSE_REASONS[reason][1]}); reopen them from the history below'),
+              'success')
+    return _back_to_outstanding()
+
+
+@app.route('/outstanding/reopen', methods=['POST'])
+def outstanding_reopen():
+    with db_conn() as conn:
+        done = conn.execute("UPDATE outstanding_jobs SET closed=0, closed_at='', closed_by='', close_reason='', "
+                            "close_note='' WHERE job_key=? AND IFNULL(closed, 0)=1",
+                            (request.form.get('job_key', ''),)).rowcount
+    if done:
+        logger.info('%s reopened shipped line %s', g.get('username'), request.form.get('job_key'))
+        flash(tr('已重新打开，该行回到“已全部出货但缺 QA BRT 报告”列表', 'Reopened: the line is back in the open list'),
+              'success')
+    return _back_to_outstanding()
+
+
 @app.route('/')
 def index():
     current = load_schedule(CURRENT_FILE)
@@ -1427,15 +1481,21 @@ def index():
     today_str = china_today().isoformat()
     with db_conn() as conn:
         outstanding_jobs = conn.execute(
-            'SELECT * FROM outstanding_jobs WHERE completed=0 ORDER BY est_completion ASC, shipped_at ASC'
+            'SELECT * FROM outstanding_jobs WHERE completed=0 AND IFNULL(closed, 0)=0 '
+            'ORDER BY est_completion ASC, shipped_at ASC'
         ).fetchall()
+        # history: inspected lines and lines an admin closed without a report
         completed_jobs = conn.execute(
-            'SELECT * FROM outstanding_jobs WHERE completed=1 ORDER BY completed_at DESC LIMIT 100'
+            'SELECT * FROM outstanding_jobs WHERE completed=1 OR IFNULL(closed, 0)=1 '
+            "ORDER BY COALESCE(NULLIF(completed_at, ''), closed_at) DESC LIMIT 100"
         ).fetchall()
-        kpi_total     = conn.execute('SELECT COUNT(*) FROM outstanding_jobs').fetchone()[0]
+        kpi_closed    = conn.execute(
+            'SELECT COUNT(*) FROM outstanding_jobs WHERE completed=0 AND IFNULL(closed, 0)=1').fetchone()[0]
+        kpi_total     = conn.execute('SELECT COUNT(*) FROM outstanding_jobs').fetchone()[0] - kpi_closed
         kpi_done      = conn.execute('SELECT COUNT(*) FROM outstanding_jobs WHERE completed=1').fetchone()[0]
         kpi_overdue   = conn.execute(
-            "SELECT COUNT(*) FROM outstanding_jobs WHERE completed=0 AND est_completion!='' AND est_completion<?",
+            "SELECT COUNT(*) FROM outstanding_jobs WHERE completed=0 AND IFNULL(closed, 0)=0 "
+            "AND est_completion!='' AND est_completion<?",
             (today_str,)).fetchone()[0]
 
     # Group outstanding by sheet for display
@@ -1510,6 +1570,8 @@ def index():
                            kpi_total=kpi_total,
                            kpi_done=kpi_done,
                            kpi_overdue=kpi_overdue,
+                           kpi_closed=kpi_closed,
+                           close_reasons=OUTSTANDING_CLOSE_REASONS,
                            today_str=today_str,
                            sheet_names=sheet_names,
                            selected_sheet=selected_sheet,
@@ -1595,9 +1657,9 @@ def export_comparison_excel():
         history_rows = conn.execute(
             'SELECT * FROM outstanding_jobs ORDER BY shipped_at DESC').fetchall()
     for job in history_rows:
-        missing = not bool(job['completed'])
+        missing = not bool(job['completed']) and not job['closed']
         history.append([
-            'SHIPPED', 'No QA BRT' if missing else '', job['sheet'],
+            'SHIPPED', 'No QA BRT' if missing else ('Closed (no report)' if job['closed'] and not job['completed'] else ''), job['sheet'],
             job['order_number'], job['item_code'], job['item_desc'],
             job['supplier'], job['quantity'], job['week_label'],
             'YES' if job['completed'] else 'NO', job['completed_at'] or '',

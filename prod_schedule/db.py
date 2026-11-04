@@ -970,6 +970,12 @@ def init_db():
         if 'result' not in booking_cols:
             for col in ('result', 'result_note', 'result_by', 'result_at'):
                 conn.execute(f"ALTER TABLE vtrust_bookings ADD COLUMN {col} TEXT DEFAULT ''")
+        # Shipped-without-report lines an admin closed (no report will come), with who / why
+        outstanding_cols = {c[1] for c in conn.execute('PRAGMA table_info(outstanding_jobs)')}
+        if 'closed' not in outstanding_cols:
+            conn.execute('ALTER TABLE outstanding_jobs ADD COLUMN closed INTEGER DEFAULT 0')
+            for col in ('closed_at', 'closed_by', 'close_reason', 'close_note'):
+                conn.execute(f"ALTER TABLE outstanding_jobs ADD COLUMN {col} TEXT DEFAULT ''")
         # Units with issues (stem codes) and the release decision for a conditional result
         if 'release' not in booking_cols:
             for col in ('problem_units', 'release', 'release_note', 'release_by', 'release_at'):

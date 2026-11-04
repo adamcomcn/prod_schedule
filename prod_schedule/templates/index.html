@@ -470,7 +470,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 
 {# ── Outstanding Inspections (persistent across weeks) ── #}
 {% if outstanding_jobs %}
-<div style="margin: 0 0 0 0; padding: 0 0 24px 0;">
+<div style="margin: 0 0 0 0; padding: 0 0 24px 0;" id="outstanding">
 
   {# KPI bar #}
   <div style="display:flex; gap:16px; padding: 12px 24px; flex-wrap:wrap; align-items:center;">
@@ -490,6 +490,12 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
         &#10003; {{ tr('完成率', 'Done') }} {{ pct }}% ({{ kpi_done }}/{{ kpi_total }})
       </span>
       {% endif %}
+      {% if kpi_closed %}
+      <span style="background:#f3f4f6; color:#4b5563; border-radius:20px; padding:4px 14px; font-size:.78rem; font-weight:600;"
+            title="{{ tr('管理员关闭、不再需要报告的行（不计入完成率），见下方历史', 'Lines an admin closed without a report (not in the completion rate); see the history below') }}">
+        &#10005; {{ tr(kpi_closed ~ ' 已关闭', kpi_closed ~ ' closed') }}
+      </span>
+      {% endif %}
     </div>
     <button onclick="toggleOutstanding()" id="outBtn"
             style="margin-left:auto; background:none; border:1px solid #d0d5dd; border-radius:6px;
@@ -499,6 +505,22 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
   </div>
 
   <div id="outstandingBody">
+  {% if g.is_admin %}
+  <form id="closeForm" method="POST" action="{{ url_for('outstanding_close') }}" onsubmit="return confirmClose()"
+        style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:0 24px 10px; font-size:.8rem;">
+    <input type="hidden" name="sheet" value="{{ selected_sheet or '' }}">
+    <label style="display:inline-flex; align-items:center; gap:4px; margin:0; font-weight:600;">
+      <input type="checkbox" id="closeAll" onclick="selectOutstanding(null, this.checked)"> {{ tr('全选所有区域', 'Select all regions') }}</label>
+    <span id="closeCount" style="color:#6b7280;">{{ tr('已选 0 行', '0 selected') }}</span>
+    <select name="reason" required style="width:auto; padding:5px 8px; font-size:.8rem;">
+      <option value="">{{ tr('关闭原因…', 'Reason…') }}</option>
+      {% for key, label in close_reasons.items() %}<option value="{{ key }}">{{ tr(label[0], label[1]) }}</option>{% endfor %}
+    </select>
+    <input type="text" name="note" maxlength="300" placeholder="{{ tr('说明（选“其他”时必填）', 'Note (required for Other)') }}"
+           style="width:auto; min-width:220px; padding:5px 8px; font-size:.8rem;">
+    <button type="submit" class="btn btn-sm btn-outline" id="closeBtn" disabled>&#10005; {{ tr('批量关闭', 'Close selected') }}</button>
+  </form>
+  {% endif %}
   {% for sheet_name, jobs in outstanding_by_sheet.items() %}
   <div style="margin-bottom:16px;">
     <div style="background:#1a3a5c; color:#fff; font-size:.75rem; font-weight:700;
@@ -509,6 +531,8 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
       <table style="border-collapse:collapse; width:100%; font-size:.78rem;">
         <thead>
           <tr style="background:#fff7ed;">
+            {% if g.is_admin %}<th style="padding:8px 4px 8px 12px; border-bottom:2px solid #fed7aa; width:28px;">
+              <input type="checkbox" title="{{ tr('全选本区域', 'Select this region') }}" onclick='selectOutstanding({{ sheet_name|tojson }}, this.checked)'></th>{% endif %}
             <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('状态', 'Status') }}</th>
             <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('逾期', 'Overdue') }}</th>
             <th style="padding:8px 12px; text-align:left; border-bottom:2px solid #fed7aa; white-space:nowrap; color:#9a3412;">{{ tr('订单号', 'Order #') }}</th>
@@ -528,6 +552,9 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% set insp = inspections.get(job.job_key, []) %}
           <tr style="border-bottom:1px solid #f1f5f9;
                      {{ 'background:#fff7ed;' if overdue else '' }}">
+            {% if g.is_admin %}<td style="padding:7px 4px 7px 12px;">
+              <input type="checkbox" class="out-check" name="job_key" value="{{ job.job_key }}" form="closeForm"
+                     data-sheet="{{ sheet_name }}" onchange="updateCloseCount()"></td>{% endif %}
             <td style="padding:7px 12px; white-space:nowrap;">
               <span class="badge badge-shipped">{{ tr('已出货', 'SHIPPED') }}</span>
               <span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>
@@ -622,11 +649,17 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
             <td style="padding:7px 12px; text-align:center;">{{ job.quantity or '—' }}</td>
             <td style="padding:7px 12px; white-space:nowrap; font-size:.75rem;">{{ job.est_completion or '—' }}</td>
             <td style="padding:7px 12px; font-size:.72rem; color:#9ca3af; white-space:nowrap;">{{ job.week_label or '—' }}</td>
-            <td style="padding:7px 12px; font-size:.72rem; color:#059669; white-space:nowrap;">
-              {{ job.completed_at[:10] if job.completed_at else '—' }}
+            {% set closed_only = job.closed and not job.completed %}
+            <td style="padding:7px 12px; font-size:.72rem; color:{{ '#6b7280' if closed_only else '#059669' }}; white-space:nowrap;">
+              {% if closed_only %}{{ job.closed_at|localtime if job.closed_at else '—' }}{% else %}{{ job.completed_at[:10] if job.completed_at else '—' }}{% endif %}
             </td>
             <td style="padding:7px 12px; white-space:nowrap;">
-              {% if last_insp %}
+              {% if closed_only %}
+                {% set reason = close_reasons.get(job.close_reason) %}
+                <span style="background:#e5e7eb;color:#374151;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10005; {{ tr('已关闭', 'Closed') }}</span>
+                <span style="font-size:.7rem; color:#6b7280; margin-left:4px; white-space:normal;">
+                  {{ tr(reason[0], reason[1]) if reason else job.close_reason }}{% if job.close_note %} — {{ job.close_note }}{% endif %} · {{ job.closed_by }}</span>
+              {% elif last_insp %}
                 {% if last_insp.result|lower == 'pass' %}
                   <span style="background:#d1fae5;color:#065f46;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;">&#10003; {{ tr('合格', 'Pass') }}</span>
                 {% elif last_insp.result|lower == 'fail' %}
@@ -639,12 +672,19 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
                 <span style="color:#9ca3af; font-size:.75rem;">—</span>
               {% endif %}
             </td>
-            <td style="padding:7px 12px;">
+            <td style="padding:7px 12px; white-space:nowrap;">
               <a href="{{ url_for('inspect_form', job_key=job.job_key) }}"
                  class="btn btn-sm btn-outline"
                  style="font-size:.72rem; padding:3px 10px;">
                 &#128203; {{ tr('查看', 'View') }}
               </a>
+              {% if closed_only and g.is_admin %}
+              <form method="POST" action="{{ url_for('outstanding_reopen') }}" style="display:inline;">
+                <input type="hidden" name="job_key" value="{{ job.job_key }}">
+                <input type="hidden" name="sheet" value="{{ selected_sheet or '' }}">
+                <button type="submit" class="btn btn-sm btn-outline" style="font-size:.72rem; padding:3px 10px;">&#8634; {{ tr('重新打开', 'Reopen') }}</button>
+              </form>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -656,6 +696,24 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 {% endif %}
 
 <script>
+// ── Admin: bulk close shipped lines without a QA BRT report ──
+function selectOutstanding(sheet, on) {
+  document.querySelectorAll('.out-check').forEach(cb => { if (sheet === null || cb.dataset.sheet === sheet) cb.checked = on; });
+  updateCloseCount();
+}
+function updateCloseCount() {
+  const n = document.querySelectorAll('.out-check:checked').length;
+  const label = document.getElementById('closeCount');
+  if (label) label.textContent = {{ tr('已选 {n} 行', '{n} selected')|tojson }}.replace('{n}', n);
+  const btn = document.getElementById('closeBtn');
+  if (btn) btn.disabled = !n;
+}
+function confirmClose() {
+  const n = document.querySelectorAll('.out-check:checked').length;
+  return n > 0 && confirm({{ tr('确定关闭所选的 {n} 行？关闭后不再要求 QA BRT 报告，可在历史中重新打开。',
+                                'Close the {n} selected line(s)? No QA BRT report will be expected; you can reopen them from the history.')|tojson }}.replace('{n}', n));
+}
+
 const I18N = {collapse: {{ tr('收起', 'Collapse')|tojson }}, expand: {{ tr('展开', 'Expand')|tojson }},
               hidden: {{ tr('（已隐藏 {n} 列）', '({n} hidden)')|tojson }}};
 
