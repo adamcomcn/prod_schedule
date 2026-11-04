@@ -98,8 +98,10 @@ textarea { resize: vertical; min-height: 80px; }
 .badge-shipped           { background: #e5e7eb; color: #6b7280; }
 
 {% block extra_style %}{% endblock %}
-
-/* ── dark mode (admin only): invert the page, keep photos, videos and the top bar as they are ── */
+</style>
+<style>
+/* ── dark mode (admin only): invert the page, keep photos, videos and the top bar as they are.
+   Its own style element, so a page's extra_style can never cut it off. ── */
 html[data-theme="dark"] { filter: invert(1) hue-rotate(180deg); background: #f0f2f5; }
 html[data-theme="dark"] img, html[data-theme="dark"] video, html[data-theme="dark"] iframe,
 html[data-theme="dark"] .nav, html[data-theme="dark"] .no-invert { filter: invert(1) hue-rotate(180deg); }
