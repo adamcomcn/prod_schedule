@@ -982,6 +982,10 @@ def init_db():
             size       INTEGER NOT NULL,
             synced_at  TEXT    NOT NULL
         )''')
+        # Where the copy is in Dropbox (readable path); '' = first layout /files/<path>.
+        # For report PDFs path is 'report-pdf/<job key>/<index>' and size a checksum of the report.
+        if 'remote' not in {c[1] for c in conn.execute('PRAGMA table_info(dropbox_files)')}:
+            conn.execute("ALTER TABLE dropbox_files ADD COLUMN remote TEXT DEFAULT ''")
         # Units with issues (stem codes) and the release decision for a conditional result
         if 'release' not in booking_cols:
             for col in ('problem_units', 'release', 'release_note', 'release_by', 'release_at'):

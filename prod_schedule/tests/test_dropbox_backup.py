@@ -26,7 +26,7 @@ REFRESH = 'rt-very-secret-refresh-token'
 class FakeDropbox:
     def __init__(self, scope='account_info.read files.content.write', account_id='dbid:one'):
         self.scope, self.account_id = scope, account_id
-        self.files, self.sessions, self.deleted, self.calls = {}, {}, [], []
+        self.files, self.sessions, self.deleted, self.calls, self.moves = {}, {}, [], [], []
         self.fail, self.revoked, self.verifier = None, False, None
 
     @staticmethod
@@ -68,9 +68,21 @@ class FakeDropbox:
                 return self.reply(200, {'path_display': arg['commit']['path']})
             return 200, b'null'
         if name == 'files/delete_v2':
-            self.deleted.append(arg['path'])
-            if self.files.pop(arg['path'], None) is None:
+            path = arg['path']
+            self.deleted.append(path)
+            gone = [k for k in self.files if k == path or k.startswith(path + '/')]
+            if not gone:
                 return self.reply(409, {'error_summary': 'path_lookup/not_found/'})
+            for k in gone:
+                del self.files[k]
+            return self.reply(200, {})
+        if name == 'files/move_v2':
+            self.moves.append((arg['from_path'], arg['to_path']))
+            if arg['from_path'] not in self.files:
+                return self.reply(409, {'error_summary': 'from_lookup/not_found/'})
+            if arg['to_path'] in self.files:
+                return self.reply(409, {'error_summary': 'to/conflict/file/'})
+            self.files[arg['to_path']] = self.files.pop(arg['from_path'])
             return self.reply(200, {})
         if name == 'users/get_current_account':
             return self.reply(200, {'account_id': self.account_id, 'email': 'backup@example.com',
@@ -98,6 +110,9 @@ class DropboxBackupTests(unittest.TestCase):
                         mock.patch.object(app, 'PRODUCT_IMG_DIR', self.images)):
             patcher.start()
             self.addCleanup(patcher.stop)
+        original = app.load_json(app.INSPECTIONS_CACHE, {})
+        self.addCleanup(app.save_json, app.INSPECTIONS_CACHE, original)
+        app.save_json(app.INSPECTIONS_CACHE, {})
         if os.path.exists(app.DROPBOX_TOKEN_FILE):
             os.remove(app.DROPBOX_TOKEN_FILE)
         config = app.load_config()
@@ -128,7 +143,7 @@ class DropboxBackupTests(unittest.TestCase):
             fh.write(content)
         past = time.time() - age
         os.utime(full, (past, past))
-        return f'/files/{self.base_rel}/' + ('product_images/' + rel[4:] if rel.startswith('img/') else 'uploads/' + rel)
+        return f'/其他 Other/{self.base_rel}/' + ('product_images/' + rel[4:] if rel.startswith('img/') else 'uploads/' + rel)
 
     @staticmethod
     def sync():
@@ -215,7 +230,7 @@ class DropboxBackupTests(unittest.TestCase):
         self.assertEqual(self.fake.files[report], b'excel-bytes')
         self.assertEqual(self.fake.files[video], b'v' * 25)
         self.assertEqual(self.fake.files[photo], b'jpeg')
-        self.assertNotIn(f'/files/{self.base_rel}/uploads/job1/just-now.jpg', self.fake.files)
+        self.assertNotIn(f'/其他 Other/{self.base_rel}/uploads/job1/just-now.jpg', self.fake.files)
         snapshot = self.fake.files['/data/qc-backup-data-2026-11-15.zip']
         self.assertTrue(snapshot.startswith(b'PK'))
         self.assertIn('/data/qc-backup-data-2026-10-16.zip', self.fake.deleted)     # older than 30 days
@@ -294,7 +309,7 @@ class DropboxBackupTests(unittest.TestCase):
         self.write('job1/a.jpg', b'a')
         response = self.client().post('/settings/dropbox/sync', data={'_csrf_token': 'tok'})
         self.assertEqual(response.status_code, 302)
-        self.assertIn(f'/files/{self.base_rel}/uploads/job1/a.jpg', self.fake.files)
+        self.assertIn(f'/其他 Other/{self.base_rel}/uploads/job1/a.jpg', self.fake.files)
 
     def test_full_backup_reminder_paused_while_dropbox_works(self):
         from collections import namedtuple
@@ -307,6 +322,131 @@ class DropboxBackupTests(unittest.TestCase):
                 mock.patch.object(app, '_smtp_send', side_effect=lambda *a: sent.append(a) or (True, 'ok')),                 app.app.test_request_context():
             app.send_storage_alert()
         self.assertEqual(sent, [])
+
+    # ── readable layout ──
+    JOB = 'MELBOURNE|DPL2633|GPEFAD100125'
+    FOLDER = '/检验报告 Inspections/MELBOURNE/DPL2633/GPEFAD100125/QC-20260920-DPL2633-GPEFAD100125-1'
+    RECORD = {'region': 'MELBOURNE', 'order_number': 'DPL2633', 'item_code': 'GPEFAD100125',
+              'item_description': 'Restraint Flange Adaptor', 'inspector': 'murphy',
+              'inspection_date': '2026-09-20', 'submitted_at': '2026-09-20 05:47', 'result': 'Pass',
+              'report_no': 'QC-20260920-DPL2633-GPEFAD100125-1'}
+
+    def add_report(self, job_key=JOB):
+        cache = app.load_json(app.INSPECTIONS_CACHE, {})
+        cache[job_key] = [dict(self.RECORD)]
+        app.save_json(app.INSPECTIONS_CACHE, cache)
+
+    def attach(self, rel, original, job_key=JOB, content=b'x'):
+        self.write(rel, content)
+        full = os.path.join(self.uploads, rel)
+        with db_conn() as conn:
+            conn.execute('INSERT INTO inspection_attachments (job_key, insp_index, evidence_type, original_name, '
+                         'saved_name, file_path) VALUES (?,?,?,?,?,?)',
+                         (job_key, 0, 'other', original, os.path.basename(full), full))
+        self.addCleanup(self._sql, 'DELETE FROM inspection_attachments WHERE job_key=?', job_key)
+
+    @staticmethod
+    def _sql(sql, *args):
+        with db_conn() as conn:
+            conn.execute(sql, args)
+
+    def uploads_count(self):
+        return sum(1 for u in self.fake.calls if u.endswith('files/upload'))
+
+    def test_files_are_filed_by_report_under_their_original_names(self):
+        self.connect()
+        self.add_report()
+        self.attach('h1/aaa.xlsx', 'DPL2633-PE material report.xlsx', content=b'first')
+        self.attach('h1/bbb.xlsx', 'DPL2633-PE material report.xlsx', content=b'second')
+        self.attach('h1/ccc.pdf', 'a/b:c?.pdf')
+        self.write('vt/v1.pdf', b'vt')
+        with db_conn() as conn:
+            conn.execute('INSERT INTO vtrust_files (job_number, original_name, saved_name, file_path) VALUES (?,?,?,?)',
+                         ('VT-001', 'V-Trust report.pdf', 'v1.pdf', os.path.join(self.uploads, 'vt', 'v1.pdf')))
+            conn.execute("INSERT INTO products (item_code, name, image_path) VALUES ('ABC123', 'Gate Valve', 'p9.jpg')")
+        self.addCleanup(self._sql, "DELETE FROM vtrust_files WHERE job_number='VT-001'")
+        self.addCleanup(self._sql, "DELETE FROM products WHERE item_code='ABC123'")
+        self.write('img/p9.jpg', b'jpeg')
+        self.assertTrue(self.sync()[0])
+        files = self.fake.files
+        self.assertEqual(files[f'{self.FOLDER}/DPL2633-PE material report.xlsx'], b'first')
+        self.assertEqual(files[f'{self.FOLDER}/DPL2633-PE material report (2).xlsx'], b'second')
+        self.assertIn(f'{self.FOLDER}/a_b_c_.pdf', files)
+        self.assertTrue(files[f'{self.FOLDER}/QC-20260920-DPL2633-GPEFAD100125-1.pdf'].startswith(b'%PDF'))
+        self.assertEqual(files['/V-Trust/VT-001/V-Trust report.pdf'], b'vt')
+        self.assertEqual(files['/产品图片 Product images/ABC123 Gate Valve.jpg'], b'jpeg')
+        self.assertFalse([k for k in files if k.startswith('/files/')])
+
+    def test_report_pdf_is_sent_again_when_the_report_changes(self):
+        self.connect()
+        self.add_report()
+        pdf = f'{self.FOLDER}/QC-20260920-DPL2633-GPEFAD100125-1.pdf'
+        self.sync()
+        self.assertIn(pdf, self.fake.files)
+        before = self.uploads_count()
+        self.sync()
+        self.assertEqual(self.uploads_count(), before)              # unchanged: not sent again
+        with db_conn() as conn:
+            conn.execute("INSERT INTO inspection_reviews (job_key, insp_index, status, reviewer) "
+                         "VALUES (?, 0, 'approved', 'hq1')", (self.JOB,))
+        self.addCleanup(self._sql, 'DELETE FROM inspection_reviews WHERE job_key=?', self.JOB)
+        self.sync()
+        self.assertEqual(self.uploads_count(), before + 1)
+
+    def test_draft_file_moves_into_the_report_when_submitted(self):
+        self.connect()
+        self.write('h2/drafts/d1.jpg', b'photo')
+        full = os.path.join(self.uploads, 'h2', 'drafts', 'd1.jpg')
+        with db_conn() as conn:
+            draft = conn.execute('INSERT INTO inspection_drafts (job_key, user_id) VALUES (?,?)',
+                                 (self.JOB, self.ids['qc1'])).lastrowid
+            conn.execute("INSERT INTO draft_files (draft_id, ref, original_name, saved_name, file_path) "
+                         "VALUES (?, 'q1', 'IMG_0001.jpg', 'd1.jpg', ?)", (draft, full))
+        self.addCleanup(self._sql, 'DELETE FROM inspection_drafts WHERE job_key=?', self.JOB)
+        self.addCleanup(self._sql, 'DELETE FROM draft_files WHERE draft_id=?', draft)
+        self.sync()
+        draft_path = '/草稿 Drafts/MELBOURNE/DPL2633/GPEFAD100125/IMG_0001.jpg'
+        self.assertEqual(self.fake.files[draft_path], b'photo')
+        # submitted: the draft rows go, the same file becomes a report attachment
+        self._sql('DELETE FROM draft_files WHERE draft_id=?', draft)
+        self.add_report()
+        with db_conn() as conn:
+            conn.execute("INSERT INTO inspection_attachments (job_key, insp_index, evidence_type, original_name, "
+                         "saved_name, file_path) VALUES (?, 0, 'checklist_photo', 'IMG_0001.jpg', 'd1.jpg', ?)",
+                         (self.JOB, full))
+        self.addCleanup(self._sql, 'DELETE FROM inspection_attachments WHERE job_key=?', self.JOB)
+        before = self.uploads_count()
+        self.sync()
+        self.assertNotIn(draft_path, self.fake.files)
+        self.assertEqual(self.fake.files[f'{self.FOLDER}/IMG_0001.jpg'], b'photo')
+        self.assertIn((draft_path, f'{self.FOLDER}/IMG_0001.jpg'), self.fake.moves)
+        self.assertEqual(self.uploads_count(), before + 1)             # only the report PDF
+
+    def test_first_layout_copies_are_moved_and_files_folder_removed(self):
+        self.connect()
+        self.add_report()
+        self.attach('h3/old.xlsx', 'Material report.xlsx', content=b'old')
+        kept = f'{self.base_rel}/uploads/h3/old.xlsx'
+        gone = 'uploads/deleted-here/gone.jpg'
+        self.fake.files['/files/' + kept] = b'old'
+        self.fake.files['/files/' + gone] = b'gone'
+        with db_conn() as conn:
+            conn.execute("INSERT INTO dropbox_files (path, size, synced_at) VALUES (?, 3, 'x')", (kept,))
+            conn.execute("INSERT INTO dropbox_files (path, size, synced_at) VALUES (?, 4, 'x')", (gone,))
+        self.assertTrue(self.sync()[0])
+        self.assertEqual(self.fake.files[f'{self.FOLDER}/Material report.xlsx'], b'old')
+        self.assertIn(('/files/' + kept, f'{self.FOLDER}/Material report.xlsx'), self.fake.moves)
+        self.assertEqual(self.fake.files['/其他 Other/' + gone], b'gone')     # deleted here: kept in Dropbox
+        self.assertIn('/files', self.fake.deleted)
+        self.assertFalse([k for k in self.fake.files if k.startswith('/files/')])
+        self.assertTrue(app.load_config()['dropbox_legacy_cleaned'])
+
+    def test_names_dropbox_rejects_are_cleaned(self):
+        self.assertEqual(app._dbx_part('a/b\\c:d*e?f"g<h>i|j. '), 'a_b_c_d_e_f_g_h_i_j')
+        self.assertEqual(app._dbx_part(''), '_')
+        long = app._dbx_part('x' * 300 + '.xlsx')
+        self.assertEqual(len(long), 120)
+        self.assertTrue(long.endswith('.xlsx'))
 
 
 if __name__ == '__main__':

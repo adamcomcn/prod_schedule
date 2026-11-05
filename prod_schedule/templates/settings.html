@@ -309,8 +309,8 @@
             {% endif %}
           </div>
           <div style="margin-top:4px; color:#6b7280;">
-            {{ tr('每小时自动上传新文件到 Dropbox“应用/<App 名>/files”；每天一份数据快照到“/data”（保留 %d 天，每月 1 号的永久保留）。系统里删除的文件不会从 Dropbox 删除。连续失败时每天邮件提醒备份邮箱。' % dropbox.keep_days,
-                  'New files go to Dropbox “Apps/<app name>/files” every hour; a daily data snapshot goes to “/data” (kept %d days, the 1st of each month for good). Files deleted here are not deleted in Dropbox. Repeated failures are e-mailed to the backup addresses daily.' % dropbox.keep_days) }}
+            {{ tr('每小时自动同步到 Dropbox“应用/<App 名>/”，按报告整理：“检验报告 Inspections/区域/订单/物料/报告编号/”里是报告 PDF 和原文件名的附件；未提交的检验在“草稿 Drafts”，另有“V-Trust”和“产品图片”。每天一份数据快照在“/data”（保留 %d 天，每月 1 号的永久保留）。系统里删除的文件不会从 Dropbox 删除。连续失败时每天邮件提醒备份邮箱。' % dropbox.keep_days,
+                  'Synced hourly to Dropbox “Apps/<app name>/”, by report: “检验报告 Inspections/region/order/item/report no./” holds the report PDF and the attachments under their original names; inspections not submitted yet are in “草稿 Drafts”, plus “V-Trust” and “产品图片 Product images”. A daily data snapshot goes to “/data” (kept %d days, the 1st of each month for good). Files deleted here are not deleted in Dropbox. Repeated failures are e-mailed to the backup addresses daily.' % dropbox.keep_days) }}
           </div>
         {% endif %}
       </div>

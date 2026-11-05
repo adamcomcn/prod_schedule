@@ -7,6 +7,7 @@ kept by app.py in a private file outside every backup zip. The app should be an
 """
 import base64
 import hashlib
+import io
 import json
 import os
 import secrets
@@ -136,19 +137,27 @@ class Client:
     def delete(self, path):
         return self.rpc('files/delete_v2', {'path': path})
 
+    def move(self, from_path, to_path):
+        return self.rpc('files/move_v2', {'from_path': from_path, 'to_path': to_path, 'autorename': False})
+
     def upload(self, local_path, remote_path):
         """Upload one file (overwriting a file of the same name); big files in CHUNK pieces."""
-        size = os.path.getsize(local_path)
-        commit = {'path': remote_path, 'mode': 'overwrite', 'mute': True}
         with open(local_path, 'rb') as fh:
-            if size <= CHUNK:
-                return self._content('files/upload', commit, fh.read())
-            session_id = self._content('files/upload_session/start', {'close': False}, fh.read(CHUNK))['session_id']
-            offset = CHUNK
-            while True:
-                piece = fh.read(CHUNK)
-                cursor = {'session_id': session_id, 'offset': offset}
-                if offset + len(piece) >= size or not piece:
-                    return self._content('files/upload_session/finish', {'cursor': cursor, 'commit': commit}, piece)
-                self._content('files/upload_session/append_v2', {'cursor': cursor, 'close': False}, piece)
-                offset += len(piece)
+            return self._upload(fh, os.path.getsize(local_path), remote_path)
+
+    def upload_bytes(self, data, remote_path):
+        return self._upload(io.BytesIO(data), len(data), remote_path)
+
+    def _upload(self, fh, size, remote_path):
+        commit = {'path': remote_path, 'mode': 'overwrite', 'mute': True}
+        if size <= CHUNK:
+            return self._content('files/upload', commit, fh.read())
+        session_id = self._content('files/upload_session/start', {'close': False}, fh.read(CHUNK))['session_id']
+        offset = CHUNK
+        while True:
+            piece = fh.read(CHUNK)
+            cursor = {'session_id': session_id, 'offset': offset}
+            if offset + len(piece) >= size or not piece:
+                return self._content('files/upload_session/finish', {'cursor': cursor, 'commit': commit}, piece)
+            self._content('files/upload_session/append_v2', {'cursor': cursor, 'close': False}, piece)
+            offset += len(piece)

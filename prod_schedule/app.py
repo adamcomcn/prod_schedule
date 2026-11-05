@@ -1,5 +1,6 @@
 import os, io, json, hashlib, tempfile, math, logging, traceback, secrets, hmac, time, base64, uuid, zipfile, re, unicodedata, shutil
 import threading
+import zlib
 from collections import Counter, defaultdict, deque
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
@@ -4458,13 +4459,101 @@ def _dropbox_client():
     return dropbox_backup.Client(DROPBOX_APP_KEY, dropbox_connection()['refresh_token'])
 
 
-def dropbox_pending(include_recent=False):
-    """[(path relative to APP_DATA_DIR, full path, size)] of attachments and product
-    images that are not in Dropbox yet (or changed size since). Files written in the
-    last DROPBOX_SETTLE_SECONDS may still be uploading: left out unless include_recent."""
+# Dropbox layout: files are stored under readable names, one folder per report:
+#   检验报告 Inspections/<region>/<PO>/<item>/<report no.>/  report PDF + attachments (original names)
+#   草稿 Drafts/<region>/<PO>/<item>/   checklist files of inspections not submitted yet
+#   V-Trust/<job number>/ · 产品图片 Product images/ · 其他 Other/<path on the server>
+# A file that gets a new place (a draft is submitted, or a report is renumbered) is moved there.
+DROPBOX_INSPECTIONS = '/检验报告 Inspections'
+DROPBOX_DRAFTS = '/草稿 Drafts'
+DROPBOX_VTRUST = '/V-Trust'
+DROPBOX_PRODUCTS = '/产品图片 Product images'
+DROPBOX_OTHER = '/其他 Other'
+DROPBOX_LEGACY = '/files'          # first layout (server paths); moved to the folders above
+_DBX_BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def _dbx_part(text, fallback='_'):
+    """One file / folder name that Dropbox accepts."""
+    text = _DBX_BAD.sub('_', str(text or '')).strip().rstrip('. ')
+    if len(text) > 120:
+        stem, ext = os.path.splitext(text)
+        text = stem[:120 - len(ext)].rstrip('. ') + ext
+    return text or fallback
+
+
+def _dbx_job_folder(job_key):
+    parts = job_key.split('|')
+    return '/'.join(_dbx_part(p) for p in (parts[0], parts[1] if len(parts) > 2 else '', parts[-1]))
+
+
+def _dropbox_names():
+    """({saved file name: Dropbox path}, [(key, Dropbox path, signature, job_key, index)] of
+    report PDFs). Names are made unique per folder in id order, so they stay stable."""
+    inspections = load_inspections()
     with db_conn() as conn:
-        done = {r[0]: r[1] for r in conn.execute('SELECT path, size FROM dropbox_files')}
-    now, pending = time.time(), []
+        attachments = conn.execute('SELECT job_key, insp_index, original_name, saved_name, file_path '
+                                   'FROM inspection_attachments ORDER BY id').fetchall()
+        drafts = conn.execute('SELECT d.job_key, f.original_name, f.saved_name, f.file_path FROM draft_files f '
+                              'JOIN inspection_drafts d ON d.id=f.draft_id ORDER BY f.id').fetchall()
+        vtrust = conn.execute('SELECT job_number, original_name, saved_name, file_path FROM vtrust_files '
+                              'ORDER BY id').fetchall()
+        products = conn.execute("SELECT item_code, name, image_path FROM products "
+                                "WHERE IFNULL(image_path, '') != '' ORDER BY id").fetchall()
+        reviews = {(r['job_key'], r['insp_index']): dict(r) for r in conn.execute('SELECT * FROM inspection_reviews')}
+    used, names, pdfs, folders = defaultdict(set), {}, [], {}
+
+    def place(folder, name):
+        name = _dbx_part(name, 'file')
+        stem, ext = os.path.splitext(name)
+        candidate, n = name, 2
+        while candidate.casefold() in used[folder]:
+            candidate, n = f'{stem} ({n}){ext}', n + 1
+        used[folder].add(candidate.casefold())
+        return f'{folder}/{candidate}'
+
+    def report_folder(job_key, index):
+        if (job_key, index) not in folders:
+            records = inspections.get(job_key) or []
+            number = report_number(job_key, records[index], index) if 0 <= index < len(records) else f'report-{index + 1}'
+            folders[(job_key, index)] = f'{DROPBOX_INSPECTIONS}/{_dbx_job_folder(job_key)}/{_dbx_part(number)}'
+        return folders[(job_key, index)]
+
+    for job_key, records in inspections.items():
+        for index, record in enumerate(records or []):
+            folder = report_folder(job_key, index)
+            signature = zlib.crc32(json.dumps([record, reviews.get((job_key, index))], sort_keys=True,
+                                              default=str).encode('utf-8'))
+            pdfs.append((f'report-pdf/{job_key}/{index}', place(folder, folder.rsplit('/', 1)[1] + '.pdf'),
+                         signature, job_key, index))
+
+    def add(saved, folder, original):
+        saved = saved and os.path.basename(saved)
+        if saved and saved not in names:
+            names[saved] = place(folder, original or saved)
+
+    for r in attachments:
+        add(r['saved_name'] or r['file_path'], report_folder(r['job_key'], r['insp_index'] or 0), r['original_name'])
+    for r in drafts:
+        add(r['saved_name'] or r['file_path'], f"{DROPBOX_DRAFTS}/{_dbx_job_folder(r['job_key'])}", r['original_name'])
+    for r in vtrust:
+        add(r['saved_name'] or r['file_path'], f"{DROPBOX_VTRUST}/{_dbx_part(r['job_number'])}", r['original_name'])
+    for r in products:
+        title = ' '.join(p for p in ((r['item_code'] or '').strip(), (r['name'] or '').strip()) if p)
+        add(r['image_path'], DROPBOX_PRODUCTS, (title or 'product') + os.path.splitext(r['image_path'])[1])
+    return names, pdfs
+
+
+def dropbox_plan(include_recent=False):
+    """(work, legacy). work: what to send - files not in Dropbox yet or whose place changed, and
+    report PDFs that are new or changed; each a dict with key, full (None for a PDF), sig,
+    remote, prev ((sig, remote) already recorded) and job. Files written in the last
+    DROPBOX_SETTLE_SECONDS may still be uploading: left out unless include_recent.
+    legacy: [(key, Dropbox path)] of first-layout copies whose file is gone here."""
+    names, pdfs = _dropbox_names()
+    with db_conn() as conn:
+        done = {r[0]: (r[1], r[2] or '') for r in conn.execute('SELECT path, size, remote FROM dropbox_files')}
+    now, work, seen = time.time(), [], set()
     for base in (UPLOAD_DIR, PRODUCT_IMG_DIR):
         for root, dirs, files in os.walk(base):
             dirs.sort()
@@ -4477,11 +4566,83 @@ def dropbox_pending(include_recent=False):
                 except OSError:
                     continue
                 rel = os.path.relpath(full, APP_DATA_DIR).replace(os.sep, '/')
-                if done.get(rel) == st.st_size or (
+                seen.add(rel)
+                remote = names.get(name) or f'{DROPBOX_OTHER}/{rel}'
+                prev = done.get(rel)
+                if prev == (st.st_size, remote) or (
                         not include_recent and now - st.st_mtime < DROPBOX_SETTLE_SECONDS):
                     continue
-                pending.append((rel, full, st.st_size))
-    return pending
+                work.append({'key': rel, 'full': full, 'sig': st.st_size, 'remote': remote, 'prev': prev})
+    for key, remote, sig, job_key, index in pdfs:
+        seen.add(key)
+        prev = done.get(key)
+        if prev != (sig, remote):
+            work.append({'key': key, 'full': None, 'sig': sig, 'remote': remote, 'prev': prev,
+                         'job': (job_key, index)})
+    legacy = [(key, remote or f'{DROPBOX_LEGACY}/{key}') for key, (_sig, remote) in done.items()
+              if key not in seen and (not remote or remote.startswith(DROPBOX_LEGACY + '/'))]
+    return work, legacy
+
+
+def _dropbox_record(key, sig, remote):
+    with db_conn() as conn:
+        conn.execute('INSERT OR REPLACE INTO dropbox_files (path, size, synced_at, remote) VALUES (?,?,?,?)',
+                     (key, sig, _utc_minute(), remote))
+
+
+def _dropbox_delete_quietly(client, path):
+    try:
+        client.delete(path)
+    except dropbox_backup.DropboxError:
+        pass
+
+
+def _dropbox_send(client, item):
+    """Put one planned item in its place; False if there was nothing to send."""
+    prev, remote = item['prev'], item['remote']
+    old = (prev[1] or f"{DROPBOX_LEGACY}/{item['key']}") if prev else ''
+    if item['full'] is None:                                  # report PDF, built fresh
+        try:
+            built = build_report_pdf(*item['job'])
+        except Exception:
+            logger.exception('Report PDF for Dropbox failed: %s', item['job'])
+            return False
+        if not built:
+            return False
+        client.upload_bytes(built[0], remote)
+    elif prev and prev[0] == item['sig'] and old != remote:   # same file, new place
+        try:
+            client.move(old, remote)
+            old = ''
+        except dropbox_backup.DropboxError:
+            client.upload(item['full'], remote)
+    else:
+        client.upload(item['full'], remote)
+    if old and old != remote:
+        _dropbox_delete_quietly(client, old)                  # the copy at the old place
+    _dropbox_record(item['key'], item['sig'], remote)
+    return True
+
+
+def _dropbox_tidy_legacy(client, legacy):
+    """Move first-layout copies of files deleted here to 其他 Other; once none is left, remove
+    the then empty /files folder."""
+    for key, old in legacy:
+        target = f'{DROPBOX_OTHER}/{key}'
+        try:
+            client.move(old, target)
+        except dropbox_backup.DropboxError:
+            pass
+        with db_conn() as conn:
+            conn.execute('UPDATE dropbox_files SET remote=? WHERE path=?', (target, key))
+    if load_config().get('dropbox_legacy_cleaned'):
+        return
+    with db_conn() as conn:
+        left = conn.execute("SELECT COUNT(*) FROM dropbox_files WHERE IFNULL(remote, '') = '' "
+                            "OR remote LIKE ?", (DROPBOX_LEGACY + '/%',)).fetchone()[0]
+    if not left:
+        _dropbox_delete_quietly(client, DROPBOX_LEGACY)
+        update_config(dropbox_legacy_cleaned=True)
 
 
 def _dropbox_snapshot(client, day):
@@ -4570,17 +4731,16 @@ def run_dropbox_sync(budget=DROPBOX_RUN_SECONDS, force_snapshot=False):
             if force_snapshot or load_config().get('dropbox_snapshot_day') != day:
                 _dropbox_snapshot(client, day)
                 update_config(dropbox_snapshot_day=day)
-            for rel, full, size in dropbox_pending():
+            work, legacy = dropbox_plan()
+            for item in work:
                 if time.time() - started > budget:
                     break
                 try:
-                    client.upload(full, '/files/' + rel)
+                    sent += _dropbox_send(client, item)
                 except FileNotFoundError:
                     continue                 # removed while waiting
-                with db_conn() as conn:
-                    conn.execute('INSERT OR REPLACE INTO dropbox_files (path, size, synced_at) VALUES (?,?,?)',
-                                 (rel, size, _utc_minute()))
-                sent += 1
+            if time.time() - started <= budget:
+                _dropbox_tidy_legacy(client, legacy)
             try:
                 space = client.space()
             except dropbox_backup.DropboxError:
@@ -4588,9 +4748,10 @@ def run_dropbox_sync(budget=DROPBOX_RUN_SECONDS, force_snapshot=False):
         except Exception as exc:
             logger.exception('Dropbox sync failed')
             error = _dropbox_error_text(exc)
-        pending = dropbox_pending(include_recent=True)
+        pending, _legacy = dropbox_plan(include_recent=True)
         changes = {'dropbox_last_run': _utc_minute(), 'dropbox_last_error': error, 'dropbox_last_sent': sent,
-                   'dropbox_pending_count': len(pending), 'dropbox_pending_bytes': sum(p[2] for p in pending)}
+                   'dropbox_pending_count': len(pending),
+                   'dropbox_pending_bytes': sum(p['sig'] for p in pending if p['full'])}
         if not error:
             changes['dropbox_last_ok'] = changes['dropbox_last_run']
         if space:
@@ -4683,7 +4844,8 @@ def settings_dropbox_callback():
     if load_config().get('dropbox_account_id') != account_id:
         with db_conn() as conn:
             conn.execute('DELETE FROM dropbox_files')        # another Dropbox: send everything again
-        changes.update(dropbox_account_id=account_id, dropbox_snapshot_day='', dropbox_last_ok='')
+        changes.update(dropbox_account_id=account_id, dropbox_snapshot_day='', dropbox_last_ok='',
+                       dropbox_legacy_cleaned=False)
     os.makedirs(os.path.dirname(DROPBOX_TOKEN_FILE), exist_ok=True)
     save_json(DROPBOX_TOKEN_FILE, {
         'refresh_token': tokens['refresh_token'], 'account_id': account_id,
