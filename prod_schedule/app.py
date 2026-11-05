@@ -84,6 +84,7 @@ ADMIN_ENDPOINTS = {
     'settings_purchasing_send', 'export_purchasing_excel', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
     'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'vtrust_keep', 'vtrust_release', 'report_kpi_exclusion', 'schedule_est_edit',
     'outstanding_close', 'outstanding_reopen',
+    'settings_dropbox_connect', 'settings_dropbox_callback', 'settings_dropbox_sync', 'settings_dropbox_disconnect',
 }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -671,6 +672,7 @@ EVIDENCE_META = {
 # Chinese version of each guidance line (lines are combined per product).
 import evidence_rules
 import checklists
+import dropbox_backup
 
 
 def product_reference(code):
@@ -4213,7 +4215,8 @@ def settings():
                            excel_password_configured=bool(EXCEL_PASSWORD),
                            my_email=_current_user_email(),
                            storage=storage_usage(), full_backup_age=full_backup_age_days(config),
-                           disk_alert_percent=DISK_ALERT_PERCENT, full_backup_days=FULL_BACKUP_DAYS)
+                           disk_alert_percent=DISK_ALERT_PERCENT, full_backup_days=FULL_BACKUP_DAYS,
+                           dropbox=dropbox_status(), dropbox_healthy=dropbox_healthy(config))
 
 
 def _current_user_email():
@@ -4384,7 +4387,7 @@ def send_storage_alert():
     except ValueError:
         last_reminder = None
     backup_due = (age is None or age >= FULL_BACKUP_DAYS) and (
-        last_reminder is None or (day - last_reminder).days >= 7)
+        last_reminder is None or (day - last_reminder).days >= 7) and not dropbox_healthy(config)
     if not disk_due and not backup_due:
         return False, tr('无需提醒', 'Nothing to report')
     gb = 1024 ** 3
@@ -4416,6 +4419,312 @@ def send_storage_alert():
             changes['full_backup_reminder_last'] = day.isoformat()
         update_config(**changes)
     return ok, msg
+
+
+# ── Dropbox off-site backup ──────────────────────────────────────────────────
+# Attachments and product images are copied to the admin's Dropbox (an "App folder" app)
+# every hour - only files not sent yet, and nothing is ever deleted there. Once a day the
+# data snapshot (same zip as the backup e-mail) goes up too; daily ones are kept
+# DROPBOX_SNAPSHOT_KEEP_DAYS days, the one of the 1st of each month for good. The refresh
+# token lives in APP_DATA_DIR/private - outside DATA_DIR, so never in a backup zip or e-mail.
+DROPBOX_APP_KEY = os.environ.get('DROPBOX_APP_KEY', '').strip()
+DROPBOX_TOKEN_FILE = os.path.join(APP_DATA_DIR, 'private', 'dropbox.json')
+DROPBOX_SYNC_EVERY = 3600          # seconds between runs (started by a page view or /cron/reminders)
+DROPBOX_RUN_SECONDS = 15 * 60      # a run stops after this; the next one carries on
+DROPBOX_SETTLE_SECONDS = 120       # files written in the last 2 minutes wait for the next run
+DROPBOX_SNAPSHOT_KEEP_DAYS = 30
+DROPBOX_ALERT_AFTER_HOURS = 6      # e-mail the backup addresses after this long without a good run
+_dropbox_lock = threading.Lock()
+_dropbox_next_run = {'at': 0.0}
+
+
+def _utc_minute():
+    return datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M')
+
+
+def dropbox_connection():
+    """The saved Dropbox sign-in (refresh token, account), or {}."""
+    try:
+        return load_json(DROPBOX_TOKEN_FILE, {})
+    except (OSError, ValueError):
+        return {}
+
+
+def dropbox_ready():
+    return bool(DROPBOX_APP_KEY and dropbox_connection().get('refresh_token'))
+
+
+def _dropbox_client():
+    return dropbox_backup.Client(DROPBOX_APP_KEY, dropbox_connection()['refresh_token'])
+
+
+def dropbox_pending(include_recent=False):
+    """[(path relative to APP_DATA_DIR, full path, size)] of attachments and product
+    images that are not in Dropbox yet (or changed size since). Files written in the
+    last DROPBOX_SETTLE_SECONDS may still be uploading: left out unless include_recent."""
+    with db_conn() as conn:
+        done = {r[0]: r[1] for r in conn.execute('SELECT path, size FROM dropbox_files')}
+    now, pending = time.time(), []
+    for base in (UPLOAD_DIR, PRODUCT_IMG_DIR):
+        for root, dirs, files in os.walk(base):
+            dirs.sort()
+            for name in sorted(files):
+                if name.endswith('.tmp'):
+                    continue
+                full = os.path.join(root, name)
+                try:
+                    st = os.stat(full)
+                except OSError:
+                    continue
+                rel = os.path.relpath(full, APP_DATA_DIR).replace(os.sep, '/')
+                if done.get(rel) == st.st_size or (
+                        not include_recent and now - st.st_mtime < DROPBOX_SETTLE_SECONDS):
+                    continue
+                pending.append((rel, full, st.st_size))
+    return pending
+
+
+def _dropbox_snapshot(client, day):
+    path = build_backup_zip(include_files=False)
+    try:
+        client.upload(path, f'/data/qc-backup-data-{day}.zip')
+    finally:
+        _remove_quietly(path)
+    old = date.fromisoformat(day) - timedelta(days=DROPBOX_SNAPSHOT_KEEP_DAYS)
+    if old.day != 1:                     # the 1st of each month is kept for good
+        try:
+            client.delete(f'/data/qc-backup-data-{old.isoformat()}.zip')
+        except dropbox_backup.DropboxError:
+            pass                         # no snapshot that day
+
+
+def _dropbox_error_text(exc):
+    """A message the admin can act on, in both languages (stored and e-mailed)."""
+    text = str(exc)
+    if 'insufficient_space' in text:
+        return ('Dropbox 空间已满，新文件无法上传。请清理 Dropbox 或升级套餐。 / '
+                'Dropbox is full: free up space or upgrade the plan.')
+    if 'missing_scope' in text:
+        return ('Dropbox App 缺少 files.content.write 权限：在 Dropbox App 的 Permissions 页勾选并提交后，重新连接 Dropbox。 / '
+                'The Dropbox app lacks files.content.write: tick it on the app\'s Permissions page, then connect again.')
+    if 'invalid_grant' in text or 'invalid_access_token' in text or getattr(exc, 'status', None) == 401:
+        return ('Dropbox 授权已失效，请在设置里重新连接 Dropbox。 / '
+                'The Dropbox sign-in is no longer valid: connect Dropbox again in Settings.')
+    if isinstance(exc, OSError):
+        return ('连不上 Dropbox（网络问题），下次会自动重试。 / Could not reach Dropbox (network); '
+                'the next run retries. ' + text[:200])
+    return text[:300]
+
+
+def dropbox_healthy(config=None):
+    """Connected, the last run had no error, and one succeeded in the last 2 days."""
+    config = config or load_config()
+    if not dropbox_ready() or config.get('dropbox_last_error'):
+        return False
+    try:
+        last = datetime.strptime(config.get('dropbox_last_ok', ''), '%Y-%m-%d %H:%M').replace(tzinfo=_tz.utc)
+    except ValueError:
+        return False
+    return datetime.now(_tz.utc) - last < timedelta(days=2)
+
+
+def send_dropbox_alert(error):
+    """E-mail the backup addresses (once a day) when Dropbox backups keep failing."""
+    config = load_config()
+    recipients = _email_list(config.get('backup_emails', ''))
+    day = china_today().isoformat()
+    if not recipients or config.get('dropbox_alert_day') == day:
+        return False
+    try:
+        last_ok = datetime.strptime(config.get('dropbox_last_ok', ''), '%Y-%m-%d %H:%M').replace(tzinfo=_tz.utc)
+    except ValueError:
+        last_ok = None
+    if last_ok and datetime.now(_tz.utc) - last_ok < timedelta(hours=DROPBOX_ALERT_AFTER_HOURS):
+        return False                     # a passing hiccup; the next hourly run retries
+    since = (f"{config['dropbox_last_ok']} UTC" if last_ok else '—')
+    lines = ['Dropbox 自动备份失败 / Dropbox backup failed', '',
+             error, '',
+             f'上次成功 / Last success: {since}',
+             f"待上传 / Waiting: {config.get('dropbox_pending_count', 0)}", '',
+             '照片和附件目前只在 Railway 磁盘上有一份，请尽快处理。每天最多提醒一次。',
+             'Photos and attachments now only exist on the Railway disk. At most one reminder a day.',
+             url_for('settings', _external=True) + '#dropbox']
+    ok, _msg = _smtp_send('【系统提醒】Dropbox 备份失败 / Dropbox backup failed', '\n'.join(lines), recipients)
+    if ok:
+        update_config(dropbox_alert_day=day)
+    return ok
+
+
+def run_dropbox_sync(budget=DROPBOX_RUN_SECONDS, force_snapshot=False):
+    """One run: today's data snapshot (once a day), then files not sent yet until `budget`
+    seconds are used. Only one run at a time. Returns (ok, message)."""
+    if not dropbox_ready():
+        return False, tr('未连接 Dropbox', 'Dropbox is not connected')
+    if not _dropbox_lock.acquire(blocking=False):
+        return False, tr('同步正在进行中', 'A sync is already running')
+    started, sent, error, space = time.time(), 0, '', None
+    try:
+        try:
+            client = _dropbox_client()
+            day = _backup_day()
+            if force_snapshot or load_config().get('dropbox_snapshot_day') != day:
+                _dropbox_snapshot(client, day)
+                update_config(dropbox_snapshot_day=day)
+            for rel, full, size in dropbox_pending():
+                if time.time() - started > budget:
+                    break
+                try:
+                    client.upload(full, '/files/' + rel)
+                except FileNotFoundError:
+                    continue                 # removed while waiting
+                with db_conn() as conn:
+                    conn.execute('INSERT OR REPLACE INTO dropbox_files (path, size, synced_at) VALUES (?,?,?)',
+                                 (rel, size, _utc_minute()))
+                sent += 1
+            try:
+                space = client.space()
+            except dropbox_backup.DropboxError:
+                space = None
+        except Exception as exc:
+            logger.exception('Dropbox sync failed')
+            error = _dropbox_error_text(exc)
+        pending = dropbox_pending(include_recent=True)
+        changes = {'dropbox_last_run': _utc_minute(), 'dropbox_last_error': error, 'dropbox_last_sent': sent,
+                   'dropbox_pending_count': len(pending), 'dropbox_pending_bytes': sum(p[2] for p in pending)}
+        if not error:
+            changes['dropbox_last_ok'] = changes['dropbox_last_run']
+        if space:
+            changes['dropbox_space_used'] = space.get('used', 0)
+            changes['dropbox_space_total'] = (space.get('allocation') or {}).get('allocated', 0)
+        update_config(**changes)
+    finally:
+        _dropbox_lock.release()
+    if error:
+        send_dropbox_alert(error)
+        return False, error
+    return True, tr(f'已上传 {sent} 个文件', f'{sent} file(s) uploaded')
+
+
+def _start_dropbox_sync(base_url, force_snapshot=False):
+    _dropbox_next_run['at'] = time.time() + DROPBOX_SYNC_EVERY
+
+    def work():
+        try:
+            with app.test_request_context(base_url=base_url):
+                run_dropbox_sync(force_snapshot=force_snapshot)
+        except Exception:
+            logger.exception('Dropbox sync run failed')
+    if app.config.get('TESTING'):
+        work()
+    else:
+        threading.Thread(target=work, daemon=True).start()
+
+
+def dropbox_status():
+    """What the Settings page shows (never the token)."""
+    info = dropbox_connection()
+    with db_conn() as conn:
+        count, size = conn.execute('SELECT COUNT(*), IFNULL(SUM(size), 0) FROM dropbox_files').fetchone()
+    return {'configured': bool(DROPBOX_APP_KEY), 'connected': bool(DROPBOX_APP_KEY and info.get('refresh_token')),
+            'email': info.get('email', ''), 'name': info.get('name', ''),
+            'connected_at': info.get('connected_at', ''), 'connected_by': info.get('connected_by', ''),
+            'redirect_uri': url_for('settings_dropbox_callback', _external=True),
+            'synced_count': count, 'synced_bytes': size, 'running': _dropbox_lock.locked(),
+            'keep_days': DROPBOX_SNAPSHOT_KEEP_DAYS}
+
+
+def _back_to_dropbox():
+    return redirect(url_for('settings') + '#dropbox')
+
+
+@app.route('/settings/dropbox/connect')
+def settings_dropbox_connect():
+    if not DROPBOX_APP_KEY:
+        flash(tr('Railway 里还没有设置 DROPBOX_APP_KEY', 'DROPBOX_APP_KEY is not set in Railway'), 'error')
+        return _back_to_dropbox()
+    verifier, challenge = dropbox_backup.new_pkce()
+    state = secrets.token_urlsafe(24)
+    session['dropbox_oauth'] = {'verifier': verifier, 'state': state}
+    return redirect(dropbox_backup.authorize_url(
+        DROPBOX_APP_KEY, challenge, url_for('settings_dropbox_callback', _external=True), state))
+
+
+@app.route('/settings/dropbox/callback')
+def settings_dropbox_callback():
+    pending = session.pop('dropbox_oauth', None) or {}
+    if request.args.get('error'):
+        flash(tr('没有连接 Dropbox', 'Dropbox was not connected') + ': '
+              + (request.args.get('error_description') or request.args['error'])[:200], 'error')
+        return _back_to_dropbox()
+    if (not pending or not request.args.get('code')
+            or not hmac.compare_digest(request.args.get('state', ''), pending.get('state', ''))):
+        flash(tr('Dropbox 登录已过期，请重新点“连接 Dropbox”', 'The Dropbox sign-in expired; click Connect Dropbox again'),
+              'error')
+        return _back_to_dropbox()
+    try:
+        tokens = dropbox_backup.exchange_code(DROPBOX_APP_KEY, request.args['code'], pending['verifier'],
+                                              url_for('settings_dropbox_callback', _external=True))
+        client = dropbox_backup.Client(DROPBOX_APP_KEY, tokens['refresh_token'])
+        if tokens.get('scope') and dropbox_backup.WRITE_SCOPE not in tokens['scope'].split():
+            try:
+                client.revoke()
+            except (dropbox_backup.DropboxError, OSError):
+                pass
+            flash(tr('这个 Dropbox App 没有 files.content.write 权限：在 Dropbox App 的 Permissions 页勾选并提交，再重新连接。',
+                     'The Dropbox app lacks files.content.write: tick it on its Permissions page, submit, then connect again.'),
+                  'error')
+            return _back_to_dropbox()
+        account = client.account()
+    except (dropbox_backup.DropboxError, OSError) as exc:
+        flash(tr('连接 Dropbox 失败', 'Could not connect Dropbox') + f': {str(exc)[:200]}', 'error')
+        return _back_to_dropbox()
+    account_id = tokens.get('account_id') or account.get('account_id', '')
+    changes = {'dropbox_last_error': '', 'dropbox_alert_day': ''}
+    if load_config().get('dropbox_account_id') != account_id:
+        with db_conn() as conn:
+            conn.execute('DELETE FROM dropbox_files')        # another Dropbox: send everything again
+        changes.update(dropbox_account_id=account_id, dropbox_snapshot_day='', dropbox_last_ok='')
+    os.makedirs(os.path.dirname(DROPBOX_TOKEN_FILE), exist_ok=True)
+    save_json(DROPBOX_TOKEN_FILE, {
+        'refresh_token': tokens['refresh_token'], 'account_id': account_id,
+        'email': account.get('email', ''), 'name': (account.get('name') or {}).get('display_name', ''),
+        'connected_at': _utc_minute(), 'connected_by': g.username})
+    try:
+        os.chmod(DROPBOX_TOKEN_FILE, 0o600)
+    except OSError:
+        pass
+    update_config(**changes)
+    _dropbox_next_run['at'] = 0.0                            # first sync with the next page view
+    flash(tr(f"已连接 Dropbox：{account.get('email', '')}。几分钟后开始上传。",
+             f"Dropbox connected: {account.get('email', '')}. Uploads start within minutes."), 'success')
+    return _back_to_dropbox()
+
+
+@app.route('/settings/dropbox/sync', methods=['POST'])
+def settings_dropbox_sync():
+    if not dropbox_ready():
+        flash(tr('未连接 Dropbox', 'Dropbox is not connected'), 'error')
+    elif _dropbox_lock.locked():
+        flash(tr('同步正在进行中', 'A sync is already running'), 'info')
+    else:
+        _start_dropbox_sync(request.host_url)
+        flash(tr('已开始同步，稍后刷新本页查看结果', 'Sync started; reload this page in a while to see the result'),
+              'success')
+    return _back_to_dropbox()
+
+
+@app.route('/settings/dropbox/disconnect', methods=['POST'])
+def settings_dropbox_disconnect():
+    if dropbox_ready():
+        try:
+            _dropbox_client().revoke()
+        except Exception:
+            logger.warning('Could not revoke the Dropbox token', exc_info=True)
+    _remove_quietly(DROPBOX_TOKEN_FILE)
+    update_config(dropbox_last_error='')
+    flash(tr('已断开 Dropbox（已备份到 Dropbox 的文件保留不动）', 'Dropbox disconnected (files already in Dropbox stay there)'),
+          'success')
+    return _back_to_dropbox()
 
 
 @app.route('/settings/backup/email', methods=['POST'])
@@ -8279,6 +8588,10 @@ def _auth_check():
     if not app.config.get('TESTING') and _last_reminder_day['day'] != china_today():
         _last_reminder_day['day'] = china_today()
         _run_reminders_in_background(request.host_url)
+    if not app.config.get('TESTING') and time.time() >= _dropbox_next_run['at']:
+        _dropbox_next_run['at'] = time.time() + DROPBOX_SYNC_EVERY
+        if dropbox_ready():
+            _start_dropbox_sync(request.host_url)
     g.display_name = user['display_name'] or user['username']
     if request.endpoint == 'dashboard' and not g.can_view_dashboard:
         return tr('无权限访问此页面', 'Forbidden'), 403
@@ -8392,7 +8705,17 @@ def cron_reminders():
             'vtrust_reminders_sent': send_vtrust_reminders()[0],
             'vtrust_reschedule_alerts': send_vtrust_reschedule_alerts()[0],
             'backup': send_backup_email()[1], 'weekly_summary': send_weekly_summary()[1],
-            'storage_alert': send_storage_alert()[1]}
+            'storage_alert': send_storage_alert()[1],
+            'dropbox': _cron_dropbox()}
+
+
+def _cron_dropbox():
+    if not dropbox_ready():
+        return 'not connected'
+    if _dropbox_lock.locked():
+        return 'already running'
+    _start_dropbox_sync(request.host_url)
+    return 'started'
 
 
 @app.route('/lang/<code>')

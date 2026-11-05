@@ -254,8 +254,65 @@
             {{ tr('上次下载完整备份', 'Last full backup') }}: {{ config.full_backup_last_at|localtime }}
             ({{ tr('%d 天前' % full_backup_age, '%d day(s) ago' % full_backup_age) }}{% if config.get('full_backup_last_by') %} · {{ config.full_backup_last_by }}{% endif %})
           {% endif %}
-          <span style="color:#6b7280;">— {{ tr('超过 %d 天未下载时，每周邮件提醒一次' % full_backup_days, 'reminder e-mailed weekly after %d days without one' % full_backup_days) }}</span>
+          <span style="color:#6b7280;">— {% if dropbox_healthy %}{{ tr('Dropbox 自动备份正常，不再邮件提醒下载', 'Dropbox backup is working, so no download reminders') }}{% else %}{{ tr('超过 %d 天未下载时，每周邮件提醒一次' % full_backup_days, 'reminder e-mailed weekly after %d days without one' % full_backup_days) }}{% endif %}</span>
         </div>
+      </div>
+      <div id="dropbox" style="margin-bottom:14px; padding:12px 14px; border:1px solid #e5e7eb; border-radius:8px; font-size:.84rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:6px;">
+          <strong>&#9729; {{ tr('Dropbox 自动备份（照片、附件 + 每日数据）', 'Dropbox auto backup (photos, attachments + daily data)') }}</strong>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            {% if dropbox.connected %}
+              <form method="POST" action="{{ url_for('settings_dropbox_sync') }}">
+                <button type="submit" class="btn btn-outline btn-sm" {{ 'disabled' if dropbox.running }}>&#8635; {{ tr('立即同步', 'Sync now') }}</button>
+              </form>
+              <form method="POST" action="{{ url_for('settings_dropbox_disconnect') }}"
+                    onsubmit='return confirm({{ tr("断开 Dropbox？已备份的文件会保留在 Dropbox 里，但之后不再自动备份。", "Disconnect Dropbox? Files already there stay, but new ones are no longer backed up.")|tojson }})'>
+                <button type="submit" class="btn btn-outline btn-sm">{{ tr('断开', 'Disconnect') }}</button>
+              </form>
+            {% elif dropbox.configured %}
+              <a href="{{ url_for('settings_dropbox_connect') }}" class="btn btn-primary btn-sm">&#128279; {{ tr('连接 Dropbox', 'Connect Dropbox') }}</a>
+            {% endif %}
+          </div>
+        </div>
+        {% if not dropbox.configured %}
+          <span class="status-dot dot-red"></span>{{ tr('未开启：在 Railway 设置环境变量 DROPBOX_APP_KEY 后重新部署。', 'Off: set DROPBOX_APP_KEY in Railway and redeploy.') }}
+        {% elif not dropbox.connected %}
+          <div><span class="status-dot dot-red"></span>{{ tr('还没有连接 Dropbox。连接前请在 Dropbox App 控制台确认：', 'Dropbox is not connected yet. First check in the Dropbox app console:') }}</div>
+          <ol style="margin:6px 0 0 20px; color:#4b5563; line-height:1.7;">
+            <li>{{ tr('Permissions 页勾选 files.content.write，点 Submit', 'Permissions: tick files.content.write and Submit') }}</li>
+            <li>{{ tr('Settings 页 → OAuth 2 → Redirect URIs 添加：', 'Settings → OAuth 2 → Redirect URIs, add:') }} <code style="user-select:all;">{{ dropbox.redirect_uri }}</code></li>
+            <li>{{ tr('回到这里点“连接 Dropbox”，用要存备份的 Dropbox 账号登录并允许', 'Come back and click Connect Dropbox; sign in with the Dropbox account for the backups and allow') }}</li>
+          </ol>
+        {% else %}
+          {% set last_error = config.get('dropbox_last_error') %}
+          <div>
+            {{ tr('已连接', 'Connected') }}: <strong>{{ dropbox.email }}</strong>{% if dropbox.name %} ({{ dropbox.name }}){% endif %}
+            <span style="color:#6b7280;">· {{ dropbox.connected_at|localtime }}{% if dropbox.connected_by %} · {{ dropbox.connected_by }}{% endif %}</span>
+          </div>
+          <div style="margin-top:4px;">
+            {% if dropbox.running %}
+              <span class="status-dot dot-green"></span>{{ tr('正在同步…', 'Syncing…') }}
+            {% elif not config.get('dropbox_last_run') %}
+              <span class="status-dot dot-green"></span>{{ tr('等待第一次同步（下一次有人打开网站时开始）', 'Waiting for the first sync (starts with the next page view)') }}
+            {% else %}
+              <span class="status-dot {{ 'dot-red' if last_error else 'dot-green' }}"></span>
+              {{ tr('上次同步', 'Last sync') }}: {{ config.dropbox_last_run|localtime }} —
+              {% if last_error %}<span style="color:#dc2626;">{{ last_error }}</span>{% else %}{{ tr('成功，上传 %d 个文件' % config.get('dropbox_last_sent', 0), 'OK, %d file(s) uploaded' % config.get('dropbox_last_sent', 0)) }}{% endif %}
+            {% endif %}
+          </div>
+          <div style="margin-top:4px; color:#4b5563;">
+            {{ tr('已备份', 'Backed up') }} {{ dropbox.synced_count }} {{ tr('个文件', 'files') }} ({{ dropbox.synced_bytes|filesizeformat(true)|replace('iB', 'B') }})
+            {% if config.get('dropbox_pending_count') %} · <strong>{{ tr('待上传', 'waiting') }} {{ config.dropbox_pending_count }} {{ tr('个', '') }} ({{ config.get('dropbox_pending_bytes', 0)|filesizeformat(true)|replace('iB', 'B') }})</strong>{% endif %}
+            {% if config.get('dropbox_space_total') %}
+              {% set dbx_pct = config.dropbox_space_used * 100 / config.dropbox_space_total %}
+              · <span style="{{ 'color:#dc2626; font-weight:600;' if dbx_pct >= 90 else '' }}">Dropbox {{ tr('空间', 'space') }} {{ config.dropbox_space_used|filesizeformat(true)|replace('iB', 'B') }} / {{ config.dropbox_space_total|filesizeformat(true)|replace('iB', 'B') }} ({{ '%.0f'|format(dbx_pct) }}%)</span>
+            {% endif %}
+          </div>
+          <div style="margin-top:4px; color:#6b7280;">
+            {{ tr('每小时自动上传新文件到 Dropbox“应用/<App 名>/files”；每天一份数据快照到“/data”（保留 %d 天，每月 1 号的永久保留）。系统里删除的文件不会从 Dropbox 删除。连续失败时每天邮件提醒备份邮箱。' % dropbox.keep_days,
+                  'New files go to Dropbox “Apps/<app name>/files” every hour; a daily data snapshot goes to “/data” (kept %d days, the 1st of each month for good). Files deleted here are not deleted in Dropbox. Repeated failures are e-mailed to the backup addresses daily.' % dropbox.keep_days) }}
+          </div>
+        {% endif %}
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
         <form method="POST" action="{{ url_for('settings_backup') }}">

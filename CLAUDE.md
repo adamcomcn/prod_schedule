@@ -33,6 +33,9 @@ CI (`.github/workflows/tests.yml`) runs pytest on PRs and on main.
 ## Data
 - `APP_DATA_DIR` (`/data` on Railway, a mounted volume): `data/app.db`, JSON files
   (`current_week.json`, `previous_week.json`, `inspections_cache.json`, `config.json`), `uploads/`.
+- Off-site copy: `dropbox_backup.py` + "Dropbox" in Settings → Backups. Hourly upload of new files in
+  `uploads/` and `product_images/` (tracked in `dropbox_files`), daily data zip to `/data`. The refresh
+  token is in `APP_DATA_DIR/private/dropbox.json`, outside `data/`, so never in a backup zip.
 - JSON writes go through `save_json` (atomic tmp + `os.replace`, retry on Windows PermissionError).
 - Inspection records live in `inspections_cache.json` keyed by job key `REGION|PO|ITEMCODE`.
   `SharedReports` falls back across regions by PO+item; region moves are detected on upload
@@ -68,6 +71,7 @@ Never push `main` without that explicit per-change "merge". `git pull` main firs
 ## Environment variables
 `SECRET_KEY`, `APP_DATA_DIR`, `SMTP_*`, `SMTP_FROM_NAME`, `CRON_SECRET`, `EXCEL_PASSWORD`,
 `BOOTSTRAP_ADMIN_*`, `MAX_UPLOAD_BYTES`, `PDF_FONT_PATH`, `SESSION_HOURS`, `TRUSTED_PROXY_HOPS`,
+`DROPBOX_APP_KEY` (public App key of the Dropbox "App folder" app; PKCE, no secret),
 `DESK_INTEGRATION_TOKEN` (shared with the Production Desk: `/api/integration/schedule` stages Wang's forwarded
 schedule as the pending upload, `/api/integration/inspections` reports latest result + review per job).
 Secrets are set by the owner in Railway — never ask for or handle their values.

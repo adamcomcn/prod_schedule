@@ -976,6 +976,12 @@ def init_db():
             conn.execute('ALTER TABLE outstanding_jobs ADD COLUMN closed INTEGER DEFAULT 0')
             for col in ('closed_at', 'closed_by', 'close_reason', 'close_note'):
                 conn.execute(f"ALTER TABLE outstanding_jobs ADD COLUMN {col} TEXT DEFAULT ''")
+        # Files already copied to the Dropbox backup (path relative to APP_DATA_DIR)
+        conn.execute('''CREATE TABLE IF NOT EXISTS dropbox_files (
+            path       TEXT PRIMARY KEY,
+            size       INTEGER NOT NULL,
+            synced_at  TEXT    NOT NULL
+        )''')
         # Units with issues (stem codes) and the release decision for a conditional result
         if 'release' not in booking_cols:
             for col in ('problem_units', 'release', 'release_note', 'release_by', 'release_at'):
