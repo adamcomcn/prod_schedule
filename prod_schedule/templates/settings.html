@@ -279,7 +279,7 @@
         {% elif not dropbox.connected %}
           <div><span class="status-dot dot-red"></span>{{ tr('还没有连接 Dropbox。连接前请在 Dropbox App 控制台确认：', 'Dropbox is not connected yet. First check in the Dropbox app console:') }}</div>
           <ol style="margin:6px 0 0 20px; color:#4b5563; line-height:1.7;">
-            <li>{{ tr('Permissions 页勾选 files.content.write，点 Submit', 'Permissions: tick files.content.write and Submit') }}</li>
+            <li>{{ tr('Permissions 页 → Files and folders 勾选 files.content.write，点右上角 Save changes', 'Permissions → Files and folders: tick files.content.write, then Save changes (top right)') }}</li>
             <li>{{ tr('Settings 页 → OAuth 2 → Redirect URIs 添加：', 'Settings → OAuth 2 → Redirect URIs, add:') }} <code style="user-select:all;">{{ dropbox.redirect_uri }}</code></li>
             <li>{{ tr('回到这里点“连接 Dropbox”，用要存备份的 Dropbox 账号登录并允许', 'Come back and click Connect Dropbox; sign in with the Dropbox account for the backups and allow') }}</li>
           </ol>

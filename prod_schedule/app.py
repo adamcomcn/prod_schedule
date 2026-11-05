@@ -4505,7 +4505,7 @@ def _dropbox_error_text(exc):
         return ('Dropbox 空间已满，新文件无法上传。请清理 Dropbox 或升级套餐。 / '
                 'Dropbox is full: free up space or upgrade the plan.')
     if 'missing_scope' in text:
-        return ('Dropbox App 缺少 files.content.write 权限：在 Dropbox App 的 Permissions 页勾选并提交后，重新连接 Dropbox。 / '
+        return ('Dropbox App 缺少 files.content.write 权限：在 Dropbox App 的 Permissions 页勾选并点 Save changes 后，重新连接 Dropbox。 / '
                 'The Dropbox app lacks files.content.write: tick it on the app\'s Permissions page, then connect again.')
     if 'invalid_grant' in text or 'invalid_access_token' in text or getattr(exc, 'status', None) == 401:
         return ('Dropbox 授权已失效，请在设置里重新连接 Dropbox。 / '
@@ -4670,8 +4670,8 @@ def settings_dropbox_callback():
                 client.revoke()
             except (dropbox_backup.DropboxError, OSError):
                 pass
-            flash(tr('这个 Dropbox App 没有 files.content.write 权限：在 Dropbox App 的 Permissions 页勾选并提交，再重新连接。',
-                     'The Dropbox app lacks files.content.write: tick it on its Permissions page, submit, then connect again.'),
+            flash(tr('这个 Dropbox App 没有 files.content.write 权限：在 Dropbox App 的 Permissions 页勾选并点 Save changes，再重新连接。',
+                     'The Dropbox app lacks files.content.write: tick it on its Permissions page, Save changes, then connect again.'),
                   'error')
             return _back_to_dropbox()
         account = client.account()
