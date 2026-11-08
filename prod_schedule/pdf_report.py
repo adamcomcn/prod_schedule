@@ -338,6 +338,10 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
         ('TOPPADDING', (1, 0), (1, 0), 8), ('BOTTOMPADDING', (1, 0), (1, 0), 8),
     ]))
     story += [head, Spacer(1, 6 * mm)]
+    if record.get('backfill'):
+        story += [_p(_bi('历史补录：本报告依据原始检验报告录入，原件见附件。',
+                         'Added afterwards from the original inspection report (attached).'), st['small']),
+                  Spacer(1, 3 * mm)]
 
     widths = [28 * mm, content_w / 2 - 28 * mm, 28 * mm, content_w / 2 - 28 * mm]
 
@@ -507,7 +511,12 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
     signed_at = time_text(record.get('submitted_at')) if record.get('submitted_at') else ''
     inspector_cell = (_bi('检验员签字', 'Inspector signature')
                       + f"\n\n{signed_by}\n已电子签署 Signed electronically\n{signed_at}")
-    if review and review['status'] == 'approved':
+    if record.get('backfill'):
+        inspector_cell = (_bi('检验员', 'Inspector') + f"\n\n{record.get('inspector_name', '')}\n"
+                          f"见原始报告 See the original report")
+        reviewer_cell = _bi('补录', 'Added by') + f"\n\n{record.get('submitted_by', '')}"
+        date_cell = _bi('补录时间', 'Added on') + f"\n\n{signed_at}"
+    elif review and review['status'] == 'approved':
         tag = '\n自审 Self-review' if review['self_review'] else ''
         note = f"\n{review['comment']}" if review['comment'] else ''
         reviewer_cell = (_bi('审核', 'Reviewed by') + f"\n\n{review['reviewer_name']}{tag}\n"

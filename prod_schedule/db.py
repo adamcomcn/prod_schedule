@@ -783,6 +783,10 @@ def init_db():
             except Exception:
                 pass
 
+        # May add old (pre-launch) reports and evidence files afterwards (admins always may)
+        if 'can_backfill' not in {c[1] for c in conn.execute('PRAGMA table_info(users)')}:
+            conn.execute('ALTER TABLE users ADD COLUMN can_backfill INTEGER DEFAULT 0')
+
         # Product reference (reference.xlsx): classifies products for the
         # required-evidence rules (evidence_rules.py)
         conn.execute('''CREATE TABLE IF NOT EXISTS product_reference (

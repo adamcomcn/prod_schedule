@@ -183,6 +183,14 @@ input[name=result] { display:none; }
 .readonly-note { background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; border-radius:10px;
                  padding:10px 14px; margin-bottom:12px; font-size:.88rem; }
 .readonly-note span { display:block; color:#3b82f6; font-size:.8rem; margin-top:2px; }
+.bf-hint { font-size:.8rem; color:#4b5563; margin:6px 0 10px; }
+.bf-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:8px; margin-bottom:8px; }
+.bf-form label { display:flex; flex-direction:column; gap:3px; font-size:.8rem; font-weight:600; color:#374151; }
+.bf-file { margin-bottom:8px; }
+.backfill-note { font-size:.75rem; color:#374151; background:#f3f4f6; border-radius:6px; padding:3px 8px; margin:4px 0; }
+.ev-added { margin-top:6px; font-size:.75rem; color:#374151; }
+.ev-added-file { display:inline-flex; align-items:center; gap:2px; border:1px solid #d0d5dd; border-radius:4px; padding:1px 6px; margin:1px 2px; }
+.ev-added-file button { border:0; background:none; color:#dc2626; cursor:pointer; padding:0 2px; font-size:.7rem; }
 .readonly-card { color:#6b7280; font-size:.88rem; }
 {% endblock %}
 
@@ -693,6 +701,39 @@ input[name=result] { display:none; }
       </div>
       {% endif %}
 
+      {% if backfill %}
+      <div class="card" id="backfill">
+        <details {% if not past_inspections %}open{% endif %}>
+        <summary class="section-title" style="cursor:pointer;">&#128450; {{ tr('补录历史报告', 'Add an old report') }}</summary>
+        <p class="bf-hint">{{ tr('用于系统上线前（或在系统外）已完成的检验：按原始报告填写原检验员、日期和结果，并上传原始报告和 BRT 等证据文件。补录的报告不需要审核、不发邮件、不计入检验员考核。',
+                                 'For inspections done before the platform went live (or outside it): enter the original inspector, date and result from the original report and upload it with the BRT and other evidence. Added reports are not reviewed, not e-mailed and not in the inspector KPIs.') }}</p>
+        <form method="POST" enctype="multipart/form-data" action="{{ url_for('backfill_report', job_key=job.job_key) }}" class="bf-form"
+              onsubmit="this.querySelector('button[type=submit]').disabled = true;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <div class="bf-grid">
+            <label>{{ tr('原检验员', 'Original inspector') }} *
+              <input type="text" name="inspector_name" list="bf-inspectors" required maxlength="100"></label>
+            <datalist id="bf-inspectors">{% for n in backfill.inspectors %}<option value="{{ n }}">{% endfor %}</datalist>
+            <label>{{ tr('原检验日期', 'Inspection date') }} *
+              <input type="date" name="inspection_date" required max="{{ backfill.today }}"></label>
+            <label>{{ tr('检验结果', 'Result') }} *
+              <select name="result" required><option value=""></option>
+                {% for v, zh in [('Pass', '合格'), ('Partial Pass', '部分合格'), ('Fail', '不合格')] %}<option value="{{ v }}">{{ tr(zh, v) }}</option>{% endfor %}
+              </select></label>
+            <label>{{ tr('抽检数量', 'Qty inspected') }}<input type="text" name="quantity_inspected" maxlength="20"></label>
+            <label>{{ tr('合格数量', 'Qty passed') }}<input type="text" name="quantity_passed" maxlength="20"></label>
+          </div>
+          {% for t, label in backfill.types %}
+          <label class="bf-file">{{ label }}{% if t == 'original' %} *{% endif %}
+            <input type="file" name="file_{{ t }}" multiple accept="{{ ev_accept }}" {% if t == 'original' %}required{% endif %}></label>
+          {% endfor %}
+          <label class="bf-file">{{ tr('备注', 'Notes') }}<textarea name="notes" rows="2" maxlength="2000"></textarea></label>
+          <button type="submit" class="btn btn-primary btn-sm">{{ tr('保存补录', 'Save old report') }}</button>
+        </form>
+        </details>
+      </div>
+      {% endif %}
+
       {% if past_inspections %}
       <div class="card">
         <div class="section-title">&#128196; {{ tr('历史检验', 'Past Inspections') }} ({{ past_inspections|length }})</div>
@@ -713,6 +754,18 @@ input[name=result] { display:none; }
                class="btn btn-sm btn-outline" style="padding:2px 8px; font-size:.72rem;"
                title="{{ tr('PDF 检验报告', 'PDF inspection report') }}">&#128196; PDF</a>
           </div>
+          {% if p.backfill %}
+          <div class="backfill-note">&#128450; {{ tr('历史补录（依据原始报告，不审核、不计入考核）', 'Old report added afterwards (from the original report; not reviewed, not in the KPIs)') }}
+            · {{ p.submitted_by }} · {{ p.submitted_at|localtime }}
+            {% if loop.first and g.can_backfill and (g.is_admin or p.submitted_by == g.username) %}
+            <form method="POST" action="{{ url_for('backfill_delete', job_key=job.job_key, index=pidx) }}" style="display:inline;"
+                  onsubmit='return confirm({{ tr("删除这份补录的报告和它的文件？", "Delete this added report and its files?")|tojson }})'>
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="hq-resend">{{ tr('删除', 'Delete') }}</button>
+            </form>
+            {% endif %}
+          </div>
+          {% endif %}
           {% if g.is_admin and assignees %}
           <details class="hq-mail" style="font-size:.75rem;">
             <summary style="cursor:pointer; color:#6b7280;">{{ tr('修改检验员', 'Change inspector') }}</summary>
@@ -726,7 +779,7 @@ input[name=result] { display:none; }
           </details>
           {% endif %}
           {% set ki = kpi_info.reports.get(pidx, {}) %}
-          {% if kpi_info.deadline or ki.exclusion %}
+          {% if not p.backfill and (kpi_info.deadline or ki.exclusion) %}
           <div class="hq-mail" style="font-size:.75rem;">
             {{ tr('考核截止日', 'KPI deadline') }}: <strong>{{ kpi_info.deadline or '—' }}</strong>
             {% if kpi_info.extended %}<span style="color:#1e40af;">{{ tr('（日期被提前，已顺延到收到变动后 %d 个工作日）' % kpi_info.grace, ' (date brought forward: moved to %d working days after the change)' % kpi_info.grace) }}</span>{% endif %}
@@ -752,6 +805,7 @@ input[name=result] { display:none; }
           {% for c in p.get('inspector_changes', []) %}
           <div style="font-size:.72rem; color:#9ca3af;">{{ tr('检验员由 ' ~ c['from'] ~ ' 改为 ' ~ c['to'], 'Inspector changed from ' ~ c['from'] ~ ' to ' ~ c['to']) }} · {{ c['by'] }} · {{ c['at']|localtime }}</div>
           {% endfor %}
+          {% if not p.backfill %}
           {% set rv = reviews.get(pidx) %}
           <div class="hq-mail">
             {% if rv and rv.status == 'approved' %}
@@ -786,6 +840,7 @@ input[name=result] { display:none; }
             {% endif %}
           </div>
           {% endif %}
+          {% endif %}{# not p.backfill #}
           <div>{{ tr('抽检 ' ~ p.quantity_inspected ~ ' / 订单 ' ~ p.quantity_ordered, 'Inspected: ' ~ p.quantity_inspected ~ ' / ' ~ p.quantity_ordered ~ ' ordered') }}{% if p.quantity_passed %} · {{ tr('合格 ', 'passed ') }}{{ p.quantity_passed }}{% endif %}</div>
           {% if p.packing_condition or p.marking %}<div>{{ tr('包装', 'Packing') }}: {{ p.packing_condition or '—' }} · {{ tr('标识', 'Marking') }}: {{ p.marking or '—' }}</div>{% endif %}
 
@@ -819,6 +874,32 @@ input[name=result] { display:none; }
             </a>
             {% endfor %}
           </div>
+          {% endif %}
+
+          {% if p.get('evidence_added') %}
+          <div class="ev-added">
+            {% for e in p.evidence_added %}
+            <div>&#10133; {{ tr('补充', 'Added') }} {{ ev_labels.get(e.type, e.type) }}:
+              {% for aid in e.ids %}<span class="ev-added-file">{{ e.files[loop.index0] }}{% if g.can_backfill and (g.is_admin or e.by == g.username) %}<form method="POST" action="{{ url_for('report_remove_evidence', job_key=job.job_key, index=pidx, aid=aid) }}" style="display:inline;"
+                  onsubmit='return confirm({{ tr("删除这个文件？", "Remove this file?")|tojson }})'><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit" title="{{ tr('删除', 'Remove') }}">&#10005;</button></form>{% endif %}</span>{% endfor %}
+              <span style="color:#9ca3af;">· {{ e.by }} · {{ e.at|localtime }}</span></div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if backfill %}
+          <details class="hq-mail add-ev">
+            <summary style="cursor:pointer; color:#1a6fc4;">&#10133; {{ tr('补充证据文件（如 BRT 报告）', 'Add evidence files (e.g. BRT report)') }}</summary>
+            <form method="POST" enctype="multipart/form-data" action="{{ url_for('report_add_evidence', job_key=job.job_key, index=pidx) }}"
+                  style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:4px;"
+                  onsubmit="this.querySelector('button[type=submit]').disabled = true;">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <select name="evidence_type" style="width:auto; padding:2px 6px; font-size:.75rem;">
+                {% for t, label in backfill.types if p.backfill or t != 'original' %}<option value="{{ t }}">{{ label }}</option>{% endfor %}
+              </select>
+              <input type="file" name="files" multiple required accept="{{ ev_accept }}" style="font-size:.75rem;">
+              <button type="submit" class="hq-resend">{{ tr('上传', 'Upload') }}</button>
+            </form>
+          </details>
           {% endif %}
 
           {% if p.get('defect_codes') %}

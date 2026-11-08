@@ -39,7 +39,9 @@
         {{ tr('检验员：只看到并更新分配给自己的任务。', 'Inspector: sees and updates the tasks assigned to them.') }}<br>
         {{ tr('检验主管：可以把任务分配给自己或其他检验员，分配后自动发送邮件通知。', 'Lead inspector: assigns tasks to themselves or other inspectors; an e-mail is sent automatically.') }}<br>
         {{ tr('澳洲总部人员：查看所有排期、任务、报告、仪表板和价格，可以审核检验报告；不提交检验、不分配任务。', 'Melbourne HQ: sees all schedules, tasks, reports, the dashboard and prices, and can review reports; does not inspect or assign.') }}<br>
-        {{ tr('管理员：上传排期、系统设置、账号管理，也可以分配任务。', 'Admin: uploads schedules, manages settings and accounts, and can also assign tasks.') }}
+        {{ tr('管理员：上传排期、系统设置、账号管理，也可以分配任务。', 'Admin: uploads schedules, manages settings and accounts, and can also assign tasks.') }}<br>
+        {{ tr('“可补录报告”：可以补录系统上线前的历史检验报告（原始报告 + BRT 等证据），并给已有报告补充证据文件；适合负责整理资料的同事（如实习生）。',
+              '"Can add old reports": may add pre-launch inspection reports (original report + BRT and other evidence) and add evidence files to reports; for whoever tidies up the records (e.g. an intern).') }}
       </div>
     </form>
   </div>
@@ -66,6 +68,9 @@
               {# keep an existing link when the field is hidden #}
               <input type="hidden" name="employee_id" value="{{ user.employee_id or '' }}">
               {% endif %}
+              <label style="display:inline-flex; align-items:center; gap:3px; font-size:.78rem; white-space:nowrap;"
+                     title="{{ tr('可以补录系统上线前的历史报告，并给报告补充证据文件（管理员默认可以）', 'Can add old (pre-launch) reports and add evidence files to reports (admins always can)') }}">
+                <input type="checkbox" name="can_backfill" value="1" style="width:auto;" {% if user.can_backfill %}checked{% endif %}>{{ tr('可补录报告', 'Can add old reports') }}</label>
               <button class="btn btn-outline btn-sm" type="submit">{{ tr('保存', 'Update') }}</button>
             </form>
           </td>

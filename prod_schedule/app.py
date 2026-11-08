@@ -668,6 +668,13 @@ EVIDENCE_META = {
     'xrf':      {'label': 'XRF Report (Material Composition)', 'label_zh': 'XRF 材质成分报告',
                  'icon': '⚗️', 'color': '#065f46', 'bg': '#d1fae5',
                  'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.heic,image/*'},
+    # files of old reports added afterwards (补录)
+    'original': {'label': 'Original inspection report', 'label_zh': '原始检验报告',
+                 'icon': '🗂️', 'color': '#374151', 'bg': '#f3f4f6',
+                 'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.heic,image/*'},
+    'other':    {'label': 'Other file', 'label_zh': '其他文件',
+                 'icon': '📎', 'color': '#374151', 'bg': '#f3f4f6',
+                 'accepts': '.pdf,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.heic,.mp4,.mov,image/*,video/*'},
 }
 
 # Chinese version of each guidance line (lines are combined per product).
@@ -2129,7 +2136,7 @@ def inspector_kpis(inspections, est_map, users, weeks, deadlines=None, exclusion
             est, extended = _parse_date(est_map.get(job_key, '')), False
         for index, rec in enumerate(records):
             name = (rec.get('inspector_name') or '').strip()
-            if not name:
+            if not name or rec.get('backfill'):      # old reports added afterwards are not rated
                 continue
             user = by_name.get(name.lower())
             if user and user['role'] in KPI_EXCLUDED_ROLES:
@@ -3282,6 +3289,9 @@ def inspect_form(job_key):
                            product_kind=product_kind,
                            can_inspect=inspect_permission(job_key)[0],
                            inspect_block_message=inspect_permission(job_key)[1],
+                           backfill=_backfill_context(job_info) if g.get('can_backfill') else None,
+                           ev_labels={t: _evidence_label(t) for t in EVIDENCE_META},
+                           ev_accept=','.join(sorted(EVIDENCE_EXTENSIONS)),
                            task=job_task(job_key),
                            assignees=_assignable() if g.can_assign else [],
                            vtrust_booking=vtrust_bookings().get(job_key),
@@ -3291,6 +3301,25 @@ def inspect_form(job_key):
                            now_date=china_today().isoformat())
 
 INSPECTION_RESULTS = {'Pass', 'Fail', 'Partial Pass'}
+
+
+def _mark_qa_brt_sent(job_key):
+    """A report exists for the job: set its "QA BRTs Sent?" cell to YES in the current schedule."""
+    with DATA_LOCK:
+        current_sched = load_schedule(CURRENT_FILE)
+        for sheet, rows in current_sched.items():
+            if not rows or len(rows) < 2:
+                continue
+            headers = rows[0]
+            qa_idx = next((i for i, h in enumerate(headers)
+                           if 'qa brt' in str(h).lower()), None)
+            if qa_idx is None:
+                continue
+            for row in rows[1:]:
+                if make_job_key(sheet, row, headers) == job_key:
+                    row[qa_idx] = 'YES'
+                    save_json(CURRENT_FILE, current_sched)
+                    return
 
 @app.route('/inspect/<path:job_key>/submit', methods=['POST'])
 def submit_inspection(job_key):
@@ -3530,27 +3559,7 @@ def submit_inspection(job_key):
         logger.warning('Report for %s saved as #%s: another report was saved at the same time',
                        job_key, insp_index + 1)
 
-    # Auto-update QA BRTs Sent? → YES in current schedule
-    with DATA_LOCK:
-        current_sched = load_schedule(CURRENT_FILE)
-        qa_updated = False
-        for sheet, rows in current_sched.items():
-            if not rows or len(rows) < 2:
-                continue
-            headers = rows[0]
-            qa_idx = next((i for i, h in enumerate(headers)
-                           if 'qa brt' in str(h).lower()), None)
-            if qa_idx is None:
-                continue
-            for row in rows[1:]:
-                if make_job_key(sheet, row, headers) == job_key:
-                    row[qa_idx] = 'YES'
-                    qa_updated = True
-                    break
-            if qa_updated:
-                break
-        if qa_updated:
-            save_json(CURRENT_FILE, current_sched)
+    _mark_qa_brt_sent(job_key)
 
     _update_task_after_inspection(job_key, inspection_data['result'])
     # HQ only receives the report once a reviewer has approved it.
@@ -3854,9 +3863,12 @@ def report_email_status(job_key):
 def resend_report_email(job_key, index):
     if not g.can_assign:
         abort(403)
-    if not 0 <= index < len(load_json(INSPECTIONS_CACHE, {}).get(job_key, [])):
+    records = load_json(INSPECTIONS_CACHE, {}).get(job_key, [])
+    if not 0 <= index < len(records):
         abort(404)
-    if not _email_list(load_config().get('hq_report_emails', '')):
+    if records[index].get('backfill'):
+        flash(tr('补录的历史报告不发送给总部', 'Old reports added afterwards are not e-mailed to HQ'), 'info')
+    elif not _email_list(load_config().get('hq_report_emails', '')):
         flash(tr('请先在设置中填写总部报告邮箱', 'Set the HQ report e-mails in Settings first'), 'error')
     elif _review_of(job_key, index) is None or _review_of(job_key, index)['status'] != 'approved':
         flash(tr('报告需先审核通过才能发送给总部', 'The report must be approved before it is sent to HQ'), 'error')
@@ -3902,6 +3914,9 @@ def review_inspection(job_key, index):
     if not 0 <= index < len(records):
         abort(404)
     record = records[index]
+    if record.get('backfill'):
+        flash(tr('补录的历史报告不需要审核', 'Old reports added afterwards are not reviewed'), 'info')
+        return redirect(url_for('inspect_form', job_key=job_key))
     action = request.form.get('action', '')
     comment = ' '.join(request.form.get('comment', '').split())[:500]
     if action not in ('approve', 'reject'):
@@ -4003,9 +4018,297 @@ def _notify_report_returned(job_key, record, comment):
 
 
 
+# ── Old reports added afterwards (补录) ──────────────────────────────────────
+# Inspections done before the platform went live (or outside it) are added from
+# the original report: original inspector, date and result, the original file(s)
+# and the BRT / other evidence. They are marked 'backfill': no checklist, no
+# review, no e-mail to HQ and not in the inspector KPIs, but they complete the
+# job like a report (task, shipped-without-report list, QA BRT). Users with
+# backfill rights (admins, or accounts with the flag) can also add evidence
+# files to any report later; every addition is logged on the report.
+
+def _evidence_label(etype):
+    meta = EVIDENCE_META.get(etype) or {}
+    return tr(meta.get('label_zh') or meta.get('label') or etype, meta.get('label') or etype)
+
+
+def backfill_evidence_types(item_code, description='', original=True):
+    """Types files can be added under: the original report, the product's
+    required evidence (BRT when the product has no rule) and 'other'."""
+    ptype = product_type_for(item_code, description)
+    required = [e['type'] for e in evidence_rules.PRODUCT_TYPES[ptype]['evidence']] if ptype else ['brt']
+    return (['original'] if original else []) + [t for t in required if t != 'checklist'] + ['other']
+
+
+def _recompute_missing_evidence(record):
+    """Set the required evidence the report still lacks (files may be added later)."""
+    ptype = record.get('product_type') or product_type_for(record.get('item_code', ''),
+                                                           record.get('item_description', ''))
+    evidence = record.get('evidence') or {}
+    missing = []
+    for req in (evidence_rules.PRODUCT_TYPES[ptype]['evidence'] if ptype in evidence_rules.PRODUCT_TYPES else []):
+        etype = req['type']
+        if etype == 'checklist' and (record.get('checklist') or record.get('backfill')):
+            continue                  # digital checklist, or the original report stands in for it
+        ev = evidence.get(etype) or {}
+        if not ev.get('files') and ev.get('result') != 'N/A':
+            missing.append(etype)
+    record['missing_evidence'] = missing
+
+
+def _backfill_context(job):
+    with db_conn() as conn:
+        names = [r['name'] for r in conn.execute(
+            "SELECT COALESCE(NULLIF(display_name, ''), username) AS name FROM users "
+            "WHERE active=1 AND role IN ('lead', 'inspector') ORDER BY name")]
+    types = backfill_evidence_types(job.get('Item Code', ''), job.get('Item Description', ''))
+    return {'types': [(t, _evidence_label(t)) for t in types], 'inspectors': names,
+            'today': china_today().isoformat()}
+
+
+def _job_upload_dir(job_key):
+    path = os.path.join(UPLOAD_DIR, hashlib.sha256(job_key.encode('utf-8')).hexdigest())
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _bad_upload_names(files):
+    return [f.filename for f in files if _upload_extension(f.filename) not in EVIDENCE_EXTENSIONS]
+
+
+def _save_report_files(conn, job_key, index, etype, files, job_dir):
+    """Save uploads as attachments of report `index`; returns [(attachment id, original name)]."""
+    saved = []
+    for f in files:
+        original, saved_name = _save_uploaded_file(f, job_dir, EVIDENCE_EXTENSIONS)
+        aid = conn.execute(
+            'INSERT INTO inspection_attachments (job_key, insp_index, evidence_type, original_name, '
+            'saved_name, file_path) VALUES (?,?,?,?,?,?)',
+            (job_key, index, etype, original, saved_name, os.path.join(job_dir, saved_name))).lastrowid
+        saved.append((aid, original))
+    return saved
+
+
+@app.route('/inspect/<path:job_key>/backfill', methods=['POST'])
+def backfill_report(job_key):
+    if not g.get('can_backfill'):
+        abort(403)
+    job = find_job(job_key)
+    if not job:
+        abort(404)
+    form = request.form
+    region, po, item = (job_key.split('|') + ['', '', ''])[:3]
+    item_code = job.get('Item Code') or item
+    item_desc = job.get('Item Description', '')
+    uploads = {t: [f for f in request.files.getlist(f'file_{t}') if f and f.filename]
+               for t in backfill_evidence_types(item_code, item_desc)}
+    inspector = ' '.join(form.get('inspector_name', '').split())[:100]
+    day = _parse_date(form.get('inspection_date', ''))
+    result = form.get('result', '')
+    errors = []
+    if not inspector:
+        errors.append(tr('请填写原检验员', 'Enter the original inspector'))
+    if not day or day > china_today():
+        errors.append(tr('请填写原检验日期（不能晚于今天）', 'Enter the original inspection date (not in the future)'))
+    if result not in INSPECTION_RESULTS:
+        errors.append(tr('请选择检验结果', 'Choose the result'))
+    if not uploads['original']:
+        errors.append(tr('请上传原始检验报告', 'Upload the original inspection report'))
+    bad = [name for files in uploads.values() for name in _bad_upload_names(files)]
+    if bad:
+        errors.append(tr('不支持的文件类型：', 'Unsupported file type: ') + ', '.join(bad))
+    if errors:
+        for error in errors:
+            flash(error, 'error')
+        return redirect(url_for('inspect_form', job_key=job_key) + '#backfill')
+
+    record = {
+        'job_key': job_key, 'region': job.get('region') or region,
+        'order_number': job.get('Order Number') or po, 'item_code': item_code,
+        'item_description': item_desc, 'supplier': job.get('Supplier') or job.get('Foundry') or '',
+        'quantity_ordered': str(job.get('Quantity', '') or ''),
+        'inspector_name': inspector, 'inspection_date': day.isoformat(),
+        'quantity_inspected': form.get('quantity_inspected', '').strip()[:20],
+        'quantity_passed': form.get('quantity_passed', '').strip()[:20],
+        'result': result, 'defect_codes': [], 'defects': '', 'packing_condition': '', 'marking': '',
+        'notes': form.get('notes', '').strip()[:2000],
+        'product_type': product_type_for(item_code, item_desc) or '',
+        'backfill': True,
+        'submitted_by': g.get('username', ''), 'submitted_at': datetime.now().isoformat(),
+    }
+    job_dir = _job_upload_dir(job_key)
+    with DATA_LOCK:                       # the files are numbered with the report: save both together
+        cache = load_json(INSPECTIONS_CACHE, {})
+        records = cache.setdefault(job_key, [])
+        index = len(records)
+        record['report_no'] = readable_report_number(record, index)
+        evidence, names = {}, []
+        with db_conn() as conn:
+            for etype, files in uploads.items():
+                saved = _save_report_files(conn, job_key, index, etype, files, job_dir)
+                if saved:
+                    evidence[etype] = {'result': '', 'notes': '', 'files': [n for _aid, n in saved]}
+                    names += [n for _aid, n in saved]
+        record['evidence'], record['file_names'] = evidence, names
+        _recompute_missing_evidence(record)
+        records.append(record)
+        save_json(INSPECTIONS_CACHE, cache)
+
+    _mark_qa_brt_sent(job_key)
+    with db_conn() as conn:
+        shipped = conn.execute('SELECT 1 FROM outstanding_jobs WHERE job_key=?', (job_key,)).fetchone()
+        # an old report of a shipped job needs no follow-up, whatever its result
+        status = 'Completed' if result == 'Pass' or shipped else 'In Progress'
+        if conn.execute('SELECT 1 FROM inspection_tasks WHERE job_key=?', (job_key,)).fetchone():
+            conn.execute('UPDATE inspection_tasks SET status=? WHERE job_key=?', (status, job_key))
+        else:
+            conn.execute(
+                'INSERT INTO inspection_tasks (job_key, order_number, region, item_code, description, '
+                'supplier, quantity, status) VALUES (?,?,?,?,?,?,?,?)',
+                (job_key, record['order_number'], record['region'], item_code, item_desc,
+                 record['supplier'], record['quantity_ordered'], status))
+        conn.execute(
+            'UPDATE outstanding_jobs SET completed=1, completed_at=? WHERE completed=0 '
+            "AND substr(job_key, instr(job_key, '|') + 1)=?",
+            (datetime.now().isoformat(), _job_tail(job_key)))
+    logger.info('%s added old report %s for %s', g.get('username'), record['report_no'], job_key)
+    flash(tr(f'已补录历史报告 {record["report_no"]}', f'Old report added as {record["report_no"]}'), 'success')
+    return redirect(url_for('inspect_form', job_key=job_key))
+
+
+@app.route('/inspect/<path:job_key>/report/<int:index>/evidence', methods=['POST'])
+def report_add_evidence(job_key, index):
+    """Add evidence files (e.g. a BRT report found later) to a submitted report."""
+    if not g.get('can_backfill'):
+        abort(403)
+    back = redirect(url_for('inspect_form', job_key=job_key))
+    records = load_json(INSPECTIONS_CACHE, {}).get(job_key, [])
+    if not 0 <= index < len(records):
+        abort(404)
+    rec = records[index]
+    etype = request.form.get('evidence_type', '')
+    if etype not in backfill_evidence_types(rec.get('item_code', ''), rec.get('item_description', ''),
+                                            original=bool(rec.get('backfill'))):
+        abort(400)
+    files = [f for f in request.files.getlist('files') if f and f.filename]
+    if not files:
+        flash(tr('请选择要上传的文件', 'Choose the files to upload'), 'error')
+        return back
+    bad = _bad_upload_names(files)
+    if bad:
+        flash(tr('不支持的文件类型：', 'Unsupported file type: ') + ', '.join(bad), 'error')
+        return back
+    job_dir = _job_upload_dir(job_key)
+    with DATA_LOCK:
+        cache = load_json(INSPECTIONS_CACHE, {})
+        records = cache.get(job_key, [])
+        if not 0 <= index < len(records):
+            abort(404)
+        record = records[index]
+        with db_conn() as conn:
+            saved = _save_report_files(conn, job_key, index, etype, files, job_dir)
+        names = [n for _aid, n in saved]
+        ev = record.setdefault('evidence', {}).setdefault(etype, {'result': '', 'notes': '', 'files': []})
+        ev.setdefault('files', []).extend(names)
+        record.setdefault('file_names', []).extend(names)
+        record.setdefault('evidence_added', []).append({
+            'type': etype, 'ids': [aid for aid, _n in saved], 'files': names,
+            'by': g.get('username', ''), 'at': datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M')})
+        _recompute_missing_evidence(record)
+        save_json(INSPECTIONS_CACHE, cache)
+    logger.info('%s added %d %s file(s) to %s #%s', g.get('username'), len(names), etype, job_key, index)
+    flash(tr(f'已补充 {len(names)} 个文件', f'{len(names)} file(s) added'), 'success')
+    return back
+
+
+@app.route('/inspect/<path:job_key>/report/<int:index>/evidence/<int:aid>/delete', methods=['POST'])
+def report_remove_evidence(job_key, index, aid):
+    """Remove a file that was added afterwards (by whoever added it, or an admin)."""
+    if not g.get('can_backfill'):
+        abort(403)
+    with DATA_LOCK:
+        cache = load_json(INSPECTIONS_CACHE, {})
+        records = cache.get(job_key, [])
+        if not 0 <= index < len(records):
+            abort(404)
+        record = records[index]
+        entry = next((e for e in record.get('evidence_added', []) if aid in e.get('ids', [])), None)
+        if not entry:
+            abort(404)
+        if not (g.is_admin or entry.get('by') == g.get('username')):
+            abort(403)
+        with db_conn() as conn:
+            att = conn.execute('SELECT * FROM inspection_attachments WHERE id=? AND job_key=? AND insp_index=?',
+                               (aid, job_key, index)).fetchone()
+            conn.execute('DELETE FROM inspection_attachments WHERE id=?', (aid,))
+            still_used = att and conn.execute('SELECT 1 FROM inspection_attachments WHERE file_path=?',
+                                              (att['file_path'],)).fetchone()
+        pos = entry['ids'].index(aid)
+        entry['ids'].pop(pos)
+        name = entry['files'].pop(pos) if pos < len(entry['files']) else (att['original_name'] if att else '')
+        if not entry['ids']:
+            record['evidence_added'].remove(entry)
+        ev = (record.get('evidence') or {}).get(entry['type']) or {}
+        if name in ev.get('files', []):
+            ev['files'].remove(name)
+        if name in record.get('file_names', []):
+            record['file_names'].remove(name)
+        _recompute_missing_evidence(record)
+        save_json(INSPECTIONS_CACHE, cache)
+    if att and not still_used:
+        _remove_quietly(att['file_path'])
+    flash(tr(f'已删除文件 {name}', f'File {name} removed'), 'success')
+    return redirect(url_for('inspect_form', job_key=job_key))
+
+
+@app.route('/inspect/<path:job_key>/report/<int:index>/backfill/delete', methods=['POST'])
+def backfill_delete(job_key, index):
+    """Undo an old report added by mistake (only the job's latest report, so no
+    other report is renumbered)."""
+    if not g.get('can_backfill'):
+        abort(403)
+    back = redirect(url_for('inspect_form', job_key=job_key))
+    with DATA_LOCK:
+        cache = load_json(INSPECTIONS_CACHE, {})
+        records = cache.get(job_key, [])
+        if not 0 <= index < len(records) or not records[index].get('backfill'):
+            abort(404)
+        if not (g.is_admin or records[index].get('submitted_by') == g.get('username')):
+            abort(403)
+        if index != len(records) - 1:
+            flash(tr('只能删除该订单最新的一份报告', 'Only the latest report of a job can be deleted'), 'error')
+            return back
+        removed = records.pop()
+        if not records:
+            del cache[job_key]
+        save_json(INSPECTIONS_CACHE, cache)
+        tail_has_report = any(recs for k, recs in cache.items() if _job_tail(k) == _job_tail(job_key))
+    with db_conn() as conn:
+        paths = [r['file_path'] for r in conn.execute(
+            'SELECT file_path FROM inspection_attachments WHERE job_key=? AND insp_index=?', (job_key, index))]
+        for table in ('inspection_attachments', 'inspection_reviews', 'report_emails', 'kpi_exclusions'):
+            conn.execute(f'DELETE FROM {table} WHERE job_key=? AND insp_index=?', (job_key, index))
+        if not tail_has_report:
+            conn.execute("UPDATE outstanding_jobs SET completed=0, completed_at=NULL WHERE completed=1 "
+                         "AND substr(job_key, instr(job_key, '|') + 1)=?", (_job_tail(job_key),))
+        if job_key not in cache:
+            conn.execute("UPDATE inspection_tasks SET status='Pending' WHERE job_key=? "
+                         "AND status IN ('Completed', 'In Progress')", (job_key,))
+        still_used = {r['file_path'] for r in conn.execute(
+            'SELECT file_path FROM inspection_attachments WHERE file_path IN (%s)' % ','.join('?' * len(paths)),
+            paths)} if paths else set()
+    for path in paths:
+        if path not in still_used:
+            _remove_quietly(path)
+    logger.info('%s deleted old report %s of %s', g.get('username'), removed.get('report_no'), job_key)
+    flash(tr(f'已删除补录的报告 {removed.get("report_no", "")}', f'Added report {removed.get("report_no", "")} deleted'),
+          'success')
+    return back
+
+
 # ── Inspection report list and Excel export ──────────────────────────────────
 
-REVIEW_STATES = ('approved', 'rejected', 'pending')
+REVIEW_STATES = ('approved', 'rejected', 'pending', 'backfill')
 REPORT_FILTERS = ('date_from', 'date_to', 'supplier', 'inspector', 'result', 'review', 'q')
 
 
@@ -4045,8 +4348,9 @@ def inspection_report_rows():
                 'missing_evidence': ', '.join(EVIDENCE_META.get(t, {}).get('label', t)
                                               for t in rec.get('missing_evidence') or []),
                 'notes': rec.get('notes') or '',
-                'review': review.get('status') or 'pending',
-                'reviewer': review.get('reviewer_name') or review.get('reviewer') or '',
+                'review': 'backfill' if rec.get('backfill') else (review.get('status') or 'pending'),
+                'reviewer': (rec.get('submitted_by') or '') if rec.get('backfill')
+                            else (review.get('reviewer_name') or review.get('reviewer') or ''),
                 'reviewed_at': review.get('reviewed_at') or '',
                 'review_comment': review.get('comment') or '',
             })
@@ -5552,7 +5856,7 @@ def pending_reviews():
     out = []
     for job_key, records in load_inspections().items():
         for index, rec in enumerate(records):
-            if (job_key, index) in done:
+            if (job_key, index) in done or rec.get('backfill'):
                 continue
             try:
                 hours = (now - datetime.fromisoformat(rec.get('submitted_at', ''))).total_seconds() / 3600
@@ -8685,6 +8989,7 @@ def user_update(uid):
     employee_id = request.form.get('employee_id') or None
     email = request.form.get('email', '').strip()
     display_name = request.form.get('display_name', '').strip()
+    can_backfill = 1 if request.form.get('can_backfill') else 0
     if role not in ROLES:
         flash(tr('无效角色', 'Invalid role'), 'error')
         return redirect(url_for('users_admin'))
@@ -8701,14 +9006,15 @@ def user_update(uid):
                 flash(tr('至少需要保留一个启用的管理员', 'At least one active admin is required'), 'error')
                 return redirect(url_for('users_admin'))
         conn.execute(
-            'UPDATE users SET role=?,employee_id=?,email=?,display_name=? WHERE id=?',
-            (role, employee_id, email, display_name, uid))
+            'UPDATE users SET role=?,employee_id=?,email=?,display_name=?,can_backfill=? WHERE id=?',
+            (role, employee_id, email, display_name, can_backfill, uid))
     flash(tr('账号资料已更新', 'Account updated'), 'success')
     return redirect(url_for('users_admin'))
 
 @app.before_request
 def _auth_check():
-    if request.endpoint in ('inspection_draft_upload', 'vtrust_result') and session.get('user_id'):
+    if request.endpoint in ('inspection_draft_upload', 'vtrust_result', 'backfill_report',
+                            'report_add_evidence') and session.get('user_id'):
         request.max_content_length = DRAFT_FILE_MAX_BYTES   # signed-in users only; set before the body is read
     if request.method == 'POST' and request.endpoint not in ('cron_reminders', *INTEGRATION_ENDPOINTS):
         submitted = request.headers.get('X-CSRF-Token') or request.form.get('_csrf_token')
@@ -8726,7 +9032,7 @@ def _auth_check():
         return redirect(url_for('login', next=request.full_path.rstrip('?')))
     with db_conn() as conn:
         user = conn.execute(
-            'SELECT id, username, role, employee_id, language, display_name, email '
+            'SELECT id, username, role, employee_id, language, display_name, email, can_backfill '
             'FROM users WHERE id=? AND active=1',
             (user_id,)
         ).fetchone()
@@ -8747,6 +9053,7 @@ def _auth_check():
     g.can_review = user['role'] in ('admin', 'lead', 'hq')
     g.can_see_prices = user['role'] in ('admin', 'hq')
     g.can_view_dashboard = user['role'] in ('admin', 'hq')
+    g.can_backfill = g.is_admin or bool(user['can_backfill'])     # add old reports / evidence afterwards
     if not app.config.get('TESTING') and _last_reminder_day['day'] != china_today():
         _last_reminder_day['day'] = china_today()
         _run_reminders_in_background(request.host_url)
@@ -8839,11 +9146,11 @@ def inspection_status_rows(cache=None):
         record = records[index]
         region, po, item = (job_key.split('|') + ['', '', ''])[:3]
         result = record.get('result', '')
-        review = reviews.get((job_key, index), 'pending')
+        review = 'backfill' if record.get('backfill') else reviews.get((job_key, index), 'pending')
         rows.append({
             'job_key': job_key, 'region': region, 'purchase_order': po, 'item_code': item,
             'result': result, 'review_status': review,
-            'passed': result == 'Pass' and review == 'approved',
+            'passed': result == 'Pass' and review in ('approved', 'backfill'),
             'submitted_at': record.get('submitted_at', ''), 'inspection_count': len(records),
         })
     return rows

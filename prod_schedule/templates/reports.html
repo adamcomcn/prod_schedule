@@ -62,7 +62,7 @@
         </select></div>
       <div><label>{{ tr('审核', 'Review') }}</label>
         <select name="review"><option value="">{{ tr('全部', 'All') }}</option>
-          {% for v, zh, en in [('pending', '待审核', 'Pending'), ('approved', '已通过', 'Approved'), ('rejected', '已退回', 'Returned')] %}
+          {% for v, zh, en in [('pending', '待审核', 'Pending'), ('approved', '已通过', 'Approved'), ('rejected', '已退回', 'Returned'), ('backfill', '历史补录', 'Old report added')] %}
           <option value="{{ v }}" {% if v == filters.review %}selected{% endif %}>{{ tr(zh, en) }}</option>{% endfor %}
         </select></div>
       <div><label>{{ tr('搜索', 'Search') }}</label>
@@ -111,7 +111,7 @@
           <td><span class="res res-{{ r.result.split(' ')[0] }}">{{ {'Pass': tr('合格', 'Pass'), 'Fail': tr('不合格', 'Fail'), 'Partial Pass': tr('部分合格', 'Partial Pass')}.get(r.result, r.result or '—') }}</span></td>
           <td style="color:#b45309; font-size:.74rem;">{{ r.missing_evidence }}</td>
           <td class="rv-{{ r.review }}" style="white-space:nowrap;">
-            {{ {'approved': tr('已通过', 'Approved'), 'rejected': tr('已退回', 'Returned'), 'pending': tr('待审核', 'Pending')}[r.review] if r.review in ['approved', 'rejected', 'pending'] else r.review }}
+            {{ {'approved': tr('已通过', 'Approved'), 'rejected': tr('已退回', 'Returned'), 'pending': tr('待审核', 'Pending'), 'backfill': tr('历史补录', 'Old report added')}[r.review] if r.review in ['approved', 'rejected', 'pending', 'backfill'] else r.review }}
             {% if r.reviewer %}<div style="color:#6b7280; font-size:.72rem;">{{ r.reviewer }}</div>{% endif %}</td>
           <td><a href="{{ url_for('inspection_report_pdf', job_key=r.job_key, i=r.index) }}" target="_blank">PDF</a></td>
         </tr>
