@@ -107,6 +107,18 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.data.startswith(b'%PDF'))
 
+    def test_only_shipped_or_closed_lines_take_old_reports(self):
+        open_job = 'MELBOURNE|DPL2700|RSV015016FLFL'
+        app.save_json(app.CURRENT_FILE, {'MELBOURNE': [HEADERS, ['DPL2700'] + ROW[1:]]})
+        page = self.client().get(f'/inspect/{open_job}').get_data(as_text=True)
+        self.assertNotIn('id="backfill"', page)
+        self.client().post(f'/inspect/{open_job}/backfill', content_type='multipart/form-data', data={
+            '_csrf_token': 'tok', 'inspector_name': 'Murphy', 'inspection_date': '2026-05-20', 'result': 'Pass',
+            'file_original': [upload('report.xlsx')]})
+        self.assertEqual(app.load_json(app.INSPECTIONS_CACHE, {}).get(open_job, []), [])
+        # a shipped line still takes them
+        self.assertIn('id="backfill"', self.client().get(f'/inspect/{JOB}').get_data(as_text=True))
+
     def test_a_failed_old_report_of_a_shipped_job_needs_no_follow_up(self):
         self.backfill(result='Fail')
         with db_conn() as conn:

@@ -701,12 +701,12 @@ input[name=result] { display:none; }
       </div>
       {% endif %}
 
-      {% if backfill %}
+      {% if backfill and backfill.shipped %}
       <div class="card" id="backfill">
         <details {% if not past_inspections %}open{% endif %}>
         <summary class="section-title" style="cursor:pointer;">&#128450; {{ tr('补录历史报告', 'Add an old report') }}</summary>
-        <p class="bf-hint">{{ tr('用于系统上线前（或在系统外）已完成的检验：按原始报告填写原检验员、日期和结果，并上传原始报告和 BRT 等证据文件。补录的报告不需要审核、不发邮件、不计入检验员考核。',
-                                 'For inspections done before the platform went live (or outside it): enter the original inspector, date and result from the original report and upload it with the BRT and other evidence. Added reports are not reviewed, not e-mailed and not in the inspector KPIs.') }}</p>
+        <p class="bf-hint">{{ tr('仅用于已出货（或已关闭）的订单行，系统上线前（或在系统外）已完成的检验：按原始报告填写原检验员、日期和结果，并上传原始报告和 BRT 等证据文件。补录的报告不需要审核、不发邮件、不计入检验员考核。',
+                                 'Only for shipped (or closed) lines inspected before the platform went live (or outside it): enter the original inspector, date and result from the original report and upload it with the BRT and other evidence. Added reports are not reviewed, not e-mailed and not in the inspector KPIs.') }}</p>
         <form method="POST" enctype="multipart/form-data" action="{{ url_for('backfill_report', job_key=job.job_key) }}" class="bf-form"
               onsubmit="this.querySelector('button[type=submit]').disabled = true;">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

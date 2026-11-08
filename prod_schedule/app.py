@@ -4056,6 +4056,13 @@ def _recompute_missing_evidence(record):
     record['missing_evidence'] = missing
 
 
+def _is_shipped_job(job_key):
+    """Old reports are only added for fully shipped lines (open or closed in the
+    shipped-without-report list); open orders are inspected the normal way."""
+    with db_conn() as conn:
+        return conn.execute('SELECT 1 FROM outstanding_jobs WHERE job_key=?', (job_key,)).fetchone() is not None
+
+
 def _backfill_context(job):
     with db_conn() as conn:
         names = [r['name'] for r in conn.execute(
@@ -4063,7 +4070,7 @@ def _backfill_context(job):
             "WHERE active=1 AND role IN ('lead', 'inspector') ORDER BY name")]
     types = backfill_evidence_types(job.get('Item Code', ''), job.get('Item Description', ''))
     return {'types': [(t, _evidence_label(t)) for t in types], 'inspectors': names,
-            'today': china_today().isoformat()}
+            'today': china_today().isoformat(), 'shipped': _is_shipped_job(job.get('job_key', ''))}
 
 
 def _job_upload_dir(job_key):
@@ -4096,6 +4103,10 @@ def backfill_report(job_key):
     job = find_job(job_key)
     if not job:
         abort(404)
+    if not _is_shipped_job(job_key):
+        flash(tr('只有已出货（或已关闭）的订单行才能补录历史报告', 'Old reports can only be added for shipped (or closed) lines'),
+              'error')
+        return redirect(url_for('inspect_form', job_key=job_key))
     form = request.form
     region, po, item = (job_key.split('|') + ['', '', ''])[:3]
     item_code = job.get('Item Code') or item
