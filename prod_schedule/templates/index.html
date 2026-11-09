@@ -5,6 +5,17 @@
 .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .toolbar .upload-form { display: flex; align-items: center; gap: 8px; }
 .upload-info { font-size: .8rem; color: #6b7280; }
+.old-sched { position: relative; }
+.old-sched > summary { list-style: none; cursor: pointer; }
+.old-sched > summary::-webkit-details-marker { display: none; }
+.old-sched-panel { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; width: min(440px, 90vw);
+  background: #fff; border: 1px solid #d0d5dd; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  padding: 12px; font-size: .8rem; }
+.old-sched-panel p { color: #4b5563; margin: 0 0 8px; }
+.old-sched-panel form.old-up { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.old-sched-panel ul { list-style: none; padding: 0; margin: 10px 0 0; max-height: 220px; overflow-y: auto; }
+.old-sched-panel li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-top: 1px solid #f0f2f5; }
+.old-sched-panel li button { border: 0; background: none; color: #dc2626; cursor: pointer; }
 .tab-bar { background: #fff; border-bottom: 2px solid #e0e4ea; padding: 0 24px;
            display: flex; gap: 0; overflow-x: auto; position: sticky; top: 0; z-index: 10; }
 .tab-btn { border: none; background: none; padding: 13px 18px; cursor: pointer;
@@ -138,17 +149,45 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
       <span class="upload-info">{{ tr('从', 'From') }}</span>
       <select name="base" style="width:auto;max-width:260px;font-size:.8rem;padding:5px 8px;" aria-label="{{ tr('较早的排期', 'Earlier schedule') }}">
         {% for u in purchasing_versions %}
-        <option value="{{ u.id }}" {% if loop.index0 == 1 %}selected{% endif %}>{{ u.applied_at[:16] or u.id }} UTC · {{ u.filename }}{% if loop.first %} ({{ tr('最新', 'latest') }}){% endif %}</option>
+        <option value="{{ u.id }}" {% if loop.index0 == 1 %}selected{% endif %}>{% if u.old %}{{ u.schedule_date }} · {{ u.filename }} ({{ tr('旧排期', 'old') }}){% else %}{{ u.applied_at[:16] or u.id }} UTC · {{ u.filename }}{% endif %}{% if loop.first %} ({{ tr('最新', 'latest') }}){% endif %}</option>
         {% endfor %}
       </select>
       <span class="upload-info">{{ tr('到', 'to') }}</span>
       <select name="upload" style="width:auto;max-width:260px;font-size:.8rem;padding:5px 8px;" aria-label="{{ tr('较新的排期', 'Later schedule') }}">
         {% for u in purchasing_versions %}
-        <option value="{{ u.id }}">{{ u.applied_at[:16] or u.id }} UTC · {{ u.filename }}{% if loop.first %} ({{ tr('最新', 'latest') }}){% endif %}</option>
+        <option value="{{ u.id }}">{% if u.old %}{{ u.schedule_date }} · {{ u.filename }} ({{ tr('旧排期', 'old') }}){% else %}{{ u.applied_at[:16] or u.id }} UTC · {{ u.filename }}{% endif %}{% if loop.first %} ({{ tr('最新', 'latest') }}){% endif %}</option>
         {% endfor %}
       </select>
       <button type="submit" class="btn btn-outline btn-sm">&#128666; {{ tr('导出给采购', 'Changes for purchasing') }}</button>
     </form>
+    {% endif %}
+    {% if g.is_admin %}
+    <details class="old-sched">
+      <summary class="btn btn-outline btn-sm">&#128450; {{ tr('旧排期（仅对比）', 'Old schedules (compare only)') }}{% if old_schedule_list %} ({{ old_schedule_list|length }}){% endif %}</summary>
+      <div class="old-sched-panel">
+        <p>{{ tr('上传以前的排期 Excel，只用于“导出给采购”的两个排期对比。不会改变当前排期、状态、任务或提醒。',
+                 'Upload an earlier schedule workbook to use it in the two-schedule comparison only. The current schedule, statuses, tasks and alerts are not changed.') }}</p>
+        <form class="old-up" method="POST" enctype="multipart/form-data" action="{{ url_for('old_schedule_upload') }}"
+              onsubmit="this.querySelector('button[type=submit]').disabled = true;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="file" name="file" accept=".xlsx" required style="max-width:220px;font-size:.75rem;">
+          <label>{{ tr('排期日期', 'Schedule date') }} <input type="date" name="schedule_date" required max="{{ old_schedule_max }}" style="width:auto;font-size:.75rem;padding:3px 6px;"></label>
+          <button type="submit" class="btn btn-primary btn-sm">{{ tr('上传', 'Upload') }}</button>
+        </form>
+        {% if old_schedule_list %}
+        <ul>
+          {% for o in old_schedule_list %}
+          <li><span><strong>{{ o.schedule_date }}</strong> · {{ o.filename }} <span class="upload-info">· {{ o.uploaded_by }}</span></span>
+            <form method="POST" action="{{ url_for('old_schedule_delete', old_id=o.id) }}"
+                  onsubmit='return confirm({{ tr("删除这份旧排期？", "Delete this old schedule?")|tojson }})'>
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" title="{{ tr('删除', 'Delete') }}">&#10005;</button>
+            </form></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </details>
     {% endif %}
     <form method="GET" action="{{ url_for('index') }}" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
       <input type="hidden" name="sheet" value="{{ selected_sheet }}">

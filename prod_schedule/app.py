@@ -52,6 +52,7 @@ PREVIOUS_FILE = os.path.join(DATA_DIR, 'previous_week.json')
 INSPECTIONS_CACHE = os.path.join(DATA_DIR, 'inspections_cache.json')
 PENDING_UPLOAD_FILE = os.path.join(DATA_DIR, 'pending_upload.json')
 HISTORY_DIR = os.path.join(DATA_DIR, 'history')
+OLD_SCHEDULE_DIR = os.path.join(DATA_DIR, 'old_schedules')   # old weeks kept only for comparisons
 
 EXCEL_PASSWORD   = os.environ.get('EXCEL_PASSWORD', '')
 PRODUCT_IMG_DIR  = os.path.join(APP_DATA_DIR, 'product_images')
@@ -82,7 +83,7 @@ ADMIN_ENDPOINTS = {
     'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
-    'settings_purchasing_send', 'export_purchasing_excel', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
+    'settings_purchasing_send', 'export_purchasing_excel', 'old_schedule_upload', 'old_schedule_delete', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
     'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'vtrust_keep', 'vtrust_release', 'report_kpi_exclusion', 'schedule_est_edit',
     'outstanding_close', 'outstanding_reopen',
     'settings_dropbox_connect', 'settings_dropbox_callback', 'settings_dropbox_sync', 'settings_dropbox_disconnect',
@@ -1564,7 +1565,9 @@ def index():
     with db_conn() as _c:
         est_overrides = {r['job_key']: dict(r) for r in _c.execute('SELECT * FROM est_overrides')}
     return render_template('index.html',
-                           purchasing_versions=schedule_versions()[:30] if g.is_admin else [],
+                           purchasing_versions=schedule_versions()[:60] if g.is_admin else [],
+                           old_schedule_list=old_schedules() if g.is_admin else [],
+                           old_schedule_max=china_today().isoformat(),
                            move_notes=move_notes,
                            est_overrides=est_overrides,
                            data=display_data,
@@ -1845,12 +1848,88 @@ def schedule_versions(uploads=None):
         prev = uploads[-1]['previous']
         versions.append({'id': prev['id'], 'filename': prev['filename'], 'applied_at': prev['applied_at'],
                          'file': uploads[-1]['before']})
-    return versions
+    for v in versions:                 # history ids are 'YYYYMMDD-HHMMSS-ffffff' (time applied)
+        i = v['id']
+        v['when'] = f'{i[:4]}-{i[4:6]}-{i[6:8]} {i[9:11]}:{i[11:13]}'
+    versions.extend(old_schedules())
+    return sorted(versions, key=lambda v: (v['when'], v['id']), reverse=True)
+
+
+def old_schedules():
+    """Old weekly schedules uploaded only for comparisons (never applied), newest first."""
+    if not os.path.isdir(OLD_SCHEDULE_DIR):
+        return []
+    found = []
+    for name in os.listdir(OLD_SCHEDULE_DIR):
+        folder = os.path.join(OLD_SCHEDULE_DIR, name)
+        meta = load_json(os.path.join(folder, 'meta.json'), {})
+        file = os.path.join(folder, 'schedule.json')
+        if re.fullmatch(r'old-[\d-]+', name) and meta.get('schedule_date') and os.path.exists(file):
+            found.append({'id': name, 'filename': meta.get('filename') or name, 'applied_at': '',
+                          'schedule_date': meta['schedule_date'], 'uploaded_by': meta.get('uploaded_by', ''),
+                          'uploaded_at': meta.get('uploaded_at', ''), 'file': file, 'old': True,
+                          'when': meta['schedule_date'] + ' 00:00'})
+    return sorted(found, key=lambda v: (v['when'], v['id']), reverse=True)
+
+
+@app.route('/schedule/old', methods=['POST'])
+def old_schedule_upload():
+    """Keep an old weekly schedule for comparisons only: the current schedule,
+    statuses, tasks and alerts are not touched."""
+    f = request.files.get('file')
+    try:
+        day = date.fromisoformat((request.form.get('schedule_date') or '').strip())
+    except ValueError:
+        day = None
+    if not f or not f.filename:
+        flash(tr('请选择文件', 'No file selected'), 'error')
+    elif _upload_extension(f.filename) != '.xlsx':
+        flash(tr('只支持 .xlsx 格式的排期文件', 'Only .xlsx schedule files are supported'), 'error')
+    elif not day or day > china_today():
+        flash(tr('请填写这份排期的日期（不能晚于今天）', 'Enter the date of this schedule (not later than today)'), 'error')
+    else:
+        raw = f.read()
+        try:
+            data = parse_excel(raw, EXCEL_PASSWORD)
+        except ExcelUploadError as exc:
+            flash(str(exc), 'error')
+            return redirect(url_for('index'))
+        except Exception:
+            logger.error('Old schedule upload failed:\n%s', traceback.format_exc())
+            flash(tr('无法读取上传的排期，请检查文件格式和加密密码。',
+                     'Unable to read the uploaded schedule. Check the file format and encryption password.'), 'error')
+            return redirect(url_for('index'))
+        name = f"old-{day.strftime('%Y%m%d')}-{datetime.now().strftime('%H%M%S%f')}"
+        folder = os.path.join(OLD_SCHEDULE_DIR, name)
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, 'source.xlsx'), 'wb') as out:
+            out.write(raw)
+        save_json(os.path.join(folder, 'schedule.json'), data)
+        save_json(os.path.join(folder, 'meta.json'), {
+            'filename': _display_filename(f.filename), 'schedule_date': day.isoformat(),
+            'uploaded_by': g.get('username', ''), 'uploaded_at': datetime.now(_tz.utc).strftime('%Y-%m-%d %H:%M')})
+        flash(tr(f'已保存 {day.isoformat()} 的旧排期，只用于对比，当前排期没有变化',
+                 f'Old schedule of {day.isoformat()} saved for comparisons only; the current schedule is unchanged'),
+              'success')
+    return redirect(url_for('index'))
+
+
+@app.route('/schedule/old/<old_id>/delete', methods=['POST'])
+def old_schedule_delete(old_id):
+    if not re.fullmatch(r'old-[\d-]+', old_id):
+        abort(404)
+    folder = os.path.join(OLD_SCHEDULE_DIR, old_id)
+    if os.path.isdir(folder):
+        shutil.rmtree(folder, ignore_errors=True)
+        flash(tr('已删除这份旧排期', 'Old schedule deleted'), 'success')
+    return redirect(url_for('index'))
 
 
 def _upload_label(upload):
     if not upload:
         return 'previous schedule'
+    if upload.get('old'):
+        return f"{upload['filename']} (schedule of {upload['schedule_date']}, added for comparison)"
     return f"{upload['filename']} (applied {upload['applied_at']} UTC)" if upload['applied_at'] else upload['filename']
 
 
@@ -2018,7 +2097,7 @@ def purchasing_export(upload_id=None, base_id=None):
         old = by_id.get(base_id)
         if not new or not old or new['id'] == old['id']:
             return None
-        if old['id'] > new['id']:                     # ids are timestamps: keep older -> newer
+        if (old['when'], old['id']) > (new['when'], new['id']):      # keep older -> newer
             old, new = new, old
         changes = purchasing_changes(load_schedule(old['file']), load_schedule(new['file']))
         data = purchasing_workbook(changes, _upload_label(old), _upload_label(new))

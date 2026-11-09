@@ -46,6 +46,9 @@ CI (`.github/workflows/tests.yml`) runs pytest on PRs and on main.
 - Old reports added afterwards (补录, `backfill_report`): record flag `backfill` (original inspector/date/
   result + original file and BRT etc.); no review, no HQ e-mail, not in inspector KPIs. Users with
   `users.can_backfill` (or admin) may also add evidence files to any report (`evidence_added` log).
+- Old schedules for comparisons only (admin, `old_schedule_upload`): `data/old_schedules/old-YYYYMMDD-*` with
+  schedule.json + source.xlsx + meta.json; never applied. `schedule_versions()` merges them with the upload
+  history (sorted by `when`) for the two-schedule purchasing export (`purchasing_export(upload, base)`).
 
 ## Conventions
 - Bilingual UI: `tr('中文', 'English')`. Language is fixed by role (`ROLE_LANGUAGE`:
