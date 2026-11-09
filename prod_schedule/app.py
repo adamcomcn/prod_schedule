@@ -1564,7 +1564,7 @@ def index():
     with db_conn() as _c:
         est_overrides = {r['job_key']: dict(r) for r in _c.execute('SELECT * FROM est_overrides')}
     return render_template('index.html',
-                           purchasing_uploads=schedule_upload_history()[:30] if g.is_admin else [],
+                           purchasing_versions=schedule_versions()[:30] if g.is_admin else [],
                            move_notes=move_notes,
                            est_overrides=est_overrides,
                            data=display_data,
@@ -1834,6 +1834,20 @@ def schedule_upload_history():
     return [u for u in reversed(uploads) if os.path.exists(u['before']) and os.path.exists(u['after'])]
 
 
+def schedule_versions(uploads=None):
+    """Schedule versions that can be compared, newest first: each upload's id,
+    filename, applied_at and 'file' (the schedule that upload produced), plus the
+    version the oldest kept upload replaced (the one before it)."""
+    uploads = schedule_upload_history() if uploads is None else uploads
+    versions = [{'id': u['id'], 'filename': u['filename'], 'applied_at': u['applied_at'], 'file': u['after']}
+                for u in uploads]
+    if uploads and uploads[-1]['previous']:
+        prev = uploads[-1]['previous']
+        versions.append({'id': prev['id'], 'filename': prev['filename'], 'applied_at': prev['applied_at'],
+                         'file': uploads[-1]['before']})
+    return versions
+
+
 def _upload_label(upload):
     if not upload:
         return 'previous schedule'
@@ -1992,9 +2006,23 @@ def purchasing_workbook(changes, before_label, after_label):
     return buf.getvalue()
 
 
-def purchasing_export(upload_id=None):
-    """(xlsx bytes, filename, changes, upload) for one upload (default: latest), or None."""
+def purchasing_export(upload_id=None, base_id=None):
+    """(xlsx bytes, filename, changes, upload) for one upload (default: latest), or None.
+    With base_id the two chosen schedule versions are compared (older -> newer,
+    whichever order they are given in); None if either is unknown or both are the same."""
     uploads = schedule_upload_history()
+    if base_id:
+        versions = schedule_versions(uploads)
+        by_id = {v['id']: v for v in versions}
+        new = by_id.get(upload_id) if upload_id else (versions[0] if versions else None)
+        old = by_id.get(base_id)
+        if not new or not old or new['id'] == old['id']:
+            return None
+        if old['id'] > new['id']:                     # ids are timestamps: keep older -> newer
+            old, new = new, old
+        changes = purchasing_changes(load_schedule(old['file']), load_schedule(new['file']))
+        data = purchasing_workbook(changes, _upload_label(old), _upload_label(new))
+        return data, f'Comparison Sheet {china_today().isoformat()}.xlsx', changes, new
     upload = next((u for u in uploads if u['id'] == upload_id), None) if upload_id else (uploads[0] if uploads else None)
     if not upload:
         return None
@@ -2006,7 +2034,11 @@ def purchasing_export(upload_id=None):
 
 @app.route('/export/purchasing.xlsx')
 def export_purchasing_excel():
-    result = purchasing_export(request.args.get('upload') or None)
+    upload_id, base_id = request.args.get('upload') or None, request.args.get('base') or None
+    result = purchasing_export(upload_id, base_id)
+    if not result and base_id and base_id == upload_id:
+        flash(tr('请选择两个不同的排期', 'Choose two different schedules'), 'warning')
+        return redirect(url_for('index'))
     if not result:
         flash(tr('至少要有两次排期上传才能对比', 'At least two schedule uploads are needed for a comparison'), 'warning')
         return redirect(url_for('index'))

@@ -131,6 +131,49 @@ class PurchasingExportTests(unittest.TestCase):
         self.assertEqual(len(earlier['shipped']), 2)
         self.assertEqual(upload['previous']['filename'], 'Production Schedule 01.10.xlsx')
 
+    def add_third_upload(self):
+        third = os.path.join(app.HISTORY_DIR, '20261015-080000-000000')
+        os.makedirs(third)
+        app.save_json(os.path.join(third, 'replaced_schedule.json'), AFTER)    # state after the 08.10 upload
+        app.save_json(os.path.join(third, 'meta.json'), {'filename': 'Production Schedule 15.10.xlsx', 'applied_at': '2026-10-15 08:00'})
+        later = {k: [r for r in rows if r[0] != 'DPL2'] for k, rows in AFTER.items()}   # DPL2 shipped on 15.10
+        app.save_json(app.CURRENT_FILE, later)
+
+    def test_compare_any_two_schedules(self):
+        self.add_third_upload()
+        self.assertEqual([v['id'] for v in app.schedule_versions()],
+                         ['20261015-080000-000000', '20261008-080000-000000', '20261001-080000-000000'])
+        # 01.10 -> 15.10 spans two uploads: DPL1 and DPL2 both left the schedule
+        data, _name, ch, new = app.purchasing_export('20261015-080000-000000', '20261001-080000-000000')
+        self.assertEqual(new['id'], '20261015-080000-000000')
+        self.assertEqual(sorted(l['dpl'] for l in ch['shipped'] if l['type'] == 'Fully shipped'), ['DPL1', 'DPL2'])
+        flat = str(self.sheets(data)['Summary'])
+        self.assertIn('Production Schedule 01.10.xlsx (applied 2026-10-01 08:00 UTC)', flat)
+        self.assertIn('Production Schedule 15.10.xlsx (applied 2026-10-15 08:00 UTC)', flat)
+        # order of the two choices does not matter
+        _d, _n, swapped, new = app.purchasing_export('20261001-080000-000000', '20261015-080000-000000')
+        self.assertEqual((new['id'], swapped['shipped']), ('20261015-080000-000000', ch['shipped']))
+        # 08.10 -> 15.10 is only the last upload's change
+        _d, _n, last, _u = app.purchasing_export('20261015-080000-000000', '20261008-080000-000000')
+        self.assertEqual([l['dpl'] for l in last['shipped']], ['DPL2'])
+        self.assertIsNone(app.purchasing_export('20261015-080000-000000', '20261015-080000-000000'))
+        self.assertIsNone(app.purchasing_export('20261015-080000-000000', 'nope'))
+
+    def test_compare_two_schedules_download(self):
+        self.add_third_upload()
+        boss = self.client('boss')
+        page = boss.get('/').get_data(as_text=True)
+        self.assertIn('name="base"', page)
+        self.assertIn('<option value="20261008-080000-000000" selected>', page)    # default: latest vs the one before
+        r = boss.get('/export/purchasing.xlsx?base=20261001-080000-000000&upload=20261015-080000-000000')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('Production Schedule 01.10.xlsx', str(self.sheets(r.data)['Summary']))
+        r = boss.get('/export/purchasing.xlsx?base=20261015-080000-000000&upload=20261015-080000-000000')
+        self.assertEqual(r.status_code, 302)
+        with boss.session_transaction() as sess:
+            self.assertRegex(str(sess.get('_flashes')), '请选择两个不同的排期|Choose two different schedules')
+        self.assertEqual(self.client('hq1').get('/export/purchasing.xlsx?base=20261001-080000-000000').status_code, 403)
+
     def test_needs_two_uploads(self):
         shutil.rmtree(os.path.join(app.HISTORY_DIR, '20261008-080000-000000'))
         self.assertIsNone(app.purchasing_export())
@@ -153,7 +196,8 @@ class PurchasingExportTests(unittest.TestCase):
         page = self.client('boss').get('/').get_data(as_text=True)
         self.assertIn('/export/purchasing.xlsx', page)
         self.assertIn('<option value="20261008-080000-000000">2026-10-08 08:00 UTC · Production Schedule 08.10.xlsx', page)
-        self.assertNotIn('20261001-080000-000000', page)          # first upload: nothing before it to compare
+        # the schedule the first upload produced can be the "from" side (selected by default)
+        self.assertIn('<option value="20261001-080000-000000" selected>2026-10-01 08:00 UTC · Production Schedule 01.10.xlsx', page)
         self.assertEqual(self.client('boss').get('/export/purchasing.xlsx?upload=20261008-080000-000000').status_code, 200)
         self.assertNotIn('/export/purchasing.xlsx', self.client('yu').get('/').get_data(as_text=True))
 
