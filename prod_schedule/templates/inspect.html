@@ -241,6 +241,13 @@ input[name=result] { display:none; }
   </div>
   {% endif %}
 
+  {% if qty_increase %}
+  <div class="readonly-note" style="background:#fffbeb; border-color:#fcd34d; color:#92400e;">
+    &#9888; {{ tr('上次检验时订单数量是 ' ~ qty_increase[0] ~ '，现在排期上是 ' ~ qty_increase[1] ~ '。增加的数量可能需要补检。',
+                  'When last inspected the order qty was ' ~ qty_increase[0] ~ '; the schedule now says ' ~ qty_increase[1] ~ '. The extra quantity may need another inspection.') }}
+  </div>
+  {% endif %}
+
   {% if matched_tpl and can_inspect %}
   <div style="background:#eff6ff; border:1.5px solid #3b82f6; border-radius:10px;
               padding:14px 18px; margin-bottom:16px; display:flex;

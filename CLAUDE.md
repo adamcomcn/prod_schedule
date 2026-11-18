@@ -49,6 +49,10 @@ CI (`.github/workflows/tests.yml`) runs pytest on PRs and on main.
 - Old schedules for comparisons only (admin, `old_schedule_upload`): `data/old_schedules/old-YYYYMMDD-*` with
   schedule.json + source.xlsx + meta.json; never applied. `schedule_versions()` merges them with the upload
   history (sorted by `when`) for the two-schedule purchasing export (`purchasing_export(upload, base)`).
+- Quantity increases: `compute_changes(..., moves_out)` puts `qty_up` {key: (before, after)} there (status stays
+  `not_shipped`); `inspected_qty_increases` / `report_qty_increase` compare the latest report's
+  `quantity_ordered` with the line's qty now ("may need another inspection"). Filter `?status=qty_up`,
+  purchasing export sheet "Quantity Changes".
 
 ## Conventions
 - Bilingual UI: `tr('中文', 'English')`. Language is fixed by role (`ROLE_LANGUAGE`:

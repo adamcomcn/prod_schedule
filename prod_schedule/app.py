@@ -1010,6 +1010,45 @@ def _qty_text(value):
     return str(int(value)) if value == int(value) else str(value)
 
 
+def report_qty_increase(records, current_qty):
+    """(qty when last inspected, qty now) as text when the line's quantity went up
+    after its latest inspection report (that report may not cover the extra pieces), else None."""
+    now = _parse_qty(current_qty)
+    if now is None:
+        return None
+    for rec in reversed(records or []):
+        then = _parse_qty(rec.get('quantity_ordered'))
+        if then is not None:
+            return (_qty_text(then), _qty_text(now)) if now > then else None
+    return None
+
+
+def inspected_qty_increases(current, inspections):
+    """{job_key: (qty when last inspected, qty now)} for every schedule line whose
+    quantity went up after its latest inspection report. Compares the first lot of
+    the line, the quantity a report stores as quantity_ordered."""
+    out = {}
+    for sheet, rows in (current or {}).items():
+        if not rows or len(rows) < 2:
+            continue
+        headers = rows[0]
+        qi = _qty_index(headers)
+        if qi is None:
+            continue
+        seen = set()
+        for row in rows[1:]:
+            key = make_job_key(sheet, row, headers)
+            if key in seen:
+                continue
+            seen.add(key)
+            records = inspections.get(key)
+            if records:
+                hit = report_qty_increase(records, row[qi] if qi < len(row) else None)
+                if hit:
+                    out[key] = hit
+    return out
+
+
 def move_text(m):
     """'DI FITTING 48 → FIJI 36 (DI FITTING keeps 15)' style description."""
     src = ', '.join(f"{f['sheet']} {_qty_text(f['before'])}" for f in m['from'])
@@ -1253,6 +1292,10 @@ def compute_changes(previous, current, moves_out=None):
                 statuses[k] = 'partially_moved' if k in reduced_by_move else 'partially_shipped'
             else:
                 statuses[k] = 'not_shipped'
+    if moves_out is not None:          # quantity went UP since the previous schedule (status stays not_shipped)
+        moves_out['qty_up'] = {k: (prev_qty[k], curr_qty[k]) for k, s in statuses.items()
+                               if s == 'not_shipped' and prev_qty.get(k) is not None
+                               and curr_qty.get(k) is not None and curr_qty[k] > prev_qty[k]}
 
     # ── collect shipped rows from previous week ───────────────────────────────
     # One representative row per unique key (split rows are deduplicated).
@@ -1438,11 +1481,13 @@ def index():
     for m in moves_info.get('moves', []):
         for k in m['to_keys'] + m['reduced_keys']:
             move_notes[k] = move_text(m)
+    qty_up = {k: (_qty_text(a), _qty_text(b)) for k, (a, b) in moves_info.get('qty_up', {}).items()}
     if not g.can_see_prices:
         # Prices never reach inspectors (not even via search).
         current, shipped_rows = strip_admin_only_columns(current, shipped_rows)
     config = load_config()
     inspections = SharedReports(load_inspections())
+    reinspect = inspected_qty_increases(current, inspections)
 
     sheet_names = list(current.keys())
     selected_sheet = request.args.get('sheet', '')
@@ -1455,7 +1500,7 @@ def index():
     status_filter = request.args.get('status', '')
     if status_filter not in {
             'new', 'not_shipped', 'partially_shipped', 'shipped', 'vtrust',
-            'no_qa_brt'}:
+            'no_qa_brt', 'qty_up'}:
         status_filter = ''
     try:
         page = max(1, int(request.args.get('page', '1')))
@@ -1541,6 +1586,8 @@ def index():
                 status = 'shipped' if kind == 'shipped' else statuses.get(job_key, '')
                 if status_filter == 'no_qa_brt':
                     return qa_brt_missing(status, inspections.get(job_key, []))
+                if status_filter == 'qty_up':
+                    return kind == 'active' and (job_key in qty_up or job_key in reinspect)
                 if status_filter != 'vtrust':
                     return status == status_filter
                 records = inspections.get(job_key, [])
@@ -1569,6 +1616,8 @@ def index():
                            old_schedule_list=old_schedules() if g.is_admin else [],
                            old_schedule_max=china_today().isoformat(),
                            move_notes=move_notes,
+                           qty_up=qty_up,
+                           reinspect=reinspect,
                            est_overrides=est_overrides,
                            data=display_data,
                            statuses=statuses,
@@ -1807,7 +1856,17 @@ def purchasing_changes(before, after, inspections=None):
                              'note': 'Total went down: part of it also shipped' if m['also_shipped'] else ''})
     for line in shipped:
         line['has_report'] = bool(inspections.get(line['key']))
+    qty_up = []
+    for key, (b, a) in moves_info.get('qty_up', {}).items():
+        if key in new:
+            records = inspections.get(key) or []
+            then = next((_parse_qty(r.get('quantity_ordered')) for r in reversed(records)
+                         if _parse_qty(r.get('quantity_ordered')) is not None), None)
+            note = (f'Last inspection report was for {_qty_text(then)}: the extra quantity may need another inspection'
+                    if then is not None and a > then else '')
+            qty_up.append(dict(new[key], before=b, after=a, added=a - b, has_report=bool(records), note=note))
     return {'shipped': sorted(shipped, key=lambda l: (l['type'] != 'Fully shipped', order(l))),
+            'qty_up': sorted(qty_up, key=order),
             'date_changes': sorted(date_changes, key=lambda l: (-(l['est_days'] if l['est_days'] is not None
                                                                   else l['ship_days'] or -10 ** 6), order(l))),
             'new': sorted(new_lines, key=order),
@@ -2002,6 +2061,21 @@ def purchasing_workbook(changes, before_label, after_label):
             cell.font = Font(bold=True, color='B91C1C')
             cell.fill = PatternFill('solid', fgColor='FEE2E2')
 
+    ws = table('Quantity Changes', [('Region', 13, 'c'), ('DPL', 10, 'c'), ('PO', 11, 'c'), ('Supplier', 10, 'c'),
+                                    ('Item Code', 18, 'l'), ('Description', 40, 'l'),
+                                    ('Previous Qty', 11, 'c'), ('Current Qty', 11, 'c'), ('Added', 9, 'c'),
+                                    ('QA Report', 11, 'c'), ('Est. Completion', 22, 'c'), ('Note', 40, 'l')],
+               [(l['region'], l['dpl'], l['po'], l['supplier'], l['item_code'], l['description'],
+                 qty(l['before']), qty(l['after']), qty(l['added']), 'Yes' if l['has_report'] else 'No',
+                 day(l['est']), l['note']) for l in changes.get('qty_up', [])])
+    for (cell,) in ws.iter_rows(min_row=2, min_col=9, max_col=9):
+        if isinstance(cell.value, (int, float)):
+            cell.font = Font(bold=True, color='B91C1C')
+            cell.value = f'+{cell.value}'
+    for (cell,) in ws.iter_rows(min_row=2, min_col=12, max_col=12):
+        if cell.value:
+            cell.font = Font(bold=True, color='B45309')
+
     ws = table('Date Changes', [('Region', 13, 'c'), ('DPL', 10, 'c'), ('PO', 11, 'c'), ('Supplier', 10, 'c'),
                                 ('Item Code', 18, 'l'), ('Description', 40, 'l'), ('Qty', 8, 'c'),
                                 ('Est. Completion (previous)', 22, 'c'), ('Est. Completion (new)', 22, 'c'),
@@ -2048,6 +2122,7 @@ def purchasing_workbook(changes, before_label, after_label):
     head_row = summary.max_row
     for row in (('Fully shipped (line left the schedule)', len(fully), 'Shipped'),
                 ('Partially shipped (quantity went down)', len(partly), 'Shipped'),
+                ('Quantity increased', len(changes.get('qty_up', [])), 'Quantity Changes'),
                 ('Shipped without a QA report', sum(1 for l in changes['shipped'] if not l.get('has_report')),
                  'Shipped (QA Report = No)'),
                 ('Est. completion delayed', delayed, 'Date Changes'),
@@ -2073,13 +2148,16 @@ def purchasing_workbook(changes, before_label, after_label):
         for cell in row[1:]:
             cell.alignment = Alignment(horizontal='center')
     summary.append([])
-    for note in ('How to read',
-                 '• A line that is no longer in the new schedule has fully shipped.',
-                 '• A lower quantity means part of the line has shipped.',
-                 '• Days: + = later than before (delayed, red), − = earlier (green).',
-                 '• A PO + item that moved to another region is listed under Region Moves, not as shipped.'):
+    notes = ('How to read',
+             '• A line that is no longer in the new schedule has fully shipped.',
+             '• A lower quantity means part of the line has shipped.',
+             '• A higher quantity is listed under Quantity Changes; if the line was already inspected '
+             'for less, the extra pieces may need another inspection.',
+             '• Days: + = later than before (delayed, red), − = earlier (green).',
+             '• A PO + item that moved to another region is listed under Region Moves, not as shipped.')
+    for note in notes:
         summary.append([note])
-    summary.cell(summary.max_row - 4, 1).font = Font(bold=True)
+    summary.cell(summary.max_row - len(notes) + 1, 1).font = Font(bold=True)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -2141,6 +2219,7 @@ def send_purchasing_email(upload_id=None):
     lines = ['Production schedule changes for purchasing', '',
              f"New schedule: {_upload_label(upload)}", f"Previous schedule: {_upload_label(upload['previous'])}", '',
              f'Fully shipped: {fully}', f'Partially shipped: {partly}',
+             f"Quantity increased: {len(changes.get('qty_up', []))}",
              f"Date changes: {len(changes['date_changes'])} ({delayed} delayed)",
              f"New lines: {len(changes['new'])}", f"Region moves: {len(changes['moves'])}", '',
              'Details are in the attached Excel.']
@@ -3387,6 +3466,7 @@ def inspect_form(job_key):
                            checklist_photos=checklist_photos,
                            related_reports=related_reports,
                            past_inspections=past,
+                           qty_increase=report_qty_increase(past, job_info.get('Quantity')),
                            kpi_info=_kpi_info(job_key, job_info, past),
                            past_attachments=dict(past_attachments),
                            report_emails=report_email_status(job_key),

@@ -60,6 +60,8 @@ tbody tr:hover { background: #eef2f7; }
 tbody tr.row-new               { border-left: 3px solid #10b981; }
 tbody tr.row-not_shipped       { border-left: 3px solid #ef4444; }
 tbody tr.row-partially_shipped { border-left: 3px solid #f59e0b; }
+.badge-qty_up { background:#ede9fe; color:#5b21b6; border:1px solid #c4b5fd; }
+.reinspect-note { font-size:.68rem; color:#b45309; margin-top:2px; white-space:normal; font-weight:600; }
 tbody tr.row-shipped           { border-left: 3px solid #9ca3af; opacity: .55; }
 tr.shipped-divider td { background: #f3f4f6; color: #6b7280; font-size: .75rem;
                         font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
@@ -262,6 +264,9 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
          href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='not_shipped', per_page=per_page) }}"><span class="badge badge-not_shipped">{{ tr('未出货', 'NOT SHIPPED') }}</span> {{ tr('仍在排产', 'Still waiting') }}</a>
       <a class="legend-item {% if status_filter == 'partially_shipped' %}active{% endif %}"
          href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='partially_shipped', per_page=per_page) }}"><span class="badge badge-partially_shipped">{{ tr('部分出货', 'PARTIAL') }}</span> {{ tr('数量减少', 'Qty reduced') }}</a>
+      <a class="legend-item {% if status_filter == 'qty_up' %}active{% endif %}"
+         title="{{ tr('比上次排期数量多，或比上次检验时的订单数量多（可能需要补检）', 'Higher than in the previous schedule, or than when it was last inspected (may need another inspection)') }}"
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='qty_up', per_page=per_page) }}"><span class="badge badge-qty_up">&#9650; {{ tr('数量增加', 'QTY UP') }}</span> {{ tr('数量变多', 'Qty increased') }}</a>
       <a class="legend-item {% if status_filter == 'shipped' %}active{% endif %}"
          href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='shipped', per_page=per_page) }}"><span class="badge badge-shipped">{{ tr('已出货', 'SHIPPED') }}</span> {{ tr('已从排期消失', 'Gone from schedule') }}</a>
       <a class="legend-item {% if status_filter == 'vtrust' %}active{% endif %}"
@@ -352,6 +357,8 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
               <span class="badge" style="background:#e0e7ff;color:#3730a3;" title="{{ move_notes.get(job_key, '') }}">&#8644; {{ tr('部分转出', 'PART MOVED') }}</span>
             {% endif %}
             {% if move_notes.get(job_key) %}<div style="font-size:.68rem;color:#4338ca;margin-top:2px;white-space:normal;">{{ move_notes[job_key] }}</div>{% endif %}
+            {% if qty_up.get(job_key) %}<span class="badge badge-qty_up" style="margin-top:2px" title="{{ tr('比上次排期数量多', 'Higher than in the previous schedule') }}">&#9650; {{ tr('数量增加', 'QTY UP') }} {{ qty_up[job_key][0] }} &rarr; {{ qty_up[job_key][1] }}</span>{% endif %}
+            {% if reinspect.get(job_key) %}<div class="reinspect-note">&#9888; {{ tr('检验时数量 ' ~ reinspect[job_key][0] ~ '，现在 ' ~ reinspect[job_key][1] ~ '，可能需要补检', 'Inspected at ' ~ reinspect[job_key][0] ~ ', now ' ~ reinspect[job_key][1] ~ ': may need another inspection') }}</div>{% endif %}
             {% if qa_warn %}<span class="badge" style="background:#dc2626;color:#fff;margin-top:2px">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span>{% endif %}
             {% if qa_mismatch %}<span class="badge" style="background:#f59e0b;color:#fff;margin-top:2px" title="{{ tr('Excel 中 QA BRT 已发送=YES，但系统里没有检验报告，请补检验报告', 'Excel says QA BRTs sent = YES but there is no inspection report in the system') }}">&#9888; {{ tr('Excel 已标 YES，系统无报告', 'Excel YES, no report') }}</span>{% endif %}
           </td>

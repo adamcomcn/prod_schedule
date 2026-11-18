@@ -89,7 +89,7 @@ class PurchasingExportTests(unittest.TestCase):
             data, filename, _ch, upload = app.purchasing_export()
         self.assertEqual(filename, 'Comparison Sheet 2026-10-09.xlsx')            # export day, not upload day
         s = self.sheets(data)
-        self.assertEqual(list(s), ['Summary', 'Shipped', 'Date Changes', 'New Lines', 'Region Moves'])
+        self.assertEqual(list(s), ['Summary', 'Shipped', 'Quantity Changes', 'Date Changes', 'New Lines', 'Region Moves'])
         flat = str(s)
         self.assertFalse(any('一' <= ch <= '鿿' for ch in flat), 'English only')
         self.assertNotIn('99', flat.replace('2026', ''))          # unit price never exported
