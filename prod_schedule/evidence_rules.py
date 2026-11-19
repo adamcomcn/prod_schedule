@@ -65,6 +65,11 @@ PE_GRIPPA_BRT = [
     _c('材质报告：化学成分和力学性能在限值内', 'Material report: chemical and mechanical within limits'),
 ]
 
+# Pieces tested on the pressure test machine (Dalian): the machine's export
+# file replaces the pressure test records for the item codes listed in Settings.
+MACHINE_CHECK = _c('打压机导出数据：每件壳体试验合格，压力和保压时间符合要求',
+                   'Machine export: every piece passed the body test at the required pressure and holding time')
+
 # DAQ thresholds (MPa) for the automatic check on RSV pressure tests
 DAQ_LIMITS = (('t1', _c('T1 平均值 [AL] 闸板测试 1', 'T1 average [AL] gate test 1'), 1.76),
               ('t2', _c('T2 平均值 [AW] 闸板测试 2', 'T2 average [AW] gate test 2'), 1.76),

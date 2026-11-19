@@ -448,6 +448,42 @@
       </div>
     </div>
 
+    <!-- Pressure test machine (Dalian) -->
+    <div class="card" style="margin-top:0;" id="machine">
+      <div class="card-title">&#129514; {{ tr('打压机测试（大连）', 'Pressure test machine (Dalian)') }}</div>
+      <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">
+        {{ tr('下面这些料号在大连工厂的打压机上做压力测试。检验这些料号时，“压力测试记录”换成“打压机测试数据”：检验员上传机器导出的 CSV / Excel，系统读出每次测试的压力、保压时间和结果，写进检验报告 PDF。料号末尾加 * 表示前缀匹配（如 DFT10*）。',
+              'These item codes are pressure tested on the machine at the Dalian factory. For them, "Pressure test records" becomes "Pressure test machine data": the inspector uploads the CSV / Excel the machine exports, and the pressure, holding time and result of every test are read and added to the PDF report. End a code with * to match a prefix (e.g. DFT10*).') }}
+      </p>
+      <form method="POST" action="{{ url_for('settings_machine') }}" enctype="multipart/form-data">
+        <div class="form-group">
+          <label>{{ tr('料号（每行一个）', 'Item codes (one per line)') }} · {{ (config.get('machine_test_codes') or [])|length }}</label>
+          <textarea name="machine_test_codes" rows="6" style="font-family:monospace;">{{ (config.get('machine_test_codes') or [])|join('\n') }}</textarea>
+        </div>
+        <div class="form-group">
+          <label>{{ tr('从 Excel 导入料号（读取“Product Code”列，加到上面的列表）', 'Import codes from Excel ("Product Code" column, added to the list above)') }}</label>
+          <input type="file" name="codes_file" accept=".xlsx" style="width:auto;">
+        </div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <div class="form-group">
+            <label>{{ tr('最低试验压力 (MPa)', 'Minimum test pressure (MPa)') }}</label>
+            <input type="number" name="machine_min_pressure" step="0.01" min="0" style="width:140px;"
+                   value="{{ config.get('machine_min_pressure') or '' }}" placeholder="{{ tr('不检查', 'not checked') }}">
+          </div>
+          <div class="form-group">
+            <label>{{ tr('最短保压时间（秒）', 'Minimum holding time (s)') }}</label>
+            <input type="number" name="machine_min_hold" step="1" min="0" style="width:140px;"
+                   value="{{ config.get('machine_min_hold') or '' }}" placeholder="{{ tr('不检查', 'not checked') }}">
+          </div>
+        </div>
+        <p style="font-size:.78rem; color:#6b7280; margin:0 0 8px;">
+          {{ tr('机器判“不合格”的测试总会标出；填了上面的要求后，压力或保压时间不够的测试也会标出。留空表示不检查。',
+                'Tests the machine marks as failed are always flagged; with the limits above, tests below the pressure or holding time are flagged too. Leave empty to skip that check.') }}
+        </p>
+        <button type="submit" class="btn btn-primary btn-sm">{{ tr('保存', 'Save') }}</button>
+      </form>
+    </div>
+
     <!-- PDF report font -->
     <div class="card" style="margin-top:0;">
       <div class="card-title">&#128196; {{ tr('PDF 检验报告', 'PDF inspection reports') }}</div>

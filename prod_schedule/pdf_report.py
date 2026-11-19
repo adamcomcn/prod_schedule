@@ -267,6 +267,73 @@ def _photo_grid(story, items, st, content_w, heading, per_row=3):
             story.append(_p(line, st['small']))
 
 
+MACHINE_BLOCK_LINES = 50
+
+
+def _machine_section(story, entries, st, content_w):
+    """Pressure test machine exports: summary per file and every test (failed
+    and below-limit tests in red), two tests per line."""
+    import pressure_machine
+    font = st['cell'].fontName
+    red = colors.HexColor('#b91c1c')
+    title = _p(_bi('打压机测试数据', 'Pressure test machine data'), st['h'])
+    for n, entry in enumerate(entries):
+        head = [title] if n == 0 else []
+        head.append(_p(_bi('文件', 'File') + f": {entry.get('file', '')}", st['small']))
+        if entry.get('error'):
+            story.append(KeepTogether(head + [_p(' / '.join(entry['error']), st['cell'])]))
+            continue
+        s, rows = entry['summary'], entry.get('rows') or []
+        lines = [f'{zh}\n{en}' for zh, en in pressure_machine.summary_lines(s)]
+        groups = s.get('groups') or []
+        if groups:
+            lines.append('\n'.join(f"{g['model']} {g['product']} {g['content']}: "
+                                   f"{g['passed']}/{g['tests']} 合格 passed" for g in groups))
+        tone = AMBER if s.get('attention') else RESULT_COLORS['Pass']
+        box = Table([[_p('\n'.join(lines), st['cell'])]], colWidths=[content_w])
+        box.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), tone[0]),
+                                 ('BOX', (0, 0), (-1, -1), 0.6, tone[1])]))
+        story.append(KeepTogether(head + [Spacer(1, 1 * mm), box, Spacer(1, 2 * mm)]))
+        shown = rows[:pressure_machine.PDF_MAX_ROWS]
+        labels = ['#', '时间 Time', '压力 MPa', '保压 s', '结果 Result']
+        gap = 4 * mm
+        w = (content_w - gap) / 2
+        cols = [8 * mm, w - 8 * mm - 14 * mm - 11 * mm - 15 * mm, 14 * mm, 11 * mm, 15 * mm]
+        # blocks of 2 x 50 tests, each read down the left column then the right one,
+        # kept on one page so the order is never broken by a page break
+        per_block = 2 * MACHINE_BLOCK_LINES
+        for start in range(0, len(shown), per_block):
+            block = shown[start:start + per_block]
+            half = (len(block) + 1) // 2
+            data, style = [labels + [''] + labels], []
+
+            def cells(j, base, line_no):
+                if j >= len(block):
+                    return [''] * 5
+                r = block[j]
+                if pressure_machine.row_flags(r, s.get('min_pressure'), s.get('min_hold')):
+                    style.append(('TEXTCOLOR', (base, line_no), (base + 4, line_no), red))
+                res = '合格 OK' if r.get('ok') else ('不合格 NG' if r.get('ok') is False else '—')
+                return [str(start + j + 1), r.get('time') or '', pressure_machine._num_text(r.get('pressure')),
+                        pressure_machine._num_text(r.get('hold'), 1), res]
+
+            for i in range(half):
+                data.append(cells(i, 0, i + 1) + [''] + cells(i + half, 6, i + 1))
+            t = Table(data, colWidths=cols + [gap] + cols)
+            t.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), font), ('FONTSIZE', (0, 0), (-1, -1), 6.8),
+                ('LEADING', (0, 0), (-1, -1), 8), ('TOPPADDING', (0, 0), (-1, -1), 1),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+                ('GRID', (0, 0), (4, -1), 0.25, LINE), ('GRID', (6, 0), (10, -1), 0.25, LINE),
+                ('BACKGROUND', (0, 0), (4, 0), LIGHT), ('BACKGROUND', (6, 0), (10, 0), LIGHT),
+            ] + style))
+            story += [KeepTogether([t]), Spacer(1, 2 * mm)]
+        if len(rows) > len(shown):
+            story.append(_p(_bi(f'另有 {len(rows) - len(shown)} 条记录，见附件原始文件',
+                                f'{len(rows) - len(shown)} more tests in the attached original file'), st['small']))
+        story.append(Spacer(1, 3 * mm))
+
+
 def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=None,
                          evidence_labels=None, checklist=None, logo_path=None, generated_by='', review=None,
                          time_text=None):
@@ -403,6 +470,13 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
                 readings = '  '.join(f'{k.upper()} {v:g} MPa' for k, v in daq.items())
                 verdict = ('√ 合格 OK' if data.get('daq_ok') else '× 低于要求 Below limit')
                 notes = (f'DAQ: {readings}  {verdict}' + ('\n' + notes if notes else ''))
+            for entry in data.get('machine_data') or []:
+                if entry.get('summary'):
+                    import pressure_machine
+                    s = entry['summary']
+                    first = pressure_machine.summary_lines(s)[0]
+                    flag = '!' if s.get('attention') else '√'
+                    notes = f'{flag} {first[0]} / {first[1]}' + ('\n' + notes if notes else '')
             rows.append([item_cell, _p(_result_text(res) if res else '—', st['cell']),
                          _p('\n'.join(data.get('files') or []) or '—', st['small']),
                          _p(notes, st['cell'])])
@@ -422,6 +496,9 @@ def build_inspection_pdf(job, record, report_no, attachments=(), defect_names=No
         warn.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), AMBER[0]),
                                   ('BOX', (0, 0), (-1, -1), 0.6, AMBER[1])]))
         story += [Spacer(1, 2 * mm), warn]
+    machine_entries = (evidence.get('machine') or {}).get('machine_data') or []
+    if machine_entries:
+        _machine_section(story, machine_entries, st, content_w)
 
     # ── Defects ─────────────────────────────────────────────────────────────
     codes = record.get('defect_codes') or []

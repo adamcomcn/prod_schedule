@@ -49,6 +49,10 @@ CI (`.github/workflows/tests.yml`) runs pytest on PRs and on main.
 - Old schedules for comparisons only (admin, `old_schedule_upload`): `data/old_schedules/old-YYYYMMDD-*` with
   schedule.json + source.xlsx + meta.json; never applied. `schedule_versions()` merges them with the upload
   history (sorted by `when`) for the two-schedule purchasing export (`purchasing_export(upload, base)`).
+- Pressure test machine (Dalian): `pressure_machine.py` reads the machine's MCGS export (CSV in GB18030 or
+  .xlsx; columns found by keyword). Settings → 打压机测试: item codes (`machine_test_codes`, `*` = prefix) and
+  optional limits (`machine_min_pressure`/`_hold`). `required_evidence(ptype, code)` swaps the 'pressure' card
+  for 'machine' on those codes; parsed tests go in `evidence['machine']['machine_data']` and are listed in the PDF.
 - Quantity increases: `compute_changes(..., moves_out)` puts `qty_up` {key: (before, after)} there (status stays
   `not_shipped`); `inspected_qty_increases` / `report_qty_increase` compare the latest report's
   `quantity_ordered` with the line's qty now ("may need another inspection"). Filter `?status=qty_up`,

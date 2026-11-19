@@ -133,6 +133,14 @@ input[name=result] { display:none; }
            font-size:.8rem; color:#6b7280; }
 .ev-drop:hover, .ev-drop.drag-over { border-color:#1a6fc4; background:#eff6ff; }
 .ev-file-list { margin-top:8px; display:flex; flex-direction:column; gap:5px; }
+.machine-hint { font-size:.78rem; color:#0f766e; background:#f0fdfa; border:1px solid #99f6e4;
+                border-radius:6px; padding:6px 9px; margin-bottom:8px; }
+.machine-sum { font-size:.8rem; border-radius:6px; padding:7px 10px; border:1px solid #86efac; background:#f0fdf4; }
+.machine-sum.attention { border-color:#fcd34d; background:#fffbeb; }
+.machine-sum.error { border-color:#fca5a5; background:#fef2f2; color:#991b1b; }
+.machine-sum table { border-collapse:collapse; margin-top:6px; font-size:.75rem; width:100%; }
+.machine-sum th, .machine-sum td { border:1px solid #e5e7eb; padding:2px 6px; text-align:left; }
+.machine-sum td.bad { color:#b91c1c; font-weight:600; }
 .ev-capture-row { display:flex; gap:8px; margin-top:8px; }
 .ev-capture-row .btn { flex:1; padding:10px; font-size:.9rem; }
 @media (hover: hover) and (pointer: fine) { .ev-capture-row { display:none; } }  /* desktop: no camera */
@@ -462,6 +470,19 @@ input[name=result] { display:none; }
                     <span class="daq-flag" id="daq-flag-{{ key }}"></span>
                   </label>
                   {% endfor %}
+                </div>
+                {% endif %}
+
+                {% if ev.machine_limits %}
+                <div class="machine-hint">
+                  {{ tr('上传打压机导出的 CSV 或 Excel 文件，系统会自动读出每次测试的压力、保压时间和结果，并写进检验报告。',
+                        'Upload the CSV or Excel file exported by the pressure test machine: the pressure, holding time and result of every test are read automatically and added to the report.') }}
+                  {% if ev.machine_limits.pressure or ev.machine_limits.hold %}
+                  <br>{{ tr('要求', 'Required') }}:
+                  {% if ev.machine_limits.pressure %}{{ tr('试验压力', 'test pressure') }} ≥ {{ '%g'|format(ev.machine_limits.pressure) }} MPa{% endif %}
+                  {% if ev.machine_limits.pressure and ev.machine_limits.hold %} · {% endif %}
+                  {% if ev.machine_limits.hold %}{{ tr('保压', 'holding') }} ≥ {{ '%g'|format(ev.machine_limits.hold) }} {{ tr('秒', 's') }}{% endif %}
+                  {% endif %}
                 </div>
                 {% endif %}
 
@@ -1147,8 +1168,47 @@ function evRenderList(etype) {
       <span class="ev-file-size ev-file-saved">${EV_SAVED}</span>
       <button class="ev-remove" type="button" onclick="evRemoveFile('${etype}',${f.id})">✕</button>
     </div>`;
+    if (f.machine) html += machineSummaryHtml(f.machine);
   });
   list.innerHTML = html;
+}
+
+// Pressure test machine export read by the server: summary and the tests that need a look
+const MACHINE_TXT = {{ {
+  'fail': tr('不合格', 'failed'), 'pressure': tr('压力低', 'low pressure'), 'hold': tr('保压短', 'short hold'),
+  'ok': tr('合格', 'passed'), 'time': tr('时间', 'Time'), 'p': tr('压力 MPa', 'Pressure MPa'),
+  'h': tr('保压 秒', 'Hold s'), 'r': tr('结果', 'Result'), 'flagged': tr('需要注意的测试', 'Tests to check'),
+  'more': tr('另有 {n} 条，见文件', '{n} more, see the file'),
+  'qty': tr('合格 {p} 次，少于订单数量 {q}', '{p} passed is less than the {q} ordered'),
+  'model': tr('型号', 'Model'),
+}|tojson }};
+function machineSummaryHtml(m) {
+  if (m.error) return `<div class="machine-sum error">⚠ ${escapeHtml(m.error)}</div>`;
+  const qtyField = document.querySelector('input[name="quantity_ordered"]');
+  const qty = qtyField ? parseFloat(qtyField.value) : NaN;
+  const lines = m.lines.slice();
+  if (!isNaN(qty) && m.passed < qty) lines.push(MACHINE_TXT.qty.replace('{p}', m.passed).replace('{q}', qty));
+  const attention = m.attention || (!isNaN(qty) && m.passed < qty);
+  let html = `<div class="machine-sum${attention ? ' attention' : ''}">${attention ? '⚠' : '✅'} `
+           + lines.map(escapeHtml).join('<br>');
+  if (m.groups && m.groups.length > 1) {
+    html += '<br>' + m.groups.map(g => escapeHtml(`${MACHINE_TXT.model} ${g.model} ${g.product} ${g.content}: ${g.passed}/${g.tests}`)).join('<br>');
+  }
+  if (m.flagged && m.flagged.length) {
+    html += `<table><tr><th colspan="4">${MACHINE_TXT.flagged} (${m.flagged_total})</th></tr>`
+          + `<tr><th>${MACHINE_TXT.time}</th><th>${MACHINE_TXT.p}</th><th>${MACHINE_TXT.h}</th><th>${MACHINE_TXT.r}</th></tr>`;
+    m.flagged.forEach(r => {
+      const why = r.flags.map(f => MACHINE_TXT[f]).join(', ');
+      html += `<tr><td>${escapeHtml(r.time || '')}</td>`
+            + `<td class="${r.flags.includes('pressure') ? 'bad' : ''}">${r.pressure == null ? '—' : r.pressure.toFixed(3)}</td>`
+            + `<td class="${r.flags.includes('hold') ? 'bad' : ''}">${r.hold == null ? '—' : r.hold}</td>`
+            + `<td class="bad">${escapeHtml(why)}</td></tr>`;
+    });
+    if (m.flagged_total > m.flagged.length)
+      html += `<tr><td colspan="4">${MACHINE_TXT.more.replace('{n}', m.flagged_total - m.flagged.length)}</td></tr>`;
+    html += '</table>';
+  }
+  return html + '</div>';
 }
 
 function escapeHtml(text) {

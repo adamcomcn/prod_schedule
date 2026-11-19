@@ -83,7 +83,7 @@ ADMIN_ENDPOINTS = {
     'leave_delete', 'expense_approve', 'expense_reject', 'expense_delete',
     'users_admin', 'user_create', 'user_toggle', 'user_reset_password',
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
-    'settings_purchasing_send', 'export_purchasing_excel', 'old_schedule_upload', 'old_schedule_delete', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
+    'settings_purchasing_send', 'settings_machine', 'export_purchasing_excel', 'old_schedule_upload', 'old_schedule_delete', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
     'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'vtrust_keep', 'vtrust_release', 'report_kpi_exclusion', 'schedule_est_edit',
     'outstanding_close', 'outstanding_reopen',
     'settings_dropbox_connect', 'settings_dropbox_callback', 'settings_dropbox_sync', 'settings_dropbox_disconnect',
@@ -666,6 +666,9 @@ EVIDENCE_META = {
     'pressure': {'label': 'Pressure Test Records', 'label_zh': '压力测试记录',
                  'icon': '🧪', 'color': '#1e3a8a', 'bg': '#e0e7ff',
                  'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.heic,.mp4,.mov,image/*,video/*'},
+    'machine':  {'label': 'Pressure Test Machine Data', 'label_zh': '打压机测试数据',
+                 'icon': '🧪', 'color': '#0f766e', 'bg': '#ccfbf1',
+                 'accepts': '.csv,.xlsx,.pdf,.jpg,.jpeg,.png,.heic,image/*'},
     'xrf':      {'label': 'XRF Report (Material Composition)', 'label_zh': 'XRF 材质成分报告',
                  'icon': '⚗️', 'color': '#065f46', 'bg': '#d1fae5',
                  'accepts': '.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.heic,image/*'},
@@ -682,6 +685,7 @@ EVIDENCE_META = {
 import evidence_rules
 import checklists
 import dropbox_backup
+import pressure_machine
 
 
 def product_reference(code):
@@ -698,6 +702,78 @@ def product_type_for(item_code, description=''):
     return evidence_rules.classify(item_code, description, product_reference(item_code))
 
 
+def machine_test_codes(config=None):
+    """Item codes tested on the pressure test machine (Settings)."""
+    return list((config if config is not None else load_config()).get('machine_test_codes') or [])
+
+
+def needs_machine_test(item_code, config=None):
+    return pressure_machine.code_matches(item_code, machine_test_codes(config))
+
+
+def required_evidence(ptype, item_code='', config=None):
+    """Evidence items of a product type ({'type', 'checks'}). Items tested on
+    the pressure test machine need its export instead of the pressure records."""
+    items = list(evidence_rules.PRODUCT_TYPES[ptype]['evidence']) if ptype in evidence_rules.PRODUCT_TYPES else []
+    if needs_machine_test(item_code, config):
+        machine = {'type': 'machine', 'checks': [evidence_rules.MACHINE_CHECK]}
+        pos = next((i for i, e in enumerate(items) if e['type'] == 'pressure'), None)
+        if pos is None:
+            items.append(machine)
+        else:
+            items[pos] = machine
+    return items
+
+
+def machine_limits(config=None):
+    """(minimum test pressure MPa, minimum holding time s) from Settings; None = not checked."""
+    config = config if config is not None else load_config()
+    return config.get('machine_min_pressure') or None, config.get('machine_min_hold') or None
+
+
+def machine_data(files, quantity=None, config=None):
+    """Parsed machine exports for a report: [{'file', 'summary', 'rows'} or
+    {'file', 'error': [zh, en]}] from [(original name, path)]."""
+    min_p, min_h = machine_limits(config)
+    qty = _parse_qty(quantity)
+    out = []
+    for name, path in files:
+        if not pressure_machine.is_machine_file(name):
+            continue
+        try:
+            with open(path, 'rb') as fh:
+                rows = pressure_machine.parse_machine_file(fh.read(), name)
+        except pressure_machine.MachineFileError as exc:
+            out.append({'file': name, 'error': [exc.zh, exc.en]})
+            continue
+        except OSError:
+            continue
+        out.append({'file': name, 'rows': rows,
+                    'summary': pressure_machine.summarise(rows, min_p, min_h, qty)})
+    return out
+
+
+def machine_preview(name, path):
+    """What the inspection page shows right after a machine export is uploaded."""
+    entries = machine_data([(name, path)])
+    if not entries:
+        return None
+    entry = entries[0]
+    if entry.get('error'):
+        return {'error': tr(*entry['error'])}
+    s = entry['summary']
+    min_p, min_h = s.get('min_pressure'), s.get('min_hold')
+    flagged = []
+    for r in entry['rows']:
+        flags = pressure_machine.row_flags(r, min_p, min_h)
+        if flags:
+            flagged.append({'time': r['time'], 'pressure': r['pressure'], 'hold': r['hold'], 'ok': r['ok'],
+                            'flags': flags})
+    return {'lines': [tr(zh, en) for zh, en in pressure_machine.summary_lines(s)],
+            'tests': s['tests'], 'passed': s['passed'], 'attention': s['attention'],
+            'groups': s['groups'], 'flagged': flagged[:50], 'flagged_total': len(flagged)}
+
+
 def product_type_name(ptype):
     if not ptype:
         return ''
@@ -709,11 +785,13 @@ def get_evidence_requirements(item_code, description=''):
     """Evidence cards required for a product, from the agreed rule matrix
     (evidence_rules.PRODUCT_TYPES). Each card lists its check items."""
     ptype = product_type_for(item_code, description)
-    if not ptype:
+    items = required_evidence(ptype, item_code)
+    if not items:
         return []
     en = current_lang() == 'en'
+    min_p, min_h = machine_limits()
     reqs = []
-    for item in evidence_rules.PRODUCT_TYPES[ptype]['evidence']:
+    for item in items:
         meta = EVIDENCE_META[item['type']]
         reqs.append({
             **meta,
@@ -724,6 +802,7 @@ def get_evidence_requirements(item_code, description=''):
             'daq_limits': ([(key, label['en'] if en else label['zh'], limit)
                             for key, label, limit in evidence_rules.DAQ_LIMITS]
                            if item['type'] == 'daq' else []),
+            'machine_limits': ({'pressure': min_p, 'hold': min_h} if item['type'] == 'machine' else None),
         })
     return reqs
 
@@ -3624,6 +3703,7 @@ def submit_inspection(job_key):
 
     job_dir = os.path.join(UPLOAD_DIR, hashlib.sha256(job_key.encode('utf-8')).hexdigest())
     os.makedirs(job_dir, exist_ok=True)
+    ev_paths = defaultdict(list)           # {type: [(original name, path)]}
 
     with db_conn() as conn:
         for etype in ev_types:
@@ -3633,6 +3713,7 @@ def submit_inspection(job_key):
             evidence_results[etype] = {'result': ev_result, 'notes': ev_notes, 'files': []}
 
             for f in ev_draft_files.get(etype, []):
+                ev_paths[etype].append((f['original_name'], f['file_path']))
                 all_file_names.append(f['original_name'])
                 all_file_links.append(f"[local] {f['saved_name']}")
                 evidence_results[etype]['files'].append(f['original_name'])
@@ -3649,6 +3730,7 @@ def submit_inspection(job_key):
                 orig_name, saved_name = _save_uploaded_file(
                     uploaded_file, job_dir, EVIDENCE_EXTENSIONS)
                 file_path = os.path.join(job_dir, saved_name)
+                ev_paths[etype].append((orig_name, file_path))
                 all_file_names.append(orig_name)
 
                 all_file_links.append(f'[local] {saved_name}')
@@ -3667,7 +3749,10 @@ def submit_inspection(job_key):
     ptype = product_type_for(item_code, item_desc)
     inspection_data['product_type'] = ptype or ''
     missing = []
-    for req in (evidence_rules.PRODUCT_TYPES[ptype]['evidence'] if ptype else []):
+    if ev_paths.get('machine'):
+        evidence_results['machine']['machine_data'] = machine_data(
+            ev_paths['machine'], inspection_data.get('quantity_ordered'))
+    for req in required_evidence(ptype, item_code):
         etype = req['type']
         if etype == 'checklist' and checklist:
             continue                  # filled in digitally, nothing to upload
@@ -3919,9 +4004,10 @@ def applicable_evidence_types(record):
     so every evidence file applies)."""
     ptype = record.get('product_type') or product_type_for(record.get('item_code', ''),
                                                            record.get('item_description', ''))
-    if not ptype:
+    items = required_evidence(ptype, record.get('item_code', ''))
+    if not ptype and not items:
         return None
-    return {item['type'] for item in evidence_rules.PRODUCT_TYPES[ptype]['evidence']}
+    return {item['type'] for item in items}
 
 
 def _original_attachments(job_key, index, links, used=0, allowed_types=None):
@@ -4227,7 +4313,8 @@ def backfill_evidence_types(item_code, description='', original=True):
     """Types files can be added under: the original report, the product's
     required evidence (BRT when the product has no rule) and 'other'."""
     ptype = product_type_for(item_code, description)
-    required = [e['type'] for e in evidence_rules.PRODUCT_TYPES[ptype]['evidence']] if ptype else ['brt']
+    items = required_evidence(ptype, item_code)
+    required = [e['type'] for e in items] if (ptype or items) else ['brt']
     return (['original'] if original else []) + [t for t in required if t != 'checklist'] + ['other']
 
 
@@ -4237,7 +4324,7 @@ def _recompute_missing_evidence(record):
                                                            record.get('item_description', ''))
     evidence = record.get('evidence') or {}
     missing = []
-    for req in (evidence_rules.PRODUCT_TYPES[ptype]['evidence'] if ptype in evidence_rules.PRODUCT_TYPES else []):
+    for req in required_evidence(ptype, record.get('item_code', '')):
         etype = req['type']
         if etype == 'checklist' and (record.get('checklist') or record.get('backfill')):
             continue                  # digital checklist, or the original report stands in for it
@@ -4409,9 +4496,13 @@ def report_add_evidence(job_key, index):
         record = records[index]
         with db_conn() as conn:
             saved = _save_report_files(conn, job_key, index, etype, files, job_dir)
+            paths = [(n, conn.execute('SELECT file_path FROM inspection_attachments WHERE id=?',
+                                      (aid,)).fetchone()[0]) for aid, n in saved]
         names = [n for _aid, n in saved]
         ev = record.setdefault('evidence', {}).setdefault(etype, {'result': '', 'notes': '', 'files': []})
         ev.setdefault('files', []).extend(names)
+        if etype == 'machine':
+            ev.setdefault('machine_data', []).extend(machine_data(paths, record.get('quantity_ordered')))
         record.setdefault('file_names', []).extend(names)
         record.setdefault('evidence_added', []).append({
             'type': etype, 'ids': [aid for aid, _n in saved], 'files': names,
@@ -4453,6 +4544,10 @@ def report_remove_evidence(job_key, index, aid):
         ev = (record.get('evidence') or {}).get(entry['type']) or {}
         if name in ev.get('files', []):
             ev['files'].remove(name)
+        for entry_data in list(ev.get('machine_data') or []):
+            if entry_data.get('file') == name:
+                ev['machine_data'].remove(entry_data)
+                break
         if name in record.get('file_names', []):
             record['file_names'].remove(name)
         _recompute_missing_evidence(record)
@@ -5451,6 +5546,40 @@ def settings_reference():
               v.get('pc_category', ''), now) for c, v in items.items()])
     flash(tr(f'已导入 {len(items)} 个产品编码', f'Imported {len(items)} product codes'), 'success')
     return redirect(url_for('settings'))
+
+
+@app.route('/settings/machine', methods=['POST'])
+def settings_machine():
+    """Item codes tested on the pressure test machine and the limits its export is checked against."""
+    config = load_config()
+    codes = pressure_machine.codes_from_text(request.form.get('machine_test_codes', ''))
+    f = request.files.get('codes_file')
+    if f and f.filename:
+        if _upload_extension(f.filename) != '.xlsx':
+            flash(tr('料号文件请用 .xlsx', 'Use an .xlsx file for the item codes'), 'error')
+            return redirect(url_for('settings', _anchor='machine'))
+        try:
+            added = pressure_machine.codes_from_workbook(f.read())
+        except pressure_machine.MachineFileError as exc:
+            flash(tr(exc.zh, exc.en), 'error')
+            return redirect(url_for('settings', _anchor='machine'))
+        if not added:
+            flash(tr('文件里没有找到“Product Code”或“Item Code”列',
+                     'No "Product Code" or "Item Code" column found in the file'), 'error')
+            return redirect(url_for('settings', _anchor='machine'))
+        codes = pressure_machine.codes_from_text('\n'.join(codes + added))
+
+    def limit(name, low, high):
+        value = request.form.get(name, type=float)
+        return value if value is not None and low < value <= high else None
+
+    config['machine_test_codes'] = codes
+    config['machine_min_pressure'] = limit('machine_min_pressure', 0, 100)
+    config['machine_min_hold'] = limit('machine_min_hold', 0, 3600)
+    save_json(CONFIG_FILE, config)
+    flash(tr(f'打压机测试设置已保存（{len(codes)} 个料号）', f'Pressure test machine settings saved ({len(codes)} item codes)'),
+          'success')
+    return redirect(url_for('settings', _anchor='machine'))
 
 
 def evidence_rule_coverage():
@@ -7756,10 +7885,13 @@ def _draft_files(conn, draft_id):
 
 
 def _draft_file_json(job_key, row):
-    return {'id': row['id'], 'name': row['original_name'], 'ref': row['ref'],
-            'video': _upload_extension(row['original_name']) in {'.mp4', '.mov', '.avi', '.mkv'},
-            'doc': _upload_extension(row['original_name']) in {'.pdf', '.xlsx', '.xls', '.csv'},
-            'url': url_for('draft_file', job_key=job_key, fid=row['id'])}
+    out = {'id': row['id'], 'name': row['original_name'], 'ref': row['ref'],
+           'video': _upload_extension(row['original_name']) in {'.mp4', '.mov', '.avi', '.mkv'},
+           'doc': _upload_extension(row['original_name']) in {'.pdf', '.xlsx', '.xls', '.csv'},
+           'url': url_for('draft_file', job_key=job_key, fid=row['id'])}
+    if row['ref'] == EV_REF_PREFIX + 'machine':
+        out['machine'] = machine_preview(row['original_name'], row['file_path'])
+    return out
 
 
 def load_inspection_draft(job_key):
