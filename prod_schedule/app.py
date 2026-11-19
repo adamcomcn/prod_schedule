@@ -713,15 +713,12 @@ def needs_machine_test(item_code, config=None):
 
 def required_evidence(ptype, item_code='', config=None):
     """Evidence items of a product type ({'type', 'checks'}). Items tested on
-    the pressure test machine need its export instead of the pressure records."""
+    the pressure test machine also need its export, right after the pressure records."""
     items = list(evidence_rules.PRODUCT_TYPES[ptype]['evidence']) if ptype in evidence_rules.PRODUCT_TYPES else []
     if needs_machine_test(item_code, config):
         machine = {'type': 'machine', 'checks': [evidence_rules.MACHINE_CHECK]}
         pos = next((i for i, e in enumerate(items) if e['type'] == 'pressure'), None)
-        if pos is None:
-            items.append(machine)
-        else:
-            items[pos] = machine
+        items.insert(len(items) if pos is None else pos + 1, machine)
     return items
 
 

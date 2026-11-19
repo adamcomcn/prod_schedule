@@ -452,8 +452,8 @@
     <div class="card" style="margin-top:0;" id="machine">
       <div class="card-title">&#129514; {{ tr('打压机测试（大连）', 'Pressure test machine (Dalian)') }}</div>
       <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">
-        {{ tr('下面这些料号在大连工厂的打压机上做压力测试。检验这些料号时，“压力测试记录”换成“打压机测试数据”：检验员上传机器导出的 CSV / Excel，系统读出每次测试的压力、保压时间和结果，写进检验报告 PDF。料号末尾加 * 表示前缀匹配（如 DFT10*）。',
-              'These item codes are pressure tested on the machine at the Dalian factory. For them, "Pressure test records" becomes "Pressure test machine data": the inspector uploads the CSV / Excel the machine exports, and the pressure, holding time and result of every test are read and added to the PDF report. End a code with * to match a prefix (e.g. DFT10*).') }}
+        {{ tr('下面这些料号在大连工厂的打压机上做压力测试。检验这些料号时，除了“压力测试记录”，还要上传“打压机测试数据”：机器导出的 CSV / Excel，系统读出每次测试的压力、保压时间和结果，写进检验报告 PDF。料号末尾加 * 表示前缀匹配（如 DFT10*）。',
+              'These item codes are pressure tested on the machine at the Dalian factory. For them, "Pressure test machine data" is needed as well as the pressure test records: the inspector uploads the CSV / Excel the machine exports, and the pressure, holding time and result of every test are read and added to the PDF report. End a code with * to match a prefix (e.g. DFT10*).') }}
       </p>
       <form method="POST" action="{{ url_for('settings_machine') }}" enctype="multipart/form-data">
         <div class="form-group">

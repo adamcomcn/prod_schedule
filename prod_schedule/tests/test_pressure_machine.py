@@ -1,5 +1,5 @@
 """Pressure test machine exports (Dalian): item codes in Settings get a
-"machine data" evidence card instead of the pressure records; the uploaded
+"machine data" evidence card as well as the pressure records; the uploaded
 export is read, checked and added to the report and its PDF."""
 import io
 import os
@@ -137,9 +137,9 @@ class MachineEvidenceTests(unittest.TestCase):
     def records(self, job=JOB):
         return app.load_json(app.INSPECTIONS_CACHE, {}).get(job, [])
 
-    def test_listed_codes_need_machine_data_instead_of_pressure_records(self):
+    def test_listed_codes_need_machine_data_as_well_as_pressure_records(self):
         types = [e['type'] for e in app.required_evidence('di_fitting', 'DFT1008F')]
-        self.assertEqual(types, ['brt', 'machine'])
+        self.assertEqual(types, ['brt', 'pressure', 'machine'])
         self.assertEqual([e['type'] for e in app.required_evidence('di_fitting', 'DFT1010F')], ['brt', 'pressure'])
         self.assertEqual([e['type'] for e in app.required_evidence(None, 'DFT1008F')], ['machine'])
         c = self.client()
@@ -148,7 +148,7 @@ class MachineEvidenceTests(unittest.TestCase):
         self.assertEqual(reqs['machine']['machine_limits'], {'pressure': 2.4, 'hold': 60})
         page = c.get(f'/inspect/{JOB}').get_data(as_text=True)
         self.assertIn('data-ev="machine"', page)
-        self.assertNotIn('data-ev="pressure"', page)
+        self.assertIn('data-ev="pressure"', page)
         self.assertIn('试验压力 ≥ 2.4 MPa', page)
 
     def test_upload_shows_the_tests_that_need_a_look(self):
@@ -181,7 +181,8 @@ class MachineEvidenceTests(unittest.TestCase):
         [rec] = self.records()
         ev = rec['evidence']['machine']
         self.assertEqual(ev['files'], ['试压记录.csv'])
-        self.assertEqual(rec['missing_evidence'], [])
+        # the pressure test records are still needed next to the machine data
+        self.assertEqual(rec['missing_evidence'], ['pressure'])
         [entry] = ev['machine_data']
         self.assertEqual(entry['file'], '试压记录.csv')
         self.assertEqual(len(entry['rows']), 4)
