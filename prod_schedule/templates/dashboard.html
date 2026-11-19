@@ -78,11 +78,10 @@
   <details class="help-box">
     <summary>{{ tr('数据口径说明（点击展开）', 'How the numbers are counted (click to expand)') }}</summary>
     <ul style="margin:8px 0 0 18px;">
-      <li>{{ tr('<b>订单</b>：按「区域 + 采购单号 + 物料编码」计一个；同一订单拆成多行（分批生产）只算一个。', '<b>Order</b>: one per region + PO + item code; split lots count once.')|safe }}</li>
-      <li>{{ tr('<b>状态</b>由本次上传与上一次上传对比得出：<b>新增</b>（上次没有）、<b>未发货</b>（数量不变）、<b>部分发货</b>（数量比上次少）、<b>已发货</b>（上次有、本次已从排期消失）。', '<b>Status</b> compares this upload with the previous one: <b>New</b>, <b>Not shipped</b> (same qty), <b>Partial</b> (qty reduced), <b>Shipped</b> (gone from the schedule).')|safe }}</li>
-      <li>{{ tr('<b>订单总数</b> = 本次排期里的订单 + 本次已发货离开排期的订单。', '<b>Total orders</b> = orders in this schedule + orders that shipped out of it.')|safe }}</li>
-      <li>{{ tr('<b>检验</b>以系统里提交的检验报告为准（不看 Excel 里的 QA BRT 列）；一个订单取最新一份报告的结果。', '<b>Inspection</b> status comes from reports submitted in this system (the Excel QA BRT column is not used); an order takes the result of its latest report.')|safe }}</li>
-      <li>{{ tr('「检验任务」页统计的是检验任务（含已不在排期的历史任务），与本页的订单数口径不同，数字不会完全相同。', 'The Tasks page counts inspection tasks (including old ones whose order left the schedule), so its numbers differ from this page.')|safe }}</li>
+      <li>{{ tr('<b>订单</b> = 区域 + 采购单号 + 物料编码，分批的多行算一个。', '<b>Order</b> = region + PO + item code; split lots count once.')|safe }}</li>
+      <li>{{ tr('<b>状态</b>：本次上传与上一次对比。', '<b>Status</b>: this upload compared with the previous one.')|safe }}</li>
+      <li>{{ tr('<b>检验结果</b>以系统里的报告为准（不看 Excel 的 QA BRT 列），每个订单取最新一份。', '<b>Inspection results</b> come from reports in this system (not the Excel QA BRT column), latest report per order.')|safe }}</li>
+      <li>{{ tr('「检验任务」页按任务计数，所以数字和本页不同。', 'The Tasks page counts tasks, so its numbers differ.')|safe }}</li>
     </ul>
   </details>
 
@@ -126,7 +125,7 @@
     <div class="card-title">
       {{ tr('排期变动（对比上一次上传）', 'Schedule Movement vs Previous Upload') }}
     </div>
-    <div class="card-note">{{ tr('左：上一次上传的订单数 → 本次排期的订单数；中间是变化来源（已发货离开 / 新增 / 部分发货）。右：本次订单的状态构成与各区域占比。', 'Left: orders in the previous upload → orders in this schedule, with what changed. Right: status mix of this week and per-region split.') }}</div>
+    <div class="card-note">{{ tr('左：上次 → 本次的订单数及变化；右：状态和区域占比。', 'Left: previous → current orders and what changed. Right: status and region mix.') }}</div>
 
     <div class="dash-two">
 
@@ -298,7 +297,7 @@
             {{ tr('按区域', 'By region') }}
           </div>
           <div style="font-size:.72rem; color:#9ca3af; margin-bottom:8px;">
-            {{ tr('条的长度 = 该区域订单数（最大的区域占满）；条内颜色 = 状态构成，图例同上。', 'Bar length = orders in the region (largest fills the row); colours = status mix, legend above.') }}
+            {{ tr('条长 = 订单数，颜色 = 状态。', 'Bar length = orders; colours = status.') }}
           </div>
           {% for region, s in region_stats.items() %}
           {% if s.total > 0 %}
@@ -353,8 +352,8 @@
   <!-- Inspection progress -->
   <div class="card">
     <div class="card-title">{{ tr('检验进度', 'Inspection Progress') }}</div>
-    <div class="card-note">{{ tr('已检验 = 本页订单中已提交检验报告的订单数（每个订单取最新一份报告的结果）；待检 = 还没有报告。条形按订单总数 ' ~ totals.total ~ ' 计算。', 'Inspected = orders on this page with a submitted report (latest report counts); Pending = no report yet. The bar is scaled to the ' ~ totals.total ~ ' total orders.') }}
-      {% if inspections_outside.jobs %}<br><b>{{ tr('对账：', 'Reconciliation: ') }}</b>{{ tr('系统共有 ' ~ inspections_all.jobs ~ ' 个订单、' ~ inspections_all.reports ~ ' 份检验报告；其中 ' ~ inspections_outside.jobs ~ ' 个订单（' ~ inspections_outside.reports ~ ' 份报告）已不在本页范围内，所以未计入上面的数字。', 'The system holds ' ~ inspections_all.jobs ~ ' inspected orders / ' ~ inspections_all.reports ~ ' reports; ' ~ inspections_outside.jobs ~ ' order(s) (' ~ inspections_outside.reports ~ ' report(s)) are outside this page and not counted above.') }}{% endif %}</div>
+    <div class="card-note">{{ tr('每个订单按最新一份报告计；待检 = 还没有报告。', 'Latest report per order; Pending = no report yet.') }}
+      {% if inspections_outside.jobs %}<br><b>{{ tr('对账：', 'Reconciliation: ') }}</b>{{ tr('另有 ' ~ inspections_outside.jobs ~ ' 个订单（' ~ inspections_outside.reports ~ ' 份报告）已不在排期中，未计入。', inspections_outside.jobs ~ ' more order(s) (' ~ inspections_outside.reports ~ ' reports) are no longer on the schedule and not counted.') }}{% endif %}</div>
     {% if totals.total > 0 %}
     {% set inspected = totals.insp_pass + totals.insp_fail + totals.insp_partial %}
     <div style="margin-bottom:6px;">
@@ -386,7 +385,7 @@
   <!-- Inspector KPI -->
   <div class="card">
     <div class="card-title">&#128100; {{ tr('检验员 KPI', 'Inspector KPIs') }}</div>
-    <div class="card-note">{{ tr('<b>总检验数</b> 按报告份数计（同一订单复检会计多份）；<b>质检通过率</b> = 通过份数 ÷ 总份数；<b>按时完成率</b> = 检验日期不晚于考核截止日的报告占比（考核截止日 = 预计完成日；供应商把日期提前时，至少顺延到收到变动后 ' ~ grace ~ ' 个工作日；管理员可注明原因不计入），只统计订单有预计完成日的报告，样本少于 ' ~ ontime_min ~ ' 份时仅供参考（灰色）。管理员和总部账号不做检验，不计入。', '<b>Inspections</b> counts reports (re-inspections count again); <b>Pass rate</b> = passed ÷ reports; <b>On-time rate</b> = share of reports done on or before the KPI deadline (the estimated completion date; when the supplier brings it forward, at least ' ~ grace ~ ' working days after the change reached the system; admins can leave a report out with a reason), only for orders that have one; under ' ~ ontime_min ~ ' reports it is indicative only (grey). Admin and HQ accounts do not inspect and are not listed.')|safe }}</div>
+    <div class="card-note">{{ tr('<b>检验数</b> = 报告份数（复检另算）；<b>通过率</b> = 通过 ÷ 报告；<b>按时率</b> = 在预计完成日前完成的报告占比（供应商提前日期时至少顺延 ' ~ grace ~ ' 个工作日）；灰色 = 少于 ' ~ ontime_min ~ ' 份，仅供参考；管理员和总部账号不计入。', '<b>Inspections</b> = reports (re-inspections count again); <b>Pass rate</b> = passed ÷ reports; <b>On-time</b> = reports done by the estimated completion date (at least ' ~ grace ~ ' working days after a supplier brings it forward); grey = under ' ~ ontime_min ~ ' reports, indicative only; admin and HQ accounts are not listed.')|safe }}</div>
     {% if inspector_stats %}
 
     {# ── Summary table ── #}
@@ -462,7 +461,7 @@
     {# ── Per-inspector weekly breakdown cards ── #}
     <div style="font-size:.8rem;font-weight:700;color:#1a3a5c;margin-bottom:12px;
                 padding-bottom:8px;border-bottom:1px solid #e8eaee;">
-      {{ tr('每周检验量（最近 8 周，按检验日期统计的报告份数）', 'Inspections per week (last 8 weeks, reports by inspection date)') }}
+      {{ tr('每周检验量（最近 8 周）', 'Inspections per week (last 8 weeks)') }}
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
       {% for name, s in inspector_stats %}
@@ -549,7 +548,7 @@
         <button type="button" data-mode="line">{{ tr('折线', 'Lines') }}</button>
       </span>
     </div>
-    <div class="card-note">{{ tr('每个点/每根柱 = 该周<b>最后一次上传</b>的排期里的订单数（同一周多次上传只取最后一次），按订单号+物料去重；最右边就是当前排期，与上面卡片的数字一致。<b>柱状</b>：柱子总高度 = 当周订单总数，按区域分色堆叠，柱顶数字是总数。<b>折线</b>：每个区域一条线；只显示有上传记录的周，数据点很少时不要过度解读两点之间的斜线。柱子变矮通常表示订单发货离开了排期，变高表示新增订单多于发货。', 'Each point / bar = orders in the <b>last upload of that week</b> (several uploads in a week count once), de-duplicated by PO + item; the right-most one is the current schedule and matches the cards above. <b>Bars</b>: bar height = total orders that week, stacked by region, the number on top is the total. <b>Lines</b>: one line per region; only weeks with an upload are shown, so do not read much into the slope between two far-apart points. A shorter bar usually means orders shipped out; a taller one means more new orders than shipments.')|safe }}</div>
+    <div class="card-note">{{ tr('每周最后一次上传的订单数，最右边 = 当前排期。', 'Orders in the last upload of each week; right-most = current schedule.')|safe }}</div>
     <div style="position:relative;height:260px;">
       <canvas id="weeklyRegionChart"></canvas>
     </div>
@@ -559,7 +558,7 @@
   <!-- Per-region table -->
   <div class="card">
     <div class="card-title">{{ tr('按区域统计', 'Per-Region Breakdown') }}</div>
-    <div class="card-note">{{ tr('总数 = 新增 + 未发货 + 部分发货 + 已发货。<b>QA警告</b> = 已发货/部分发货但系统里没有检验报告的订单；<b>V-Trust警告</b> = 阀门已发货/部分发货但没有 V-Trust 通过记录；通过/不通过/部分通过/待检 = 各订单最新检验结果，四项相加等于总数。', 'Total = New + Not shipped + Partial + Shipped. <b>QA alerts</b> = shipped/partial orders with no inspection report in the system; <b>V-Trust alerts</b> = shipped/partial valves without a V-Trust pass; Pass/Fail/Partial/Pending = latest result per order and add up to the total.')|safe }}</div>
+    <div class="card-note">{{ tr('<b>QA警告</b> = 已发货但没有检验报告；<b>V-Trust警告</b> = 阀门已发货但没有 V-Trust 通过。', '<b>QA alert</b> = shipped without an inspection report; <b>V-Trust alert</b> = valve shipped without a V-Trust pass.')|safe }}</div>
     <div style="overflow-x:auto;">
       <table class="rtable">
         <thead>
