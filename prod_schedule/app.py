@@ -5353,8 +5353,8 @@ def run_dropbox_sync(budget=DROPBOX_RUN_SECONDS, force_snapshot=False):
         if not error:
             changes['dropbox_last_ok'] = changes['dropbox_last_run']
         if space:
-            changes['dropbox_space_used'] = space.get('used', 0)
-            changes['dropbox_space_total'] = (space.get('allocation') or {}).get('allocated', 0)
+            (changes['dropbox_space_used'], changes['dropbox_space_total'],
+             changes['dropbox_space_scope']) = dropbox_backup.space_numbers(space)
         update_config(**changes)
     finally:
         _dropbox_lock.release()

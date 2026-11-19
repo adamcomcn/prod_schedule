@@ -95,6 +95,21 @@ class FakeDropbox:
         raise AssertionError(name)
 
 
+class SpaceNumbersTests(unittest.TestCase):
+    def test_personal_and_team_accounts(self):
+        gb = 1024 ** 3
+        self.assertEqual(dropbox_backup.space_numbers(
+            {'used': gb, 'allocation': {'.tag': 'individual', 'allocated': 2 * gb}}), (gb, 2 * gb, ''))
+        team = {'.tag': 'team', 'used': 300 * gb, 'allocated': 5000 * gb,
+                'user_within_team_space_allocated': 0, 'user_within_team_space_limit_type': {'.tag': 'off'}}
+        # no limit per member: the space the whole team shares
+        self.assertEqual(dropbox_backup.space_numbers({'used': gb, 'allocation': team}), (300 * gb, 5000 * gb, 'team'))
+        # the admin gave each member a limit: that one counts
+        limited = dict(team, user_within_team_space_allocated=100 * gb)
+        self.assertEqual(dropbox_backup.space_numbers({'used': gb, 'allocation': limited}), (gb, 100 * gb, 'member'))
+        self.assertEqual(dropbox_backup.space_numbers({}), (0, 0, ''))
+
+
 class DropboxBackupTests(unittest.TestCase):
     def setUp(self):
         app.app.config.update(TESTING=True)
@@ -239,6 +254,7 @@ class DropboxBackupTests(unittest.TestCase):
         self.assertEqual(config['dropbox_last_ok'], config['dropbox_last_run'])
         self.assertEqual(config['dropbox_pending_count'], 1)
         self.assertEqual(config['dropbox_space_total'], 2 * 1024 ** 3)
+        self.assertEqual(config['dropbox_space_scope'], '')
         self.assertTrue(app.dropbox_healthy())
 
         # second run: nothing new, no second snapshot today

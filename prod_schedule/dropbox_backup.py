@@ -80,6 +80,20 @@ def exchange_code(app_key, code, verifier, redirect_uri):
     return data
 
 
+def space_numbers(usage):
+    """(used, total, scope) from users/get_space_usage. A personal account has its own
+    quota; on a team (Business) account the member's own limit counts if the admin set
+    one, otherwise the space the whole team shares (scope 'team')."""
+    allocation = usage.get('allocation') or {}
+    used = usage.get('used') or 0
+    if allocation.get('.tag') == 'team':
+        limit = allocation.get('user_within_team_space_allocated') or 0
+        if limit:
+            return used, limit, 'member'
+        return allocation.get('used') or 0, allocation.get('allocated') or 0, 'team'
+    return used, allocation.get('allocated') or 0, ''
+
+
 class Client:
     def __init__(self, app_key, refresh_token):
         self.app_key = app_key

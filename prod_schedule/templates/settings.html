@@ -305,7 +305,7 @@
             {% if config.get('dropbox_pending_count') %} · <strong>{{ tr('待上传', 'waiting') }} {{ config.dropbox_pending_count }} {{ tr('个', '') }} ({{ config.get('dropbox_pending_bytes', 0)|filesizeformat(true)|replace('iB', 'B') }})</strong>{% endif %}
             {% if config.get('dropbox_space_total') %}
               {% set dbx_pct = config.dropbox_space_used * 100 / config.dropbox_space_total %}
-              · <span style="{{ 'color:#dc2626; font-weight:600;' if dbx_pct >= 90 else '' }}">Dropbox {{ tr('空间', 'space') }} {{ config.dropbox_space_used|filesizeformat(true)|replace('iB', 'B') }} / {{ config.dropbox_space_total|filesizeformat(true)|replace('iB', 'B') }} ({{ '%.0f'|format(dbx_pct) }}%)</span>
+              · <span style="{{ 'color:#dc2626; font-weight:600;' if dbx_pct >= 90 else '' }}">Dropbox {{ tr('团队空间', 'team space') if config.get('dropbox_space_scope') == 'team' else tr('空间', 'space') }} {{ config.dropbox_space_used|filesizeformat(true)|replace('iB', 'B') }} / {{ config.dropbox_space_total|filesizeformat(true)|replace('iB', 'B') }} ({{ '%.0f'|format(dbx_pct) }}%)</span>
             {% endif %}
           </div>
           <div style="margin-top:4px; color:#6b7280;">
