@@ -53,6 +53,8 @@ CI (`.github/workflows/tests.yml`) runs pytest on PRs and on main.
   .xlsx; columns found by keyword). Settings → 打压机测试: item codes (`machine_test_codes`, `*` = prefix) and
   optional limits (`machine_min_pressure`/`_hold`). `required_evidence(ptype, code)` adds a 'machine' card after
   'pressure' on those codes (both required); parsed tests go in `evidence['machine']['machine_data']` and are listed in the PDF.
+- Suspected typos (`compute_changes` typo_flags): admin-only panel/badge (others see NEW). Admin dismisses pairs
+  (`/typos/dismiss`, config `typo_dismissed` = 'curr_key>prev_key'); dismissed pairs count as plain new.
 - Quantity increases: `compute_changes(..., moves_out)` puts `qty_up` {key: (before, after)} there (status stays
   `not_shipped`); `inspected_qty_increases` / `report_qty_increase` compare the latest report's
   `quantity_ordered` with the line's qty now ("may need another inspection"). Filter `?status=qty_up`,

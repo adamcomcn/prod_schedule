@@ -95,7 +95,7 @@
     <div class="stat-card">
       <div class="stat-label">{{ tr('新增', 'New') }}</div>
       <div class="stat-value c-new">{{ totals.new }}</div>
-      <div class="stat-sub">{{ tr('上次上传后新增（含疑似笔误）', 'new since last upload (incl. typo flags)') }}</div>
+      <div class="stat-sub">{{ tr('上次上传后新增', 'new since last upload') }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">{{ tr('未发货', 'Not Shipped') }}</div>
@@ -112,11 +112,13 @@
       <div class="stat-value c-shipped">{{ totals.shipped }}</div>
       <div class="stat-sub">{{ tr('上次有、本次已离开排期', 'in last upload, gone now') }}</div>
     </div>
+    {% if g.is_admin %}
     <div class="stat-card">
       <div class="stat-label">{{ tr('疑似错误', 'Typo Flags') }}</div>
       <div class="stat-value c-typo">{{ typo_count }}</div>
       <div class="stat-sub">{{ tr('新订单号/编码与旧的相似，请核查', 'new code looks like an old one – please check') }}</div>
     </div>
+    {% endif %}
   </div>
 
   <!-- ── Week-over-Week Movement ───────────────────────────────────── -->

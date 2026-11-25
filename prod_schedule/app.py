@@ -85,7 +85,7 @@ ADMIN_ENDPOINTS = {
     'user_update', 'user_logins', 'change_report_inspector', 'settings_vtrust_preview', 'settings_vtrust_send',
     'settings_purchasing_send', 'settings_machine', 'export_purchasing_excel', 'old_schedule_upload', 'old_schedule_delete', 'settings_qa_mismatch_preview', 'settings_qa_mismatch_send',
     'vtrust_page', 'vtrust_book', 'vtrust_unbook', 'vtrust_result', 'vtrust_file_delete', 'vtrust_keep', 'vtrust_release', 'report_kpi_exclusion', 'schedule_est_edit',
-    'outstanding_close', 'outstanding_reopen',
+    'outstanding_close', 'outstanding_reopen', 'typo_dismiss',
     'settings_dropbox_connect', 'settings_dropbox_callback', 'settings_dropbox_sync', 'settings_dropbox_disconnect',
 }
 
@@ -1242,7 +1242,14 @@ def _send_region_move_email(followed, inherited):
     return _smtp_send(subject, '\n'.join(lines), recipients)
 
 
-def compute_changes(previous, current, moves_out=None):
+TYPO_DISMISSED_KEEP = 2000          # dismissed typo pairs remembered (oldest dropped first)
+
+
+def typo_pair(curr_key, prev_key):
+    return f'{curr_key}>{prev_key}'
+
+
+def compute_changes(previous, current, moves_out=None, dismissed=None):
     """Compare two week datasets.
 
     Same order+item can appear as multiple rows (split production lots) or
@@ -1252,7 +1259,8 @@ def compute_changes(previous, current, moves_out=None):
     Returns:
         statuses   – dict  keyed by job_key → 'new' | 'not_shipped' |
                                                'partially_shipped' | 'shipped' | 'typo'
-        typo_flags – list of dicts describing suspected typo pairs
+        typo_flags – list of dicts describing suspected typo pairs (pairs an admin
+                     dismissed, config 'typo_dismissed', are plain new orders)
         shipped_rows – dict  sheet_name → list of rows (one per unique key,
                        with qty updated to the aggregated total)
     """
@@ -1315,9 +1323,12 @@ def compute_changes(previous, current, moves_out=None):
 
     # ── typo detection ────────────────────────────────────────────────────────
     THRESHOLD = 0.75
+    if dismissed is None:
+        dismissed = set(load_config().get('typo_dismissed') or [])
     typo_flags        = []
     typo_new_keys     = set()
     typo_shipped_keys = set()
+    dismissed_hits    = set()
 
     for nk in sorted(genuine_new):
         n_sheet, n_order, n_item = nk.split('|', 2)
@@ -1339,18 +1350,24 @@ def compute_changes(previous, current, moves_out=None):
                 # Both PO and item differing is a different order line, not a
                 # typo (e.g. PO-4507/DFCT151000F vs PO-4257/DFCT151200F).
                 continue
+            if typo_pair(nk, sk) in dismissed:      # an admin checked this one
+                dismissed_hits.add(typo_pair(nk, sk))
+                continue
 
             if score > best_score:
                 best_score = score
                 best = dict(curr_key=nk, prev_key=sk, sheet=n_sheet,
                             curr_order=n_order, curr_item=n_item,
                             prev_order=s_order, prev_item=s_item,
-                            reason=reason, field=field, score=round(score * 100))
+                            reason=reason, field=field, score=round(score * 100),
+                            pair=typo_pair(nk, sk))
 
         if best:
             typo_flags.append(best)
             typo_new_keys.add(nk)
             typo_shipped_keys.add(best['prev_key'])
+    if moves_out is not None:
+        moves_out['typo_dismissed'] = sorted(dismissed_hits)
 
     # ── statuses for current-week rows ───────────────────────────────────────
     statuses = {}
@@ -1544,6 +1561,26 @@ def outstanding_reopen():
     return _back_to_outstanding()
 
 
+@app.route('/typos/dismiss', methods=['POST'])
+def typo_dismiss():
+    """Admin checked suspected typos (supplier asked to correct, or really new orders):
+    they are no longer flagged and count as plain new orders. 'restore' brings them all back."""
+    sheet = request.form.get('sheet', '')
+    if request.form.get('restore'):
+        update_config(typo_dismissed=[])
+        flash(tr('已恢复全部疑似笔误提示', 'All typo warnings are shown again'), 'success')
+    else:
+        pairs = [p for p in request.form.getlist('pair') if '>' in p][:500]
+        with DATA_LOCK:
+            config = load_config()
+            kept = [p for p in (config.get('typo_dismissed') or []) if p not in pairs]
+            config['typo_dismissed'] = (kept + pairs)[-TYPO_DISMISSED_KEEP:]
+            save_json(CONFIG_FILE, config)
+        logger.info('%s dismissed %d typo warning(s): %s', g.get('username'), len(pairs), ', '.join(pairs[:20]))
+        flash(tr(f'已关闭 {len(pairs)} 条疑似笔误提示', f'{len(pairs)} typo warning(s) dismissed'), 'success')
+    return redirect(url_for('index', sheet=sheet) if sheet else url_for('index'))
+
+
 @app.route('/')
 def index():
     current = load_schedule(CURRENT_FILE)
@@ -1697,7 +1734,9 @@ def index():
                            est_overrides=est_overrides,
                            data=display_data,
                            statuses=statuses,
-                           typo_flags=[t for t in typo_flags if t.get('sheet') == selected_sheet][:100],
+                           typo_flags=([t for t in typo_flags if t.get('sheet') == selected_sheet][:100]
+                                       if g.is_admin else []),
+                           typos_dismissed=len(moves_info.get('typo_dismissed', [])) if g.is_admin else 0,
                            shipped_rows=display_shipped,
                            inspections=inspections,
                            valve_keys=valve_keys,

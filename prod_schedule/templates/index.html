@@ -90,6 +90,10 @@ td.inspect-col { text-align: center; }
 .typo-item-header { font-weight: 600; color: #92400e; margin-bottom: 6px; }
 .typo-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
 .typo-col { background: #f9fafb; border-radius: 4px; padding: 6px 10px; }
+.typo-actions { display:flex; gap:8px; align-items:center; margin-left:auto; }
+.typo-actions form { margin:0; }
+.typo-restore { font-size:.78rem; color:#6b7280; margin:8px 24px 0; }
+.typo-restore button { background:none; border:none; color:#2563eb; cursor:pointer; padding:0; font-size:.78rem; }
 .typo-col label { font-size: .72rem; color: #6b7280; font-weight: 600;
                   text-transform: uppercase; display: block; margin-bottom: 3px; }
 .diff-mismatch { background: #fef3c7; border-radius: 3px; padding: 1px 3px; }
@@ -214,6 +218,22 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
     <span>&#9888;</span>
     <span>{{ tr('发现 ' ~ typo_flags|length ~ ' 处疑似笔误，请核实', typo_flags|length ~ ' possible typo' ~ ('s' if typo_flags|length != 1 else '') ~ ' detected — review before actioning') }}</span>
     <span class="chevron open" id="typoChevron">&#9660;</span>
+    <span class="typo-actions" onclick="event.stopPropagation()">
+      {% if typos_dismissed %}
+      <form method="POST" action="{{ url_for('typo_dismiss') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="sheet" value="{{ selected_sheet }}">
+        <button type="submit" name="restore" value="1" class="btn btn-outline btn-sm">{{ tr('恢复已关闭的 ' ~ typos_dismissed ~ ' 条', 'Show ' ~ typos_dismissed ~ ' dismissed') }}</button>
+      </form>
+      {% endif %}
+      <form method="POST" action="{{ url_for('typo_dismiss') }}"
+            onsubmit='return confirm({{ tr("确认这 " ~ typo_flags|length ~ " 条都已核实，全部关闭？", "Mark all " ~ typo_flags|length ~ " as checked and dismiss them?")|tojson }})'>
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="sheet" value="{{ selected_sheet }}">
+        {% for t in typo_flags %}<input type="hidden" name="pair" value="{{ t.pair }}">{% endfor %}
+        <button type="submit" class="btn btn-outline btn-sm">&#10003; {{ tr('全部已核实，关闭', 'All checked, dismiss') }}</button>
+      </form>
+    </span>
   </div>
   <div class="typo-list" id="typoList">
     {% for t in typo_flags %}
@@ -238,11 +258,24 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
               "If this is a typo in the supplier's file, ask them to correct it. If it is genuinely a new job, no action needed.") }}
         <a href="{{ url_for('inspect_form', job_key=t.curr_key) }}"
            style="margin-left:8px;">{{ tr('打开检验', 'Open inspection') }} &rarr;</a>
+        <form method="POST" action="{{ url_for('typo_dismiss') }}" style="display:inline; margin-left:12px;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="sheet" value="{{ selected_sheet }}">
+          <input type="hidden" name="pair" value="{{ t.pair }}">
+          <button type="submit" class="btn btn-outline btn-sm">&#10003; {{ tr('已核实，关闭', 'Checked, dismiss') }}</button>
+        </form>
       </div>
     </div>
     {% endfor %}
   </div>
 </div>
+{% elif typos_dismissed %}
+<form class="typo-restore" method="POST" action="{{ url_for('typo_dismiss') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="sheet" value="{{ selected_sheet }}">
+  {{ tr('已关闭 ' ~ typos_dismissed ~ ' 条疑似笔误提示', typos_dismissed ~ ' typo warning(s) dismissed') }} ·
+  <button type="submit" name="restore" value="1">{{ tr('恢复显示', 'show again') }}</button>
+</form>
 {% endif %}
 
 {% if sheet_names %}
@@ -333,6 +366,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
           {% endfor %}
           {% set job_key = sheet_name ~ '|' ~ (ns.po if ns.po else ns.order) ~ '|' ~ ns.item %}
           {% set status = statuses.get(job_key, '') %}
+          {% if status == 'typo' and not g.is_admin %}{% set status = 'new' %}{% endif %}
           {# QA alert: shipped or partially shipped but QA BRTs not confirmed #}
           {% set qa_warn = status in ['shipped', 'partially_shipped'] and not inspections.get(job_key) %}
           {% set qa_mismatch = qa_excel_mismatch(row, headers, inspections.get(job_key)) %}
