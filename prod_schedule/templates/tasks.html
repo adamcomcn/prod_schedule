@@ -11,6 +11,17 @@
 .urg-done    { background:#9ca3af; }
 
 /* ── task table ── */
+/* the table scrolls sideways with the bar below it, which stays at the bottom of the screen */
+.task-card { padding:0; overflow:hidden; overflow:clip; }
+.task-scroll { overflow-x:auto; scrollbar-width:none; }
+.task-scroll::-webkit-scrollbar { display:none; }
+.task-hscroll { position:sticky; bottom:0; z-index:20; overflow-x:auto; overflow-y:hidden;
+                background:#f8fafc; border-top:1px solid #e2e8f0; }
+.task-hscroll > div { height:1px; }
+.task-hscroll[hidden] { display:none; }
+.filter-bar a.export-btn { margin-left:auto; flex-shrink:0; border-radius:20px; background:#1a3a5c; color:#fff;
+                           border-color:#1a3a5c; font-weight:600; }
+.filter-bar a.export-btn:hover:not(.active) { background:#24507d; color:#fff; text-decoration:none; }
 .task-table { width:100%; border-collapse:collapse; font-size:.85rem; }
 .task-table th { background:#f8fafc; font-weight:600; text-align:left; padding:10px 10px;
                  border-bottom:2px solid #e2e8f0; font-size:.73rem;
@@ -159,12 +170,7 @@ tr.mine td { background:#f0fdf4; }
     <h1 style="font-size:1.4rem; font-weight:700; color:#1a3a5c;">
       {{ tr('检验任务跟踪', 'Inspection Task Tracker') }}
     </h1>
-    <span style="display:flex; gap:12px; align-items:center;">
-      <a id="taskExport" class="btn btn-outline btn-sm"
-         href="{{ url_for('tasks_export', scope=scope, status=status_filter or None, orphan='1' if orphan_only else None) }}"
-         title="{{ tr('按当前筛选导出', 'Exports what the current filters show') }}">&#11015; {{ tr('导出 Excel', 'Export Excel') }}</a>
-      <span style="font-size:.8rem; color:#9ca3af;">{{ tr('今日：', 'Today:') }} {{ today }}</span>
-    </span>
+    <span style="font-size:.8rem; color:#9ca3af;">{{ tr('今日：', 'Today:') }} {{ today }}</span>
   </div>
 
   {# ══════════════ STATS SECTION ══════════════ #}
@@ -515,12 +521,15 @@ tr.mine td { background:#f0fdf4; }
       &#9888; {{ tr('订单已不在当前排期', 'Order not in current schedule') }}
       <span style="margin-left:4px; opacity:.6;">({{ orphan_count }})</span>
     </a>
+    <a id="taskExport" class="export-btn"
+       href="{{ url_for('tasks_export', scope=scope, status=status_filter or None, orphan='1' if orphan_only else None) }}"
+       title="{{ tr('导出当前列表（按当前筛选和供应商）', 'Exports this list (current filters and supplier)') }}">&#11015; {{ tr('导出 Excel', 'Export Excel') }}</a>
   </div>
 
   {# ══════════════ TASK TABLE ══════════════ #}
-  <div class="card" style="padding:0; overflow:hidden;">
+  <div class="card task-card">
     {% if tasks %}
-    <div style="overflow-x:auto;">
+    <div class="task-scroll" id="taskScroll">
       <table class="task-table">
         <thead>
           <tr>
@@ -647,6 +656,7 @@ tr.mine td { background:#f0fdf4; }
         </tbody>
       </table>
     </div>
+    <div class="task-hscroll" id="taskHScroll" hidden title="{{ tr('左右拖动查看更多列', 'Drag to see more columns') }}"><div></div></div>
     {% else %}
     <div style="text-align:center; padding:50px; color:#9ca3af; font-size:.9rem;">
       {% if status_filter %}
@@ -720,6 +730,24 @@ function updateAssignCount() {
     rows.forEach(function (r) { r.style.display = show ? 'flex' : 'none'; });
     btn.textContent = show ? btn.dataset.open : btn.dataset.closed;
   });
+})();
+</script>
+<script>
+// Sideways scroll bar kept at the bottom of the screen, in step with the table
+(function () {
+  var wrap = document.getElementById('taskScroll'), bar = document.getElementById('taskHScroll');
+  if (!wrap || !bar) return;
+  var inner = bar.firstElementChild;
+  function fit() {
+    inner.style.width = wrap.scrollWidth + 'px';
+    bar.hidden = wrap.scrollWidth <= wrap.clientWidth + 1;
+    bar.scrollLeft = wrap.scrollLeft;
+  }
+  bar.addEventListener('scroll', function () { if (wrap.scrollLeft !== bar.scrollLeft) wrap.scrollLeft = bar.scrollLeft; });
+  wrap.addEventListener('scroll', function () { if (bar.scrollLeft !== wrap.scrollLeft) bar.scrollLeft = wrap.scrollLeft; });
+  window.addEventListener('resize', fit);
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(wrap.firstElementChild);
+  fit();
 })();
 </script>
 <script>

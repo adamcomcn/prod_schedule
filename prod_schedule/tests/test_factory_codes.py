@@ -59,6 +59,13 @@ class FactoryCodeTests(unittest.TestCase):
         self.assertNotIn('Cangzhou', page)
         options = page.count('<option value="RB">')
         self.assertEqual(options, 1)                                              # one filter entry
+        # the export button sits in the filter bar above the table, which has a sideways scroll bar
+        bar = page.split('class="filter-bar"')[1].split('task-card')[0]
+        self.assertIn('id="taskExport"', bar)
+        self.assertIn('/tasks/export.xlsx?scope=all', bar)
+        self.assertEqual(page.count('id="taskExport"'), 1)
+        self.assertIn('id="taskScroll"', page)
+        self.assertIn('id="taskHScroll"', page)
         import io
         import openpyxl
         data = self.client().get('/tasks/export.xlsx?scope=all&supplier=RB').data
