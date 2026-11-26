@@ -42,7 +42,8 @@ CI (`.github/workflows/tests.yml`) runs pytest on PRs and on main.
 - JSON writes go through `save_json` (atomic tmp + `os.replace`, retry on Windows PermissionError).
 - Inspection records live in `inspections_cache.json` keyed by job key `REGION|PO|ITEMCODE`.
   `SharedReports` falls back across regions by PO+item; region moves are detected on upload
-  (`detect_region_moves` / `migrate_job_key`).
+  (`detect_region_moves` / `migrate_job_key`); a destination is a new line (`to_keys`) or a line already on
+  that region that grew (`grown_keys`, e.g. NZ 24 -> MEL 8 -> 32); `dest_keys` = both.
 - Old reports added afterwards (补录, `backfill_report`): record flag `backfill` (original inspector/date/
   result + original file and BRT etc.); no review, no HQ e-mail, not in inspector KPIs. Users with
   `users.can_backfill` (or admin) may also add evidence files to any report (`evidence_added` log).

@@ -1042,9 +1042,12 @@ def _job_tail(job_key):
 
 
 def detect_region_moves(prev_keys, curr_keys, prev_qty, curr_qty):
-    """Order lines that appeared on a new sheet while leaving (or shrinking on)
-    another one. also_shipped: the total quantity went down as well, so part
-    of it shipped and the usual shipped / QA BRT rules still apply."""
+    """Order lines that appeared on a new sheet, or grew on a sheet that already had
+    the same PO + item, while leaving (or shrinking on) another one. also_shipped: the
+    total quantity went down as well, so part of it shipped and the usual shipped /
+    QA BRT rules still apply. to_keys are the new lines only; grown_keys the lines
+    that were already there and took the moved quantity (e.g. NEW ZEALAND 24 ->
+    MELBOURNE 8 -> 32); dest_keys both."""
     groups = defaultdict(lambda: ({}, {}))
     for k in prev_keys:
         groups[_job_tail(k)][0][k.split('|', 1)[0]] = prev_qty.get(k)
@@ -1055,26 +1058,31 @@ def detect_region_moves(prev_keys, curr_keys, prev_qty, curr_qty):
         if not before or not after:
             continue
         to = sorted(s for s in after if s not in before)
-        if not to:
+        grown = sorted(s for s in before if s in after and before[s] is not None
+                       and after[s] is not None and after[s] > before[s])
+        if not to and not grown:
             continue
         gone = sorted(s for s in before if s not in after)
         reduced = sorted(s for s in before if s in after and before[s] is not None
                          and after[s] is not None and after[s] < before[s])
         if not gone and not reduced:
-            continue                       # extra quantity for a new region, nothing left the old one
+            continue                       # extra quantity for a region, nothing left another one
         known = all(v is not None for v in list(before.values()) + list(after.values()))
         total_before = sum(v or 0 for v in before.values())
         total_after = sum(v or 0 for v in after.values())
         po, item = tail.split('|', 1)
         moves.append({
             'po': po, 'item': item,
-            'kind': 'partial' if any(s in after for s in before) else 'full',
+            'kind': 'partial' if reduced else 'full',   # partial: the old region keeps some
             'also_shipped': known and total_after < total_before - 1e-9,
             'from': [{'sheet': s, 'before': before[s], 'after': after.get(s)} for s in gone + reduced],
-            'to': [{'sheet': s, 'qty': after[s]} for s in to],
+            'to': ([{'sheet': s, 'qty': after[s]} for s in to]
+                   + [{'sheet': s, 'qty': after[s], 'before': before[s]} for s in grown]),
             'gone_keys': [f'{s}|{tail}' for s in gone],
             'reduced_keys': [f'{s}|{tail}' for s in reduced],
             'to_keys': [f'{s}|{tail}' for s in to],
+            'grown_keys': [f'{s}|{tail}' for s in grown],
+            'dest_keys': [f'{s}|{tail}' for s in to + grown],
             'total_before': total_before, 'total_after': total_after,
         })
     return moves
@@ -1125,10 +1133,19 @@ def inspected_qty_increases(current, inspections):
     return out
 
 
+def move_dest_text(t, english=False):
+    """'FIJI 36', or 'MELBOURNE 32 (was 8)' for a line that was already there."""
+    text = f"{t['sheet']} {_qty_text(t['qty'])}"
+    if t.get('before') is not None:
+        was = _qty_text(t['before'])
+        text += f' (was {was})' if english else tr(f'（原 {was}）', f' (was {was})')
+    return text
+
+
 def move_text(m):
     """'DI FITTING 48 → FIJI 36 (DI FITTING keeps 15)' style description."""
     src = ', '.join(f"{f['sheet']} {_qty_text(f['before'])}" for f in m['from'])
-    dst = ', '.join(f"{t['sheet']} {_qty_text(t['qty'])}" for t in m['to'])
+    dst = ', '.join(move_dest_text(t) for t in m['to'])
     kept = [f"{f['sheet']} {_qty_text(f['after'])}" for f in m['from'] if f['after'] is not None]
     text = f'{src} → {dst}'
     if kept:
@@ -1313,7 +1330,7 @@ def compute_changes(previous, current, moves_out=None, dismissed=None):
 
     # ── region moves: the same PO + item now (also) on another sheet ─────────
     moves = detect_region_moves(prev_keys, curr_keys, prev_qty, curr_qty)
-    moved_in_keys = {k for m in moves for k in m['to_keys']}
+    moved_in_keys = {k for m in moves for k in m['dest_keys']}
     moved_out_keys = {k for m in moves if not m['also_shipped'] for k in m['gone_keys']}
     reduced_by_move = {k for m in moves if not m['also_shipped'] for k in m['reduced_keys']}
     genuine_new -= moved_in_keys
@@ -1386,8 +1403,11 @@ def compute_changes(previous, current, moves_out=None, dismissed=None):
             else:
                 statuses[k] = 'not_shipped'
     if moves_out is not None:          # quantity went UP since the previous schedule (status stays not_shipped)
+        # a line that grew because quantity moved in from another region only counts
+        # when the PO + item total went up as well (more than what moved)
+        grown_extra = {k for m in moves if m['total_after'] > m['total_before'] + 1e-9 for k in m['grown_keys']}
         moves_out['qty_up'] = {k: (prev_qty[k], curr_qty[k]) for k, s in statuses.items()
-                               if s == 'not_shipped' and prev_qty.get(k) is not None
+                               if (s == 'not_shipped' or k in grown_extra) and prev_qty.get(k) is not None
                                and curr_qty.get(k) is not None and curr_qty[k] > prev_qty[k]}
 
     # ── collect shipped rows from previous week ───────────────────────────────
@@ -1592,7 +1612,7 @@ def index():
         statuses, typo_flags, shipped_rows = {}, [], {}
     move_notes = {}
     for m in moves_info.get('moves', []):
-        for k in m['to_keys'] + m['reduced_keys']:
+        for k in m['dest_keys'] + m['reduced_keys']:
             move_notes[k] = move_text(m)
     qty_up = {k: (_qty_text(a), _qty_text(b)) for k, (a, b) in moves_info.get('qty_up', {}).items()}
     if not g.can_see_prices:
@@ -1961,14 +1981,19 @@ def purchasing_changes(before, after, inspections=None):
                                  prev_must_ship=o['must_ship'], ship_days=ship_days, ship_note=ship_note))
     region_moves = []
     for m in moves:
-        line = new.get(m['to_keys'][0]) or old.get((m['gone_keys'] or m['reduced_keys'] or [''])[0]) or {}
+        line = new.get(m['dest_keys'][0]) or old.get((m['gone_keys'] or m['reduced_keys'] or [''])[0]) or {}
         src = ', '.join(f"{f['sheet']} {_qty_text(f['before'])}" for f in m['from'])
-        dst = ', '.join(f"{t['sheet']} {_qty_text(t['qty'])}" for t in m['to'])
+        dst = ', '.join(move_dest_text(t, english=True) for t in m['to'])
         kept = ', '.join(f"{f['sheet']} {_qty_text(f['after'])}" for f in m['from'] if f['after'] is not None)
         region_moves.append({'dpl': line.get('dpl', ''), 'po': m['po'], 'item_code': m['item'],
                              'supplier': line.get('supplier', ''), 'description': line.get('description', ''),
                              'from': src, 'to': dst, 'kept': kept,
-                             'note': 'Total went down: part of it also shipped' if m['also_shipped'] else ''})
+                             'note': '; '.join(n for n in (
+                                 'Added to a line already on ' + ', '.join(k.split('|', 1)[0] for k in m['grown_keys'])
+                                 if m['grown_keys'] else '',
+                                 'Total went down: part of it also shipped' if m['also_shipped'] else '',
+                                 'Total went up by ' + _qty_text(m['total_after'] - m['total_before'])
+                                 if m['total_after'] > m['total_before'] + 1e-9 else '') if n)})
     for line in shipped:
         line['has_report'] = bool(inspections.get(line['key']))
     qty_up = []
@@ -2743,7 +2768,7 @@ def schedule_diff_summary(current, new):
     summary['typo'] = typo_flags
     # A row that disappeared entirely means the job fully shipped.
     for m in moves:
-        row = new_rows.get(m['to_keys'][0]) or {}
+        row = new_rows.get(m['dest_keys'][0]) or {}
         summary.setdefault('moves', []).append({
             'order_number': row.get('order_number', ''), 'po': m['po'], 'item_code': m['item'],
             'description': row.get('description', ''), 'text': move_text(m),

@@ -67,6 +67,57 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(statuses['QLD|PO-1|A'], 'new')
         self.assertEqual(moves, [])
 
+    def test_move_into_a_line_already_on_the_other_region_like_dpl2637(self):
+        # real case (Nov 2026): NEW ZEALAND 24 left, MELBOURNE PO-4507 went 8 -> 16 + 16
+        # (DPL2627 / PO-4420 on MELBOURNE is another order and stays at 8)
+        before = week(MELBOURNE=[row('DPL2627', 'PO-4420', 'RSV025016FLFL', 8),
+                                 row('DPL2637', 'PO-4507', 'RSV025016FLFL', 8)],
+                      **{'NEW ZEALAND': [row('DPL2637', 'PO-4507', 'RSV025016FLFL', 24)]})
+        after = week(MELBOURNE=[row('DPL2627', 'PO-4420', 'RSV025016FLFL', 8),
+                                row('DPL2637', 'PO-4507', 'RSV025016FLFL', 16),
+                                row('DPL2637', 'PO-4507', 'RSV025016FLFL', 16)],
+                     **{'NEW ZEALAND': []})
+        info = {}
+        statuses, _typos, shipped = app.compute_changes(before, after, moves_out=info)
+        mel = 'MELBOURNE|PO-4507|RSV025016FLFL'
+        self.assertEqual(shipped, {})                                     # nothing shipped
+        self.assertEqual(statuses[mel], 'moved_in')
+        self.assertEqual(statuses['MELBOURNE|PO-4420|RSV025016FLFL'], 'not_shipped')
+        self.assertEqual(info['qty_up'], {})                              # the total did not go up
+        [m] = info['moves']
+        self.assertEqual((m['kind'], m['also_shipped'], m['to_keys'], m['grown_keys']), ('full', False, [], [mel]))
+        self.assertEqual((m['total_before'], m['total_after']), (32, 32))
+        with app.app.test_request_context():
+            self.assertRegex(app.move_text(m), r'NEW ZEALAND 24 → MELBOURNE 32(（原 8）| \(was 8\))')
+        changes = app.purchasing_changes(before, after, inspections=app.SharedReports({}))
+        self.assertEqual(changes['shipped'], [])
+        self.assertEqual(changes['qty_up'], [])
+        [exported] = changes['moves']
+        self.assertEqual((exported['from'], exported['to'], exported['dpl']),
+                         ('NEW ZEALAND 24', 'MELBOURNE 32 (was 8)', 'DPL2637'))
+        self.assertIn('Added to a line already on MELBOURNE', exported['note'])
+
+    def test_move_into_an_existing_line_with_extra_quantity(self):
+        before = week(MELBOURNE=[row('D1', 'PO-1', 'A', 8)], QLD=[row('D1', 'PO-1', 'A', 24)])
+        after = week(MELBOURNE=[row('D1', 'PO-1', 'A', 40)], QLD=[])
+        info = {}
+        statuses, _typos, shipped = app.compute_changes(before, after, moves_out=info)
+        self.assertEqual((statuses['MELBOURNE|PO-1|A'], shipped), ('moved_in', {}))
+        self.assertEqual(info['qty_up'], {'MELBOURNE|PO-1|A': (8, 40)})   # 8 more than what moved
+        # one region ships part while another grows by less: still a move, the shipped part counts
+        after = week(MELBOURNE=[row('D1', 'PO-1', 'A', 20)], QLD=[])
+        statuses, _typos, shipped = app.compute_changes(before, after, moves_out=info)
+        self.assertTrue(info['moves'][0]['also_shipped'])
+        self.assertEqual(set(shipped), {'QLD'})
+
+    def test_growth_without_anything_leaving_is_not_a_move(self):
+        before = week(MELBOURNE=[row('D1', 'PO-1', 'A', 8)], QLD=[row('D1', 'PO-1', 'A', 24)])
+        after = week(MELBOURNE=[row('D1', 'PO-1', 'A', 16)], QLD=[row('D1', 'PO-1', 'A', 24)])
+        info = {}
+        statuses, _typos, _shipped = app.compute_changes(before, after, moves_out=info)
+        self.assertEqual((statuses['MELBOURNE|PO-1|A'], info['moves']), ('not_shipped', []))
+        self.assertEqual(info['qty_up'], {'MELBOURNE|PO-1|A': (8, 16)})
+
     def test_shared_reports(self):
         reports = app.SharedReports({'DI FITTING|PO-4364|DFC30PF': [{'result': 'Pass'}]})
         self.assertEqual(reports.get('FIJI|PO-4364|DFC30PF'), [{'result': 'Pass'}])
@@ -139,6 +190,30 @@ class ApplyTests(unittest.TestCase):
         self.assertFalse(any('新任务' in s for s in subjects))
         move_call = next(c for c in send.call_args_list if '订单转区' in c.args[0])
         self.assertEqual(set(move_call.args[2]), {'lead@example.com', 'yu@example.com'})
+
+    def test_upload_with_a_move_into_an_existing_line(self):
+        # QLD's line moves onto MELBOURNE, which already has PO-1 / A and keeps its own task
+        before = week(MELBOURNE=[row('D1', 'PO-1', 'A', 10)], QLD=[row('D1', 'PO-1', 'A', 5)])
+        app.save_json(app.CURRENT_FILE, before)
+        app.save_json(app.PREVIOUS_FILE, before)
+        with db_conn() as conn:
+            conn.execute("INSERT INTO inspection_tasks (job_key, order_number, region, item_code, status) "
+                         "VALUES ('QLD|PO-1|A', 'D1', 'QLD', 'A', 'Pending')")
+        after = week(MELBOURNE=[row('D1', 'PO-1', 'A', 15)], QLD=[])
+        with app.app.test_request_context():
+            summary = app.schedule_diff_summary(before, after)
+        self.assertEqual((len(summary['moves']), summary['shipped']), (1, []))
+        with mock.patch.object(app, '_smtp_send', return_value=(True, 'sent')),                 app.app.test_request_context(base_url='https://qc.example.com'):
+            app._apply_schedule(after)
+        with db_conn() as conn:
+            outstanding = conn.execute('SELECT COUNT(*) FROM outstanding_jobs').fetchone()[0]
+            logged = [tuple(r) for r in conn.execute(
+                'SELECT from_sheet, to_sheet, from_before, to_qty, kind FROM region_moves')]
+            mel = conn.execute("SELECT assigned_to, status FROM inspection_tasks WHERE job_key=?",
+                               (self.OLD_KEY,)).fetchone()
+        self.assertEqual(outstanding, 0)                    # QLD's 5 did not "ship without a report"
+        self.assertEqual(logged, [('QLD', 'MELBOURNE', 5.0, 15.0, 'full')])
+        self.assertEqual((mel['assigned_to'], mel['status']), (self.yu, 'In Progress'))
 
     def test_preview_and_pages(self):
         after = week(MELBOURNE=[], QLD=[row('D1', 'PO-1', 'A', 10)],
