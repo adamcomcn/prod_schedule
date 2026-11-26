@@ -1666,26 +1666,33 @@ def index():
             if is_valve(desc, code, config):
                 valve_keys.add(make_job_key(sheet_name, row, headers))
 
-    # Load outstanding jobs (shipped but inspection incomplete) + completed history
+    # Load outstanding jobs (shipped but inspection incomplete) + completed history.
+    # Everything under a region tab is about that region only; lines of a region
+    # that is no longer in the schedule are shown on every tab so they are not lost.
     today_str = china_today().isoformat()
     with db_conn() as conn:
-        outstanding_jobs = conn.execute(
+        all_outstanding = conn.execute(
             'SELECT * FROM outstanding_jobs WHERE completed=0 AND IFNULL(closed, 0)=0 '
             'ORDER BY est_completion ASC, shipped_at ASC'
         ).fetchall()
         # history: inspected lines and lines an admin closed without a report
-        completed_jobs = conn.execute(
+        all_completed = conn.execute(
             'SELECT * FROM outstanding_jobs WHERE completed=1 OR IFNULL(closed, 0)=1 '
-            "ORDER BY COALESCE(NULLIF(completed_at, ''), closed_at) DESC LIMIT 100"
+            "ORDER BY COALESCE(NULLIF(completed_at, ''), closed_at) DESC"
         ).fetchall()
-        kpi_closed    = conn.execute(
-            'SELECT COUNT(*) FROM outstanding_jobs WHERE completed=0 AND IFNULL(closed, 0)=1').fetchone()[0]
-        kpi_total     = conn.execute('SELECT COUNT(*) FROM outstanding_jobs').fetchone()[0] - kpi_closed
-        kpi_done      = conn.execute('SELECT COUNT(*) FROM outstanding_jobs WHERE completed=1').fetchone()[0]
-        kpi_overdue   = conn.execute(
-            "SELECT COUNT(*) FROM outstanding_jobs WHERE completed=0 AND IFNULL(closed, 0)=0 "
-            "AND est_completion!='' AND est_completion<?",
-            (today_str,)).fetchone()[0]
+        everything = conn.execute('SELECT sheet, completed, IFNULL(closed, 0) AS closed FROM outstanding_jobs').fetchall()
+
+    def in_region(sheet):
+        return not selected_sheet or sheet == selected_sheet or sheet not in current
+
+    outstanding_jobs = [j for j in all_outstanding if in_region(j['sheet'])]
+    completed_jobs = [j for j in all_completed if in_region(j['sheet'])][:100]
+    region_rows = [r for r in everything if in_region(r['sheet'])]
+    kpi_closed = sum(1 for r in region_rows if not r['completed'] and r['closed'])
+    kpi_total = len(region_rows) - kpi_closed
+    kpi_done = sum(1 for r in region_rows if r['completed'])
+    kpi_overdue = sum(1 for j in outstanding_jobs if j['est_completion'] and j['est_completion'] < today_str)
+    outstanding_counts = Counter(j['sheet'] for j in all_outstanding)
 
     # Group outstanding by sheet for display
     from collections import defaultdict as _dd
@@ -1763,6 +1770,7 @@ def index():
                            upload_date=config.get('upload_date', ''),
                            outstanding_jobs=outstanding_jobs,
                            outstanding_by_sheet=outstanding_by_sheet,
+                           outstanding_counts=outstanding_counts,
                            completed_jobs=completed_jobs,
                            kpi_total=kpi_total,
                            kpi_done=kpi_done,
