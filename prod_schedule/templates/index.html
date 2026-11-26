@@ -208,9 +208,6 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
         <option value="shipped" {% if view == 'shipped' %}selected{% endif %}>{{ tr('已出货', 'Shipped') }}</option>
         <option value="all" {% if view == 'all' %}selected{% endif %}>{{ tr('全部', 'All') }}</option>
       </select>
-      <select name="per_page" style="width:auto;">
-        {% for size in [50, 100, 200] %}<option value="{{ size }}" {% if per_page == size %}selected{% endif %}>{{ tr('每页 ' ~ size ~ ' 条', size ~ ' per page') }}</option>{% endfor %}
-      </select>
       <button class="btn btn-outline btn-sm" type="submit">{{ tr('筛选', 'Apply') }}</button>
     </form>
   </div>
@@ -220,7 +217,7 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
 <div class="tab-bar" id="tabBar">
   {% for sheet in sheet_names %}
   <a class="tab-btn {% if sheet == selected_sheet %}active{% endif %}"
-     href="{{ url_for('index', sheet=sheet, q=search, view=view, status=status_filter, per_page=per_page) }}">{{ sheet }}{% if outstanding_counts.get(sheet) %}<span class="tab-count" title="{{ tr('已全部出货但缺 QA BRT 报告', 'Fully shipped, missing QA BRT report') }}">{{ outstanding_counts[sheet] }}</span>{% endif %}</a>
+     href="{{ url_for('index', sheet=sheet, q=search, view=view, status=status_filter) }}">{{ sheet }}{% if outstanding_counts.get(sheet) %}<span class="tab-count" title="{{ tr('已全部出货但缺 QA BRT 报告', 'Fully shipped, missing QA BRT report') }}">{{ outstanding_counts[sheet] }}</span>{% endif %}</a>
   {% endfor %}
 </div>
 
@@ -296,23 +293,23 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
   <div class="table-toolbar">
     <div class="legend">
       <a class="legend-item {% if status_filter == 'new' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='new', per_page=per_page) }}"><span class="badge badge-new">{{ tr('新增', 'NEW') }}</span> {{ tr('本周新增', 'New this week') }}</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='new') }}"><span class="badge badge-new">{{ tr('新增', 'NEW') }}</span> {{ tr('本周新增', 'New this week') }}</a>
       <a class="legend-item {% if status_filter == 'not_shipped' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='not_shipped', per_page=per_page) }}"><span class="badge badge-not_shipped">{{ tr('未出货', 'NOT SHIPPED') }}</span> {{ tr('仍在排产', 'Still waiting') }}</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='not_shipped') }}"><span class="badge badge-not_shipped">{{ tr('未出货', 'NOT SHIPPED') }}</span> {{ tr('仍在排产', 'Still waiting') }}</a>
       <a class="legend-item {% if status_filter == 'partially_shipped' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='partially_shipped', per_page=per_page) }}"><span class="badge badge-partially_shipped">{{ tr('部分出货', 'PARTIAL') }}</span> {{ tr('数量减少', 'Qty reduced') }}</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='partially_shipped') }}"><span class="badge badge-partially_shipped">{{ tr('部分出货', 'PARTIAL') }}</span> {{ tr('数量减少', 'Qty reduced') }}</a>
       <a class="legend-item {% if status_filter == 'qty_up' %}active{% endif %}"
          title="{{ tr('比上次排期数量多，或比上次检验时的订单数量多（可能需要补检）', 'Higher than in the previous schedule, or than when it was last inspected (may need another inspection)') }}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='qty_up', per_page=per_page) }}"><span class="badge badge-qty_up">&#9650; {{ tr('数量增加', 'QTY UP') }}</span> {{ tr('数量变多', 'Qty increased') }}</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', status='qty_up') }}"><span class="badge badge-qty_up">&#9650; {{ tr('数量增加', 'QTY UP') }}</span> {{ tr('数量变多', 'Qty increased') }}</a>
       <a class="legend-item {% if status_filter == 'shipped' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='shipped', per_page=per_page) }}"><span class="badge badge-shipped">{{ tr('已出货', 'SHIPPED') }}</span> {{ tr('已从排期消失', 'Gone from schedule') }}</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='shipped') }}"><span class="badge badge-shipped">{{ tr('已出货', 'SHIPPED') }}</span> {{ tr('已从排期消失', 'Gone from schedule') }}</a>
       <a class="legend-item {% if status_filter == 'vtrust' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='vtrust', per_page=per_page) }}"><span class="badge" style="background:#ffedd5;color:#9a3412;border:1px solid #f97316">V-Trust</span> {{ tr('阀门缺 V-Trust', 'Valve — no V-Trust') }}</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='vtrust') }}"><span class="badge" style="background:#ffedd5;color:#9a3412;border:1px solid #f97316">V-Trust</span> {{ tr('阀门缺 V-Trust', 'Valve — no V-Trust') }}</a>
       <a class="legend-item {% if status_filter == 'no_qa_brt' %}active{% endif %}"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='no_qa_brt', per_page=per_page) }}"><span class="badge" style="background:#dc2626;color:#fff">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span> {{ tr('缺检验报告', 'Missing report') }}</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='all', status='no_qa_brt') }}"><span class="badge" style="background:#dc2626;color:#fff">&#9888; {{ tr('缺 QA BRT', 'No QA BRT') }}</span> {{ tr('缺检验报告', 'Missing report') }}</a>
       {% if status_filter %}
       <a class="legend-item"
-         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active', per_page=per_page) }}">{{ tr('清除筛选', 'Clear filter') }}</a>
+         href="{{ url_for('index', sheet=selected_sheet, q=search, view='active') }}">{{ tr('清除筛选', 'Clear filter') }}</a>
       {% endif %}
     </div>
     <span class="row-count" id="count-{{ si }}">
@@ -538,13 +535,6 @@ tbody tr.row-qa-warn.row-vtrust-warn td { background: #fde8e8 !important; }
       </tbody>
     </table>
   </div>
-  {% if total_pages > 1 %}
-  <div style="display:flex;justify-content:center;align-items:center;gap:12px;padding:16px;background:#fff;">
-    {% if page > 1 %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, status=status_filter, per_page=per_page, page=page-1) }}">{{ tr('上一页', 'Previous') }}</a>{% endif %}
-    <span style="font-size:.82rem;color:#6b7280;">{{ tr('第 ' ~ page ~ ' / ' ~ total_pages ~ ' 页', 'Page ' ~ page ~ ' of ' ~ total_pages) }}</span>
-    {% if page < total_pages %}<a class="btn btn-outline btn-sm" href="{{ url_for('index', sheet=selected_sheet, q=search, view=view, status=status_filter, per_page=per_page, page=page+1) }}">{{ tr('下一页', 'Next') }}</a>{% endif %}
-  </div>
-  {% endif %}
   {% else %}
   <div class="no-data">{{ tr('此 sheet 暂无数据', 'No data in this sheet') }}</div>
   {% endif %}

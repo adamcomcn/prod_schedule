@@ -274,7 +274,7 @@ class SecurityAndProductionTests(unittest.TestCase):
             workbook['Fully Shipped History'].iter_rows(values_only=True))
         self.assertIn(('SHIPPED', 'No QA BRT'), [row[:2] for row in history_rows[1:]])
 
-    def test_schedule_is_paginated_and_knowledge_tolerates_bad_image_json(self):
+    def test_schedule_shows_every_row_and_knowledge_tolerates_bad_image_json(self):
         headers = ['Order Number', 'Item Code', 'Description']
         rows = [headers] + [[f'PO-{i}', f'ITEM-{i}', f'Description {i}'] for i in range(500)]
         app.save_json(app.CURRENT_FILE, {'MELBOURNE': rows})
@@ -284,9 +284,11 @@ class SecurityAndProductionTests(unittest.TestCase):
                 "UPDATE kb_articles SET images='invalid-json' "
                 "WHERE id=(SELECT MIN(id) FROM kb_articles)")
         self.login_as('admin-test')
-        response = self.client.get('/?sheet=MELBOURNE&per_page=50')
+        response = self.client.get('/?sheet=MELBOURNE&per_page=50&page=3')    # old links still work
         self.assertEqual(response.status_code, 200)
-        self.assertLess(len(response.data), 200_000)
+        page = response.get_data(as_text=True)
+        self.assertEqual(page.count('data-key="MELBOURNE|'), 500)            # all rows, no paging
+        self.assertNotIn('name="per_page"', page)
         config = app.load_config()
         config['modules'] = {'knowledge': True}
         app.save_json(app.CONFIG_FILE, config)

@@ -1635,14 +1635,6 @@ def index():
             'new', 'not_shipped', 'partially_shipped', 'shipped', 'vtrust',
             'no_qa_brt', 'qty_up'}:
         status_filter = ''
-    try:
-        page = max(1, int(request.args.get('page', '1')))
-    except ValueError:
-        page = 1
-    try:
-        per_page = min(200, max(1, int(request.args.get('per_page', '100'))))
-    except ValueError:
-        per_page = 100
 
     # Build set of job_keys that are valves (require V-Trust)
     valve_keys = set()
@@ -1703,7 +1695,6 @@ def index():
     display_data = {}
     display_shipped = {}
     total_results = 0
-    total_pages = 1
     if selected_sheet and current.get(selected_sheet):
         headers = current[selected_sheet][0]
         active_rows = current[selected_sheet][1:]
@@ -1739,9 +1730,7 @@ def index():
                 )
             entries = [entry for entry in entries if matches_status(entry)]
         total_results = len(entries)
-        total_pages = max(1, math.ceil(total_results / per_page))
-        page = min(page, total_pages)
-        page_entries = entries[(page - 1) * per_page:page * per_page]
+        page_entries = entries          # every row of the region on one page
         display_data[selected_sheet] = [headers] + [
             row for kind, row in page_entries if kind == 'active'
         ]
@@ -1783,10 +1772,7 @@ def index():
                            search=search,
                            view=view,
                            status_filter=status_filter,
-                           page=page,
-                           per_page=per_page,
-                           total_results=total_results,
-                           total_pages=total_pages)
+                           total_results=total_results)
 
 @app.route('/export/comparison.xlsx')
 def export_comparison_excel():
