@@ -5154,9 +5154,23 @@ def _dbx_part(text, fallback='_'):
     return text or fallback
 
 
-def _dbx_job_folder(job_key):
+def _dbx_job_folder(job_key, order_number=''):
+    """'REGION/DPL/ITEM' (the PO when the job has no DPL order number)."""
     parts = job_key.split('|')
-    return '/'.join(_dbx_part(p) for p in (parts[0], parts[1] if len(parts) > 2 else '', parts[-1]))
+    order = (order_number or '').strip() or (parts[1] if len(parts) > 2 else '')
+    return '/'.join(_dbx_part(p) for p in (parts[0], order, parts[-1]))
+
+
+def _dbx_order_numbers(inspections, conn):
+    """{job_key: DPL order number} from the tasks, then the latest report that has one."""
+    orders = {r['job_key']: (r['order_number'] or '').strip() for r in conn.execute(
+        "SELECT job_key, order_number FROM inspection_tasks WHERE IFNULL(order_number, '') != ''")}
+    for job_key, records in inspections.items():
+        number = next(((r.get('order_number') or '').strip() for r in reversed(records or [])
+                       if (r.get('order_number') or '').strip()), '')
+        if number:
+            orders[job_key] = number
+    return orders
 
 
 def _dropbox_names():
@@ -5173,6 +5187,7 @@ def _dropbox_names():
         products = conn.execute("SELECT item_code, name, image_path FROM products "
                                 "WHERE IFNULL(image_path, '') != '' ORDER BY id").fetchall()
         reviews = {(r['job_key'], r['insp_index']): dict(r) for r in conn.execute('SELECT * FROM inspection_reviews')}
+        orders = _dbx_order_numbers(inspections, conn)
     used, names, pdfs, folders = defaultdict(set), {}, [], {}
 
     def place(folder, name):
@@ -5188,7 +5203,8 @@ def _dropbox_names():
         if (job_key, index) not in folders:
             records = inspections.get(job_key) or []
             number = report_number(job_key, records[index], index) if 0 <= index < len(records) else f'report-{index + 1}'
-            folders[(job_key, index)] = f'{DROPBOX_INSPECTIONS}/{_dbx_job_folder(job_key)}/{_dbx_part(number)}'
+            folders[(job_key, index)] = (f'{DROPBOX_INSPECTIONS}/{_dbx_job_folder(job_key, orders.get(job_key))}/'
+                                         f'{_dbx_part(number)}')
         return folders[(job_key, index)]
 
     for job_key, records in inspections.items():
@@ -5207,7 +5223,8 @@ def _dropbox_names():
     for r in attachments:
         add(r['saved_name'] or r['file_path'], report_folder(r['job_key'], r['insp_index'] or 0), r['original_name'])
     for r in drafts:
-        add(r['saved_name'] or r['file_path'], f"{DROPBOX_DRAFTS}/{_dbx_job_folder(r['job_key'])}", r['original_name'])
+        add(r['saved_name'] or r['file_path'], f"{DROPBOX_DRAFTS}/{_dbx_job_folder(r['job_key'], orders.get(r['job_key']))}",
+            r['original_name'])
     for r in vtrust:
         add(r['saved_name'] or r['file_path'], f"{DROPBOX_VTRUST}/{_dbx_part(r['job_number'])}", r['original_name'])
     for r in products:
@@ -5294,6 +5311,40 @@ def _dropbox_send(client, item):
         _dropbox_delete_quietly(client, old)                  # the copy at the old place
     _dropbox_record(item['key'], item['sig'], remote)
     return True
+
+
+def _dropbox_rename_folders(client, work):
+    """Rename whole order folders whose name changed (e.g. PO-4507 -> DPL2637 under a region),
+    so the files need no moving one by one and no empty folders are left. Only when every
+    planned file of the folder goes to the same new folder and that one does not exist yet;
+    otherwise the files are moved one by one as usual. Returns how many folders were renamed."""
+    targets = defaultdict(set)
+    for item in work:
+        old = item['prev'][1] if item.get('prev') else ''
+        if not old or old == item['remote']:
+            continue
+        o, n = old.split('/'), item['remote'].split('/')
+        # ['', top folder, region, order, ...]: same top folder, region and rest; order renamed
+        if (len(o) == len(n) > 4 and o[1] in (DROPBOX_INSPECTIONS[1:], DROPBOX_DRAFTS[1:])
+                and o[:3] == n[:3] and o[4:] == n[4:] and o[3] != n[3]):
+            targets['/'.join(o[:4])].add('/'.join(n[:4]))
+        else:
+            targets['/'.join(o[:4])].add(None)
+    renamed, taken = 0, set()
+    for old, new in sorted(targets.items()):
+        if len(new) != 1 or None in new or next(iter(new)).casefold() in taken:
+            continue
+        new = next(iter(new))
+        try:
+            client.move(old, new)
+        except dropbox_backup.DropboxError:
+            continue                          # e.g. the new folder already exists: files go one by one
+        taken.add(new.casefold())
+        renamed += 1
+        with db_conn() as conn:
+            conn.execute('UPDATE dropbox_files SET remote = ? || substr(remote, ?) WHERE substr(remote, 1, ?) = ?',
+                         (new, len(old) + 1, len(old) + 1, old + '/'))
+    return renamed
 
 
 def _dropbox_tidy_legacy(client, legacy):
@@ -5404,6 +5455,8 @@ def run_dropbox_sync(budget=DROPBOX_RUN_SECONDS, force_snapshot=False):
                 _dropbox_snapshot(client, day)
                 update_config(dropbox_snapshot_day=day)
             work, legacy = dropbox_plan()
+            if _dropbox_rename_folders(client, work):
+                work, legacy = dropbox_plan()
             for item in work:
                 if time.time() - started > budget:
                     break

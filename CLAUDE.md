@@ -34,8 +34,9 @@ CI (`.github/workflows/tests.yml`) runs pytest on PRs and on main.
 - `APP_DATA_DIR` (`/data` on Railway, a mounted volume): `data/app.db`, JSON files
   (`current_week.json`, `previous_week.json`, `inspections_cache.json`, `config.json`), `uploads/`.
 - Off-site copy: `dropbox_backup.py` + "Dropbox" in Settings → Backups. Hourly sync of `uploads/` and
-  `product_images/` under readable names (`_dropbox_names`: report folder region/PO/item/report no. with
-  the report PDF + attachments' original names; drafts, V-Trust, product images; rest in 其他 Other),
+  `product_images/` under readable names (`_dropbox_names`: report folder region/DPL/item/report no. with
+  the report PDF + attachments' original names; the order folder is the DPL number (`_dbx_order_numbers`), PO only
+  when there is none, and renamed order folders are moved whole (`_dropbox_rename_folders`); drafts, V-Trust, product images; rest in 其他 Other),
   tracked in `dropbox_files` (`remote` = Dropbox path; files that change place are moved). Daily data zip
   to `/data`. The refresh token is in `APP_DATA_DIR/private/dropbox.json`, outside `data/`, so never in a
   backup zip.

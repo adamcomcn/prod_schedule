@@ -77,12 +77,17 @@ class FakeDropbox:
                 del self.files[k]
             return self.reply(200, {})
         if name == 'files/move_v2':
-            self.moves.append((arg['from_path'], arg['to_path']))
-            if arg['from_path'] not in self.files:
+            src, dst = arg['from_path'], arg['to_path']
+            self.moves.append((src, dst))
+            inside = [k for k in self.files if k.startswith(src + '/')]
+            if src not in self.files and not inside:
                 return self.reply(409, {'error_summary': 'from_lookup/not_found/'})
-            if arg['to_path'] in self.files:
+            if dst in self.files or any(k.startswith(dst + '/') for k in self.files):
                 return self.reply(409, {'error_summary': 'to/conflict/file/'})
-            self.files[arg['to_path']] = self.files.pop(arg['from_path'])
+            if src in self.files:
+                self.files[dst] = self.files.pop(src)
+            for k in inside:                                    # a whole folder
+                self.files[dst + k[len(src):]] = self.files.pop(k)
             return self.reply(200, {})
         if name == 'users/get_current_account':
             return self.reply(200, {'account_id': self.account_id, 'email': 'backup@example.com',
@@ -456,6 +461,64 @@ class DropboxBackupTests(unittest.TestCase):
         self.assertIn('/files', self.fake.deleted)
         self.assertFalse([k for k in self.fake.files if k.startswith('/files/')])
         self.assertTrue(app.load_config()['dropbox_legacy_cleaned'])
+
+    def test_order_folders_use_the_dpl_number_and_are_renamed_whole(self):
+        job = 'MELBOURNE|PO-4507|RSV025016FLFL'
+        record = dict(self.RECORD, order_number='DPL2637', item_code='RSV025016FLFL',
+                      report_no='QC-20261106-DPL2637-RSV025016FLFL-1')
+        cache = app.load_json(app.INSPECTIONS_CACHE, {})
+        cache[job] = [record]
+        app.save_json(app.INSPECTIONS_CACHE, cache)
+        self.connect()
+        self.attach('h5/a.jpg', 'photo 1.jpg', job_key=job, content=b'one')
+        self.attach('h5/b.jpg', 'photo 2.jpg', job_key=job, content=b'two')
+        old_folder = '/检验报告 Inspections/MELBOURNE/PO-4507'
+        new_folder = '/检验报告 Inspections/MELBOURNE/DPL2637'
+        report = 'RSV025016FLFL/QC-20261106-DPL2637-RSV025016FLFL-1'
+        # what an earlier sync left under the PO folder
+        with mock.patch.object(app, '_dbx_order_numbers', return_value={}):
+            self.assertTrue(self.sync()[0])
+        self.assertEqual(self.fake.files[f'{old_folder}/{report}/photo 1.jpg'], b'one')
+        uploads = self.uploads_count()
+        # now by DPL: the folder is renamed in one go, nothing is uploaded again
+        self.assertTrue(self.sync()[0])
+        self.assertIn((old_folder, new_folder), self.fake.moves)
+        self.assertEqual(self.fake.files[f'{new_folder}/{report}/photo 1.jpg'], b'one')
+        self.assertEqual(self.fake.files[f'{new_folder}/{report}/photo 2.jpg'], b'two')
+        self.assertTrue(self.fake.files[f'{new_folder}/{report}/QC-20261106-DPL2637-RSV025016FLFL-1.pdf'].startswith(b'%PDF'))
+        self.assertFalse([k for k in self.fake.files if k.startswith(old_folder + '/')])
+        self.assertEqual(self.uploads_count(), uploads)
+        with db_conn() as conn:
+            remotes = [r[0] for r in conn.execute('SELECT remote FROM dropbox_files WHERE remote LIKE ?',
+                                                  ('%RSV025016FLFL%',))]
+        self.assertTrue(remotes and all(r.startswith(new_folder + '/') for r in remotes))
+        self.assertTrue(self.sync()[0])                                  # settled: nothing more to do
+        self.assertEqual(self.uploads_count(), uploads)
+
+    def test_order_folder_falls_back_to_the_po_and_merges_file_by_file(self):
+        self.assertEqual(app._dbx_job_folder('FIJI|PO-4502|RSV030016FLFL'), 'FIJI/PO-4502/RSV030016FLFL')
+        self.assertEqual(app._dbx_job_folder('FIJI|PO-4502|RSV030016FLFL', 'DPL2636'), 'FIJI/DPL2636/RSV030016FLFL')
+
+        class Client:
+            def __init__(self):
+                self.moves = []
+
+            def move(self, a, b):
+                self.moves.append((a, b))
+
+        def item(old, new):
+            return {'prev': (1, old), 'remote': new}
+
+        top = '/检验报告 Inspections/FIJI'
+        client = Client()
+        # two PO folders into one DPL folder: only the first is renamed whole, the other goes file by file
+        work = [item(f'{top}/PO-1/A/r1/x.jpg', f'{top}/DPL9/A/r1/x.jpg'),
+                item(f'{top}/PO-2/B/r2/y.jpg', f'{top}/DPL9/B/r2/y.jpg'),
+                # a folder whose files go to different places is left alone
+                item(f'{top}/PO-3/C/r3/z.jpg', f'{top}/DPL7/C/r3/z.jpg'),
+                item(f'{top}/PO-3/D/r4/w.jpg', f'{top}/DPL8/D/r4/w.jpg')]
+        self.assertEqual(app._dropbox_rename_folders(client, work), 1)
+        self.assertEqual(client.moves, [(f'{top}/PO-1', f'{top}/DPL9')])
 
     def test_names_dropbox_rejects_are_cleaned(self):
         self.assertEqual(app._dbx_part('a/b\\c:d*e?f"g<h>i|j. '), 'a_b_c_d_e_f_g_h_i_j')
