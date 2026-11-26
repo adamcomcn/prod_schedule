@@ -1892,7 +1892,8 @@ def _format_export_sheet(worksheet):
 
 def _schedule_lines(data):
     """{job_key: line} for a saved schedule; split lots of one PO + item are
-    added up and keep the first lot's dates."""
+    added up and keep the first lot's dates. 'lots' keeps each row's own
+    quantity and dates (one entry per schedule row)."""
     lines = {}
     for sheet, rows in (data or {}).items():
         if not rows or len(rows) < 2:
@@ -1912,16 +1913,28 @@ def _schedule_lines(data):
                 return ''
 
             qty = _parse_qty(row[qi]) if qi is not None and qi < len(row) else None
+            lot = {'qty': qty, 'est': col('estimated completion date'), 'must_ship': col('must ship date')}
             line = lines.get(key)
             if line:
                 line['qty'] = None if line['qty'] is None or qty is None else line['qty'] + qty
+                line['lots'].append(lot)
                 continue
             lines[key] = {'key': key, 'region': sheet, 'dpl': col('order number'),
                           'po': col('daemco purchase order', 'purchase order'),
                           'supplier': canonical_factory(col('supplier', 'foundry')), 'item_code': col('item code'),
                           'description': col('item description'), 'qty': qty,
-                          'est': col('estimated completion date'), 'must_ship': col('must ship date')}
+                          'est': col('estimated completion date'), 'must_ship': col('must ship date'),
+                          'lots': [lot]}
     return lines
+
+
+def _line_rows(line):
+    """A line as the schedule had it: one copy per split lot (its own quantity and
+    dates), so a PO + item on two rows (5 + 1) is listed as two rows, not as 6."""
+    lots = line.get('lots') or []
+    if len(lots) < 2:
+        return [line]
+    return [dict(line, qty=lot['qty'], est=lot['est'], must_ship=lot['must_ship']) for lot in lots]
 
 
 def _date_shift(old, new):
@@ -1952,8 +1965,9 @@ def purchasing_changes(before, after, inspections=None):
         return (region_order.get(line['region'], 99), line['dpl'], line['po'], line['item_code'])
 
     moved_out = {k for m in moves if not m['also_shipped'] for k in m['gone_keys']}
-    shipped = [dict(line, type='Fully shipped', before=line['qty'], after=0, shipped=line['qty'])
-               for key, line in old.items() if key not in new and key not in moved_out]
+    shipped = [dict(lot, type='Fully shipped', before=lot['qty'], after=0, shipped=lot['qty'])
+               for key, line in old.items() if key not in new and key not in moved_out
+               for lot in _line_rows(line)]
     for key, status in statuses.items():
         if status == 'partially_shipped' and key in old and key in new:
             b, a = old[key]['qty'], new[key]['qty']
@@ -1966,7 +1980,7 @@ def purchasing_changes(before, after, inspections=None):
             t = typo_of.get(key)
             note = (f"Possible typo of {t['prev_order']} / {t['prev_item']} (that line left the schedule)"
                     if t else '')
-            new_lines.append(dict(new[key], note=note))
+            new_lines.extend(dict(lot, note=note) for lot in _line_rows(new[key]))
     date_changes = []
     for key, n in new.items():
         o = old.get(key)
@@ -2294,7 +2308,9 @@ def purchasing_workbook(changes, before_label, after_label):
              '• A higher quantity is listed under Quantity Changes; if the line was already inspected '
              'for less, the extra pieces may need another inspection.',
              '• Days: + = later than before (delayed, red), − = earlier (green).',
-             '• A PO + item that moved to another region is listed under Region Moves, not as shipped.')
+             '• A PO + item that moved to another region is listed under Region Moves, not as shipped.',
+             '• Shipped and New Lines keep split lots (same PO + item on several rows) as separate rows; '
+             'the other sheets compare the total of the lots.')
     for note in notes:
         summary.append([note])
     summary.cell(summary.max_row - len(notes) + 1, 1).font = Font(bold=True)

@@ -84,6 +84,18 @@ class PurchasingExportTests(unittest.TestCase):
         self.assertEqual([(m['item_code'], m['from'], m['to']) for m in ch['moves']],
                          [('DFC30PF', 'MELBOURNE 36', 'FIJI 36')])
 
+    def test_split_lots_stay_separate_rows(self):
+        # real case: FIJI DPL2636 / PO-4502 RSV030016FLFL on two rows (5 + 1) left the schedule
+        before = {'FIJI': [H, ['DPL2636', 'PO-4502', 'JS', 'RSV030016FLFL', 'DN300 Gate Valve', '5', '2026/11/15', '', '1'],
+                               ['DPL2636', 'PO-4502', 'JS', 'RSV030016FLFL', 'DN300 Gate Valve', '1', '2026/11/20', '', '1']]}
+        after = {'FIJI': [H, ['DPL2700', 'PO-4700', 'JS', 'RSV010016FLFL', 'DN100 Gate Valve', '7', '2026/12/01', '', '1'],
+                              ['DPL2700', 'PO-4700', 'JS', 'RSV010016FLFL', 'DN100 Gate Valve', '3', '2026/12/08', '', '1']]}
+        ch = app.purchasing_changes(before, after, inspections=app.SharedReports({}))
+        self.assertEqual([(l['dpl'], l['before'], l['shipped'], l['est']) for l in ch['shipped']],
+                         [('DPL2636', 5, 5, '2026/11/15'), ('DPL2636', 1, 1, '2026/11/20')])
+        self.assertEqual([(l['dpl'], l['qty'], l['est']) for l in ch['new']],
+                         [('DPL2700', 7, '2026/12/01'), ('DPL2700', 3, '2026/12/08')])
+
     def test_workbook_is_readable_and_has_no_prices(self):
         with mock.patch.object(app, 'china_today', return_value=__import__('datetime').date(2026, 10, 9)):
             data, filename, _ch, upload = app.purchasing_export()
